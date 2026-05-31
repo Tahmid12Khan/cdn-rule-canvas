@@ -1,0 +1,14 @@
+.DS_Store
+.temp
+
+/target
+/Cargo.lock
+
+.idea
+.env.docker
+
+node_modules
+index.node
+
+.npmrc
+yarn-error.log

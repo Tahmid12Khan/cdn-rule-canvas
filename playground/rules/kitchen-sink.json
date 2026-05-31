@@ -1,0 +1,267 @@
+{
+  "contentType": "application/vnd.gorules.decision",
+  "nodes": [
+    {
+      "id": "req",
+      "type": "inputNode",
+      "name": "Request",
+      "position": {
+        "x": 40,
+        "y": 280
+      }
+    },
+    {
+      "id": "fn",
+      "type": "functionNode",
+      "name": "Enrich (JS)",
+      "position": {
+        "x": 280,
+        "y": 280
+      },
+      "content": {
+        "source": "export const handler = async (input) => ({ ...input, browser: (input.userAgent || '').includes('Firefox') ? 'firefox' : (input.userAgent || '').includes('Chrome') ? 'chrome' : 'other', isMobile: (input.userAgent || '').includes('Mobile') });"
+      }
+    },
+    {
+      "id": "sig",
+      "type": "expressionNode",
+      "name": "Signals",
+      "position": {
+        "x": 540,
+        "y": 280
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "s1",
+            "key": "browser",
+            "value": "browser"
+          },
+          {
+            "id": "s2",
+            "key": "isMobile",
+            "value": "isMobile"
+          },
+          {
+            "id": "s3",
+            "key": "total",
+            "value": "cart.total"
+          },
+          {
+            "id": "s4",
+            "key": "isCheckout",
+            "value": "contains(url, 'checkout')"
+          },
+          {
+            "id": "s5",
+            "key": "isToday",
+            "value": "year(date(requestedAt))==year(date('now')) and monthOfYear(date(requestedAt))==monthOfYear(date('now')) and dayOfMonth(date(requestedAt))==dayOfMonth(date('now'))"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sw",
+      "type": "switchNode",
+      "name": "Route by browser",
+      "position": {
+        "x": 820,
+        "y": 280
+      },
+      "content": {
+        "hitPolicy": "first",
+        "statements": [
+          {
+            "id": "c_chrome",
+            "condition": "browser == 'chrome'"
+          },
+          {
+            "id": "c_firefox",
+            "condition": "browser == 'firefox'"
+          },
+          {
+            "id": "c_else",
+            "condition": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tbl",
+      "type": "decisionTableNode",
+      "name": "Chrome pricing",
+      "position": {
+        "x": 1120,
+        "y": 120
+      },
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {
+            "id": "i1",
+            "name": "Checkout",
+            "field": "isCheckout",
+            "type": "expression"
+          },
+          {
+            "id": "i2",
+            "name": "Total",
+            "field": "total",
+            "type": "expression"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "o1",
+            "name": "Channel",
+            "field": "channel",
+            "type": "expression"
+          },
+          {
+            "id": "o2",
+            "name": "Discount",
+            "field": "discount",
+            "type": "expression"
+          }
+        ],
+        "rules": [
+          {
+            "_id": "r1",
+            "i1": "true",
+            "i2": "> 1000",
+            "o1": "'chrome-vip'",
+            "o2": "15"
+          },
+          {
+            "_id": "r2",
+            "i1": "true",
+            "i2": "",
+            "o1": "'chrome-checkout'",
+            "o2": "10"
+          },
+          {
+            "_id": "r3",
+            "i1": "",
+            "i2": "",
+            "o1": "'chrome'",
+            "o2": "0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ff",
+      "type": "expressionNode",
+      "name": "Firefox tag",
+      "position": {
+        "x": 1120,
+        "y": 300
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "f1",
+            "key": "channel",
+            "value": "'firefox'"
+          },
+          {
+            "id": "f2",
+            "key": "discount",
+            "value": "5"
+          }
+        ]
+      }
+    },
+    {
+      "id": "other",
+      "type": "expressionNode",
+      "name": "Other tag",
+      "position": {
+        "x": 1120,
+        "y": 460
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "ot1",
+            "key": "channel",
+            "value": "'other'"
+          },
+          {
+            "id": "ot2",
+            "key": "discount",
+            "value": "0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "res",
+      "type": "outputNode",
+      "name": "Response",
+      "position": {
+        "x": 1420,
+        "y": 280
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_req_fn",
+      "type": "edge",
+      "sourceId": "req",
+      "targetId": "fn"
+    },
+    {
+      "id": "e_fn_sig",
+      "type": "edge",
+      "sourceId": "fn",
+      "targetId": "sig"
+    },
+    {
+      "id": "e_sig_sw",
+      "type": "edge",
+      "sourceId": "sig",
+      "targetId": "sw"
+    },
+    {
+      "id": "e_sw_tbl",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "tbl",
+      "sourceHandle": "c_chrome"
+    },
+    {
+      "id": "e_sw_ff",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "ff",
+      "sourceHandle": "c_firefox"
+    },
+    {
+      "id": "e_sw_other",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "other",
+      "sourceHandle": "c_else"
+    },
+    {
+      "id": "e_tbl_res",
+      "type": "edge",
+      "sourceId": "tbl",
+      "targetId": "res"
+    },
+    {
+      "id": "e_ff_res",
+      "type": "edge",
+      "sourceId": "ff",
+      "targetId": "res"
+    },
+    {
+      "id": "e_other_res",
+      "type": "edge",
+      "sourceId": "other",
+      "targetId": "res"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "nodes": [
+    {
+      "id": "in",
+      "type": "inputNode",
+      "name": "Request",
+      "position": {
+        "x": 100,
+        "y": 120
+      }
+    },
+    {
+      "id": "ex",
+      "type": "expressionNode",
+      "name": "Time Gate",
+      "position": {
+        "x": 380,
+        "y": 120
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "a",
+            "key": "isBefore",
+            "value": "date(pickedTime) > date('now')"
+          },
+          {
+            "id": "b",
+            "key": "message",
+            "value": "date(pickedTime) > date('now') ? 'Current time is BEFORE the picked time' : 'Current time is AFTER the picked time'"
+          },
+          {
+            "id": "c",
+            "key": "nowEpoch",
+            "value": "date('now')"
+          },
+          {
+            "id": "d",
+            "key": "pickedEpoch",
+            "value": "date(pickedTime)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "out",
+      "type": "outputNode",
+      "name": "Response",
+      "position": {
+        "x": 660,
+        "y": 120
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "type": "edge",
+      "sourceId": "in",
+      "targetId": "ex"
+    },
+    {
+      "id": "e2",
+      "type": "edge",
+      "sourceId": "ex",
+      "targetId": "out"
+    }
+  ]
+}

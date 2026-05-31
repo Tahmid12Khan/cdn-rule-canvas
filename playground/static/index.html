@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ZEN Playground</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card-border: #262b35;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --accent: #6d8bff;
+    --accent-hover: #5a79f0;
+    --green: #1f8a4c;
+    --green-bg: #133a25;
+    --red: #c0392b;
+    --red-bg: #3a1714;
+    --code-bg: #0c0e12;
+    --radius: 14px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 8px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: -0.5px;
+  }
+  header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .grid {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 16px 24px 48px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 22px;
+  }
+  .card h2 {
+    margin: 0 0 4px;
+    font-size: 19px;
+  }
+  .card .desc {
+    margin: 0 0 18px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin: 14px 0 6px;
+  }
+  input[type="datetime-local"],
+  select,
+  textarea {
+    width: 100%;
+    background: var(--code-bg);
+    color: var(--text);
+    border: 1px solid var(--card-border);
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: var(--font);
+    outline: none;
+  }
+  input[type="datetime-local"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent);
+  }
+  textarea {
+    font-family: var(--mono);
+    font-size: 13px;
+    resize: vertical;
+    min-height: 200px;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+  button {
+    margin-top: 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .badge {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    display: none;
+  }
+  .badge.green { display: block; background: var(--green-bg); color: #6fe09a; border: 1px solid var(--green); }
+  .badge.red { display: block; background: var(--red-bg); color: #ff9b8f; border: 1px solid var(--red); }
+  .message {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .hint {
+    margin-top: 12px;
+    color: #ffcf7a;
+    font-size: 13px;
+    display: none;
+  }
+  .hint.show { display: block; }
+  .error {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--red-bg);
+    border: 1px solid var(--red);
+    color: #ff9b8f;
+    font-size: 13px;
+    font-family: var(--mono);
+    white-space: pre-wrap;
+    display: none;
+  }
+  .error.show { display: block; }
+  pre {
+    margin-top: 14px;
+    background: var(--code-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: #cdd3df;
+    overflow-x: auto;
+    max-height: 360px;
+    overflow-y: auto;
+  }
+  .perf {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ZEN Playground</h1>
+  <p>Author and evaluate business rules with the ZEN engine. &middot; <a href="/flow.html">Flowchart editor</a></p>
+</header>
+
+<div class="grid">
+  <!-- CARD 1: Time Gate -->
+  <section class="card">
+    <h2>Time Gate</h2>
+    <p class="desc">Pick a date and time, then check whether the current time is before it.</p>
+    <label for="picker">Target date &amp; time</label>
+    <input type="datetime-local" id="picker" />
+    <div class="hint" id="timeHint">Please pick a date and time first.</div>
+    <button id="checkBtn">Check</button>
+    <div class="badge" id="timeBadge"></div>
+    <div class="message" id="timeMessage"></div>
+    <div class="error" id="timeError"></div>
+    <pre id="timeOut" style="display:none"></pre>
+  </section>
+
+  <!-- CARD 2: JDM Playground -->
+  <section class="card">
+    <h2>JDM Playground</h2>
+    <p class="desc">Edit a rule graph and its input, then evaluate it against the engine.</p>
+    <label for="example">Example</label>
+    <select id="example"></select>
+    <label for="jdm">Rule (JDM JSON)</label>
+    <textarea id="jdm" spellcheck="false"></textarea>
+    <label for="context">Input (context JSON)</label>
+    <textarea id="context" spellcheck="false"></textarea>
+    <button id="evalBtn">Evaluate</button>
+    <div class="error" id="playError"></div>
+    <pre id="out" style="display:none"></pre>
+  </section>
+</div>
+
+<script>
+const EXAMPLES = {
+  "time-gate": {
+    "label": "Time Gate (datetime rule)",
+    "jdm": {
+      "nodes": [
+        {
+          "id": "in",
+          "type": "inputNode",
+          "name": "Request",
+          "position": {
+            "x": 100,
+            "y": 120
+          }
+        },
+        {
+          "id": "ex",
+          "type": "expressionNode",
+          "name": "Time Gate",
+          "position": {
+            "x": 380,
+            "y": 120
+          },
+          "content": {
+            "expressions": [
+              {
+                "id": "a",
+                "key": "isBefore",
+                "value": "date(pickedTime) > date('now')"
+              },
+              {
+                "id": "b",
+                "key": "message",
+                "value": "date(pickedTime) > date('now') ? 'Current time is BEFORE the picked time' : 'Current time is AFTER the picked time'"
+              },
+              {
+                "id": "c",
+                "key": "nowEpoch",
+                "value": "date('now')"
+              },
+              {
+                "id": "d",
+                "key": "pickedEpoch",
+                "value": "date(pickedTime)"
+              }
+            ]
+          }
+        },
+        {
+          "id": "out",
+          "type": "outputNode",
+          "name": "Response",
+          "position": {
+            "x": 660,
+            "y": 120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "type": "edge",
+          "sourceId": "in",
+          "targetId": "ex"
+        },
+        {
+          "id": "e2",
+          "type": "edge",
+          "sourceId": "ex",
+          "targetId": "out"
+        }
+      ]
+    },
+    "context": {
+      "pickedTime": "2030-01-01T00:00:00Z"
+    }
+  },
+  "adult-check": {
+    "label": "Adult Check (expression)",
+    "jdm": {
+      "nodes": [
+        {
+          "id": "in",
+          "type": "inputNode",
+          "name": "Request",
+          "position": {
+            "x": 100,
+            "y": 120
+          }
+        },
+        {
+          "id": "ex",
+          "type": "expressionNode",
+          "name": "Adult Check",
+          "position": {
+            "x": 380,
+            "y": 120
+          },
+          "content": {
+            "expressions": [
+              {
+                "id": "a",
+                "key": "isAdult",
+                "value": "customer.age >= 18"
+              },
+              {
+                "id": "b",
+                "key": "category",
+                "value": "customer.age >= 18 ? 'adult' : 'minor'"
+              }
+            ]
+          }
+        },
+        {
+          "id": "out",
+          "type": "outputNode",
+          "name": "Response",
+          "position": {
+            "x": 660,
+            "y": 120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "type": "edge",
+          "sourceId": "in",
+          "targetId": "ex"
+        },
+        {
+          "id": "e2",
+          "type": "edge",
+          "sourceId": "ex",
+          "targetId": "out"
+        }
+      ]
+    },
+    "context": {
+      "customer": {
+        "age": 20
+      }
+    }
+  },
+  "shipping-fee": {
+    "label": "Shipping Fee (decision table)",
+    "jdm": {
+      "nodes": [
+        {
+          "id": "in",
+          "type": "inputNode",
+          "name": "Request",
+          "position": {
+            "x": 100,
+            "y": 120
+          }
+        },
+        {
+          "id": "tb",
+          "type": "decisionTableNode",
+          "name": "Shipping Fee",
+          "position": {
+            "x": 380,
+            "y": 120
+          },
+          "content": {
+            "hitPolicy": "first",
+            "inputs": [
+              {
+                "id": "i1",
+                "name": "Country",
+                "field": "customer.country",
+                "type": "expression"
+              },
+              {
+                "id": "i2",
+                "name": "Cart total",
+                "field": "cart.total",
+                "type": "expression"
+              }
+            ],
+            "outputs": [
+              {
+                "id": "o1",
+                "name": "Fee",
+                "field": "fee",
+                "type": "expression"
+              }
+            ],
+            "rules": [
+              {
+                "_id": "r1",
+                "i1": "'US'",
+                "i2": "> 1000",
+                "o1": "0"
+              },
+              {
+                "_id": "r2",
+                "i1": "'US'",
+                "i2": "",
+                "o1": "30"
+              },
+              {
+                "_id": "r3",
+                "i1": "'CA', 'MX'",
+                "i2": "",
+                "o1": "50"
+              },
+              {
+                "_id": "r4",
+                "i1": "",
+                "i2": "",
+                "o1": "150"
+              }
+            ]
+          }
+        },
+        {
+          "id": "out",
+          "type": "outputNode",
+          "name": "Response",
+          "position": {
+            "x": 660,
+            "y": 120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "type": "edge",
+          "sourceId": "in",
+          "targetId": "tb"
+        },
+        {
+          "id": "e2",
+          "type": "edge",
+          "sourceId": "tb",
+          "targetId": "out"
+        }
+      ]
+    },
+    "context": {
+      "customer": {
+        "country": "US"
+      },
+      "cart": {
+        "total": 1500
+      }
+    }
+  }
+};
+
+// Shared evaluation call
+async function evaluate(jdm, context) {
+  const res = await fetch("/api/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jdm, context })
+  });
+  return res.json();
+}
+
+function withBusy(btn, label, fn) {
+  return async function () {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = label;
+    try {
+      await fn();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  };
+}
+
+/* ---------- CARD 1: Time Gate ---------- */
+const picker = document.getElementById("picker");
+const checkBtn = document.getElementById("checkBtn");
+const timeHint = document.getElementById("timeHint");
+const timeBadge = document.getElementById("timeBadge");
+const timeMessage = document.getElementById("timeMessage");
+const timeError = document.getElementById("timeError");
+const timeOut = document.getElementById("timeOut");
+
+checkBtn.addEventListener("click", withBusy(checkBtn, "Checking...", async () => {
+  timeHint.classList.remove("show");
+  timeError.classList.remove("show");
+  timeBadge.className = "badge";
+  timeMessage.textContent = "";
+  timeOut.style.display = "none";
+
+  if (!picker.value) {
+    timeHint.classList.add("show");
+    return;
+  }
+
+  const iso = new Date(picker.value).toISOString();
+  const context = { pickedTime: iso };
+
+  try {
+    const result = await evaluate(EXAMPLES["time-gate"].jdm, context);
+    if (!result.ok) {
+      timeError.textContent = result.error || "Evaluation failed.";
+      timeError.classList.add("show");
+      return;
+    }
+    const out = result.result || {};
+    if (out.isBefore === true) {
+      timeBadge.className = "badge green";
+      timeBadge.textContent = "Current time is BEFORE the picked time";
+    } else {
+      timeBadge.className = "badge red";
+      timeBadge.textContent = "Current time is AFTER the picked time";
+    }
+    if (out.message) timeMessage.textContent = out.message;
+    timeOut.textContent = JSON.stringify(result.result, null, 2);
+    timeOut.style.display = "block";
+  } catch (e) {
+    timeError.textContent = "Request failed: " + e.message;
+    timeError.classList.add("show");
+  }
+}));
+
+/* ---------- CARD 2: JDM Playground ---------- */
+const exampleSelect = document.getElementById("example");
+const jdmArea = document.getElementById("jdm");
+const contextArea = document.getElementById("context");
+const evalBtn = document.getElementById("evalBtn");
+const playError = document.getElementById("playError");
+const out = document.getElementById("out");
+
+function loadExample(key) {
+  const ex = EXAMPLES[key];
+  if (!ex) return;
+  jdmArea.value = JSON.stringify(ex.jdm, null, 2);
+  contextArea.value = JSON.stringify(ex.context, null, 2);
+}
+
+// Populate the select
+for (const key of Object.keys(EXAMPLES)) {
+  const opt = document.createElement("option");
+  opt.value = key;
+  opt.textContent = EXAMPLES[key].label;
+  exampleSelect.appendChild(opt);
+}
+exampleSelect.addEventListener("change", () => loadExample(exampleSelect.value));
+// Initial fill
+loadExample(exampleSelect.value);
+
+evalBtn.addEventListener("click", withBusy(evalBtn, "Evaluating...", async () => {
+  playError.classList.remove("show");
+  out.style.display = "none";
+
+  let jdm, context;
+  try {
+    jdm = JSON.parse(jdmArea.value);
+  } catch (e) {
+    playError.textContent = "Rule JSON parse error: " + e.message;
+    playError.classList.add("show");
+    return;
+  }
+  try {
+    context = JSON.parse(contextArea.value);
+  } catch (e) {
+    playError.textContent = "Input JSON parse error: " + e.message;
+    playError.classList.add("show");
+    return;
+  }
+
+  try {
+    const result = await evaluate(jdm, context);
+    out.textContent = JSON.stringify(result, null, 2);
+    out.style.display = "block";
+    if (result.ok === false) {
+      playError.textContent = result.error || "Evaluation failed.";
+      playError.classList.add("show");
+    }
+  } catch (e) {
+    playError.textContent = "Request failed: " + e.message;
+    playError.classList.add("show");
+  }
+}));
+</script>
+</body>
+</html>

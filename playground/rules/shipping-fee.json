@@ -1,0 +1,96 @@
+{
+  "nodes": [
+    {
+      "id": "in",
+      "type": "inputNode",
+      "name": "Request",
+      "position": {
+        "x": 100,
+        "y": 120
+      }
+    },
+    {
+      "id": "tb",
+      "type": "decisionTableNode",
+      "name": "Shipping Fee",
+      "position": {
+        "x": 380,
+        "y": 120
+      },
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {
+            "id": "i1",
+            "name": "Country",
+            "field": "customer.country",
+            "type": "expression"
+          },
+          {
+            "id": "i2",
+            "name": "Cart total",
+            "field": "cart.total",
+            "type": "expression"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "o1",
+            "name": "Fee",
+            "field": "fee",
+            "type": "expression"
+          }
+        ],
+        "rules": [
+          {
+            "_id": "r1",
+            "i1": "'US'",
+            "i2": "> 1000",
+            "o1": "0"
+          },
+          {
+            "_id": "r2",
+            "i1": "'US'",
+            "i2": "",
+            "o1": "30"
+          },
+          {
+            "_id": "r3",
+            "i1": "'CA', 'MX'",
+            "i2": "",
+            "o1": "50"
+          },
+          {
+            "_id": "r4",
+            "i1": "",
+            "i2": "",
+            "o1": "150"
+          }
+        ]
+      }
+    },
+    {
+      "id": "out",
+      "type": "outputNode",
+      "name": "Response",
+      "position": {
+        "x": 660,
+        "y": 120
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "type": "edge",
+      "sourceId": "in",
+      "targetId": "tb"
+    },
+    {
+      "id": "e2",
+      "type": "edge",
+      "sourceId": "tb",
+      "targetId": "out"
+    }
+  ]
+}

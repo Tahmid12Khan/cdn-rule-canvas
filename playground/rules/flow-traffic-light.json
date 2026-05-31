@@ -1,0 +1,165 @@
+{
+  "contentType": "application/vnd.gorules.decision",
+  "nodes": [
+    {
+      "id": "in",
+      "type": "inputNode",
+      "name": "Request",
+      "position": {
+        "x": 40,
+        "y": 200
+      }
+    },
+    {
+      "id": "sw",
+      "type": "switchNode",
+      "name": "Traffic Light",
+      "position": {
+        "x": 340,
+        "y": 200
+      },
+      "content": {
+        "hitPolicy": "first",
+        "statements": [
+          {
+            "id": "s1",
+            "condition": "color == 'red'"
+          },
+          {
+            "id": "s2",
+            "condition": "color == 'yellow'"
+          },
+          {
+            "id": "s3",
+            "condition": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "e1",
+      "type": "expressionNode",
+      "name": "Stop",
+      "position": {
+        "x": 680,
+        "y": 60
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "x1",
+            "key": "action",
+            "value": "'STOP'"
+          },
+          {
+            "id": "x2",
+            "key": "canGo",
+            "value": "false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e2",
+      "type": "expressionNode",
+      "name": "Slow",
+      "position": {
+        "x": 680,
+        "y": 200
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "x3",
+            "key": "action",
+            "value": "'SLOW'"
+          },
+          {
+            "id": "x4",
+            "key": "canGo",
+            "value": "false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e3",
+      "type": "expressionNode",
+      "name": "Go",
+      "position": {
+        "x": 680,
+        "y": 340
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "x5",
+            "key": "action",
+            "value": "'GO'"
+          },
+          {
+            "id": "x6",
+            "key": "canGo",
+            "value": "true"
+          }
+        ]
+      }
+    },
+    {
+      "id": "out",
+      "type": "outputNode",
+      "name": "Response",
+      "position": {
+        "x": 1020,
+        "y": 200
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "ed0",
+      "type": "edge",
+      "sourceId": "in",
+      "targetId": "sw"
+    },
+    {
+      "id": "ed1",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "e1",
+      "sourceHandle": "s1"
+    },
+    {
+      "id": "ed2",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "e2",
+      "sourceHandle": "s2"
+    },
+    {
+      "id": "ed3",
+      "type": "edge",
+      "sourceId": "sw",
+      "targetId": "e3",
+      "sourceHandle": "s3"
+    },
+    {
+      "id": "ed4",
+      "type": "edge",
+      "sourceId": "e1",
+      "targetId": "out"
+    },
+    {
+      "id": "ed5",
+      "type": "edge",
+      "sourceId": "e2",
+      "targetId": "out"
+    },
+    {
+      "id": "ed6",
+      "type": "edge",
+      "sourceId": "e3",
+      "targetId": "out"
+    }
+  ]
+}
