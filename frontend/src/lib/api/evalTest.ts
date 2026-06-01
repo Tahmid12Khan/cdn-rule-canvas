@@ -7,7 +7,7 @@
 // The proxy is a separate service from the backend API, hence its own base URL.
 import { z } from "zod";
 
-import { ApiError, ApiErrorBody } from "@/lib/api/client";
+import { parseApiError } from "@/lib/api/client";
 import { CanvasGraph } from "@/lib/api/ruleGraph";
 
 export const PROXY_BASE =
@@ -16,14 +16,26 @@ export const PROXY_BASE =
 export const DeviceType = z.enum(["mobile", "desktop", "tablet"]);
 export type DeviceType = z.infer<typeof DeviceType>;
 
+// Content kind of the synthetic response under test (proxy eval delta). "html"
+// keeps the device/meta/path inputs; "json" carries a parsed response body so
+// json_expression nodes evaluate.
+export const ContentKind = z.enum(["html", "json"]);
+export type ContentKind = z.infer<typeof ContentKind>;
+
 // Test input context. Mirrors the proxy's EvaluationContext test fields. All
 // optional — the user fills only what the selected canvas's processors read.
+// JSON features send `response_json` (PREFERRED — a parsed object, e.g.
+// {"type":"premium"}); `response_body`/`content_kind` are the raw-string
+// fallbacks the proxy also accepts.
 export const EvalContext = z.object({
   device_type: DeviceType.optional(),
   user_agent: z.string().optional(),
   meta_tags: z.record(z.string()).optional(),
   path: z.string().optional(),
   url: z.string().optional(),
+  response_json: z.unknown().optional(),
+  response_body: z.string().optional(),
+  content_kind: ContentKind.optional(),
 });
 export type EvalContext = z.infer<typeof EvalContext>;
 
@@ -59,11 +71,8 @@ export async function postEvalTest(body: EvalRequest): Promise<EvalResponse> {
   });
 
   if (!res.ok) {
-    const parsed = ApiErrorBody.safeParse(await res.json().catch(() => null));
-    const e = parsed.success
-      ? parsed.data.error
-      : { code: "INTERNAL_ERROR", message: res.statusText, details: undefined };
-    throw new ApiError(res.status, e.code, e.message, e.details ?? undefined);
+    const text = await res.text().catch(() => "");
+    throw parseApiError(res.status, res.statusText, text);
   }
 
   return EvalResponse.parse(await res.json());

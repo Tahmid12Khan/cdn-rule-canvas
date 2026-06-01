@@ -4,10 +4,11 @@
 // canvases[selected] in the Zustand store; all RF callbacks dispatch to store
 // setters. Loaded via next/dynamic({ ssr:false }) by RuleBuilderClient to avoid
 // hydration mismatch. Drag-drop from the palette + edge connect land here.
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   Controls,
   ReactFlowProvider,
   useReactFlow,
@@ -28,8 +29,9 @@ import { StartNode } from "@/components/canvas/nodes/StartNode";
 import { SubRuleNode } from "@/components/canvas/nodes/SubRuleNode";
 import { ActionNode } from "@/components/canvas/nodes/ActionNode";
 import { LabeledEdge } from "@/components/canvas/edges/LabeledEdge";
+import { autoLayout, needsLayout } from "@/lib/canvas/layout";
 import { CHIP_MIME, type ChipPayload } from "@/lib/canvas/nodeTemplates";
-import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
+import { CANVAS_KEYS, useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import {
   START_NODE_ID,
   type Branch,
@@ -64,7 +66,7 @@ interface RuleBuilderCanvasProps {
 
 function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
 
   const canvas = useRuleBuilderStore((s) => s.canvases[canvasKey]);
   const onNodesChange = useRuleBuilderStore((s) => s.onNodesChange);
@@ -72,6 +74,44 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
   const addNode = useRuleBuilderStore((s) => s.addNode);
   const addEdge = useRuleBuilderStore((s) => s.addEdge);
   const openNodeConfig = useRuleBuilderStore((s) => s.openNodeConfig);
+  const setNodePositions = useRuleBuilderStore((s) => s.setNodePositions);
+  const applySeedLayout = useRuleBuilderStore((s) => s.applySeedLayout);
+
+  // Auto-layout the seeded graph ONCE per (fid/vnum) seed when its nodes lack a
+  // meaningful layout (overlapping positions from a template / older save). Read
+  // the full store via getState so this doesn't churn on every drag frame.
+  // Keyed off baselineHash so it re-arms after each fresh seed but never re-runs
+  // for the same baseline. Uses applySeedLayout so it doesn't flip dirty.
+  const laidOutForBaseline = useRef<string | null>(null);
+  const baselineHash = useRuleBuilderStore((s) => s.baselineHash);
+  useEffect(() => {
+    if (laidOutForBaseline.current === baselineHash) return;
+    const { canvases } = useRuleBuilderStore.getState();
+    if (!CANVAS_KEYS.some((k) => needsLayout(canvases[k].nodes))) {
+      laidOutForBaseline.current = baselineHash;
+      return;
+    }
+    const positionsByCanvas = {} as Record<
+      (typeof CANVAS_KEYS)[number],
+      Map<string, { x: number; y: number }>
+    >;
+    for (const k of CANVAS_KEYS) {
+      const c = canvases[k];
+      positionsByCanvas[k] = autoLayout(c.nodes, c.edges);
+    }
+    applySeedLayout(positionsByCanvas);
+    laidOutForBaseline.current =
+      useRuleBuilderStore.getState().baselineHash;
+    window.requestAnimationFrame(() => fitView({ duration: 200 }));
+  }, [baselineHash, applySeedLayout, fitView]);
+
+  // "Tidy layout" control: re-run dagre on the CURRENT canvas (a deliberate
+  // user edit, so it flips dirty via setNodePositions) and re-fit the view.
+  const handleTidyLayout = useCallback(() => {
+    const positions = autoLayout(canvas.nodes, canvas.edges);
+    setNodePositions(canvasKey, positions);
+    window.requestAnimationFrame(() => fitView({ duration: 200 }));
+  }, [canvas.nodes, canvas.edges, setNodePositions, canvasKey, fitView]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -189,6 +229,10 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
+        // Loose so a drag can complete onto a node from any side; the edge then
+        // re-renders floated to the closest border (LabeledEdge), so the single
+        // top target handle never has to be aimed at precisely (req 5).
+        connectionMode={ConnectionMode.Loose}
         nodesDraggable={editable}
         nodesConnectable={editable}
         // Always selectable so clicks fire onNodeClick even in read-only mode
@@ -217,8 +261,20 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
         />
       </ReactFlow>
 
-      {/* bottom-right cluster: full-screen + template library */}
+      {/* bottom-right cluster: tidy layout + full-screen + template library */}
       <div className="pointer-events-none absolute bottom-4 right-16 z-10 flex items-end gap-2">
+        <div className="pointer-events-auto">
+          <button
+            type="button"
+            onClick={handleTidyLayout}
+            title="Tidy layout (auto-arrange top-down)"
+            aria-label="Tidy layout"
+            className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-bg-elevated px-3 text-xs font-semibold text-nav shadow-sm hover:bg-brand-50 hover:text-brand-700"
+          >
+            <span aria-hidden>⤓</span>
+            Tidy layout
+          </button>
+        </div>
         <div className="pointer-events-auto">
           <FullScreenToggle targetRef={wrapperRef} />
         </div>

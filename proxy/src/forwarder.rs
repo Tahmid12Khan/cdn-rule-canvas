@@ -11,13 +11,13 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
-use crate::domain::applier::orchestrator;
+use crate::domain::applier::{json_apply, orchestrator};
 use crate::domain::classifier;
 use crate::domain::context::EvaluationContextParts;
 use crate::domain::evaluator::GraphEvaluator;
 use crate::domain::graph::Canvas;
 use crate::error::ProxyError;
-use crate::infra::backend_client::Env;
+use crate::infra::backend_client::{ActiveOutcome, ActiveVersionRead, Env};
 use crate::infra::encoding;
 use crate::state::AppState;
 
@@ -73,8 +73,13 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         Err(e) => return e.into_response(),
     };
 
-    // 5. HTML gate.
-    if !upstream.is_html() {
+    // 5. Content-kind gate: HTML vs JSON. Neither -> pass-through (skipped).
+    //    The gate keys off the RESPONSE content-type, not the feature type:
+    //    a json_expression node on an HTML response simply sees no
+    //    response_json and returns No (and vice versa for meta_tags on JSON).
+    let is_html = upstream.is_html();
+    let is_json = upstream.is_json();
+    if !is_html && !is_json {
         return upstream.into_response(APPLY_STATUS_HEADER, "skipped");
     }
 
@@ -95,63 +100,132 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         }
     };
 
-    // 6/7. Build eval context + evaluate the classified canvas ONLY.
-    let ctx = EvaluationContextParts::from_request(&headers, &path, &cookies, body_string.clone());
-    let canvas_graph = av.canvas(canvas_class);
-
-    let eval_start = Instant::now();
-    let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
-    let outcome_id = evaluator
-        .evaluate(
-            canvas_graph,
-            ctx,
-            &feature_id,
-            av.version_number,
-            canvas_class,
-        )
-        .await;
-    let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
-    metrics::histogram!("proxy_eval_ms").record(eval_ms);
-
-    // 8. Resolve outcome.
-    let outcome = outcome_id.and_then(|id| av.find_outcome(id));
     let canvas_label = canvas_name(canvas_class);
 
-    let (final_html, apply_status, _transform_ms) = match outcome {
-        None => {
+    let (final_body, apply_status) = if is_html {
+        // 6a. HTML applicability gate: if html_selector is set+non-empty, require
+        //     >=1 element match; zero matches -> serve original, skipped.
+        if !html_selector_matches(&av, &body_string) {
             tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label, outcome_id = "none",
-                eval_ms, apply_status = "skipped", "request"
+                feature_id = %feature_id, canvas = canvas_label,
+                apply_status = "skipped", reason = "html_selector_no_match", "request"
             );
-            (body_string, "skipped", 0.0)
+            return rebuild_response(status, resp_headers, body, "skipped");
         }
-        Some(o) if o.is_builtin_show_content() => {
-            tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
-                eval_ms, apply_status = "skipped", "request"
-            );
-            (body_string, "skipped", 0.0)
-        }
-        Some(o) => {
-            metrics::counter!("proxy_outcomes_total", "outcome_id" => o.id.to_string())
-                .increment(1);
-            let t_start = Instant::now();
-            let result = orchestrator::apply_outcome(body_string.clone(), o, &state.sanitizer);
-            let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-            metrics::histogram!("proxy_transform_ms").record(transform_ms);
-            match result {
-                Ok(m) => {
-                    let status = if m.applied { "ok" } else { "skipped" };
-                    tracing::info!(
-                        feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
-                        eval_ms, transform_ms, apply_status = status, "request"
-                    );
-                    (m.html, status, transform_ms)
+
+        // 6b. Build eval context (HTML) + evaluate the classified canvas ONLY.
+        let ctx = EvaluationContextParts::from_request(
+            &headers,
+            &path,
+            &cookies,
+            body_string.clone(),
+            false,
+        );
+        let (outcome_id, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
+        let outcome = outcome_id.and_then(|id| av.find_outcome(id));
+
+        match terminal_outcome(outcome) {
+            None => {
+                log_skipped(&feature_id, canvas_label, outcome, eval_ms);
+                (body_string, "skipped")
+            }
+            Some(o) => {
+                metrics::counter!("proxy_outcomes_total", "outcome_id" => o.id.to_string())
+                    .increment(1);
+                let t_start = Instant::now();
+                let result = orchestrator::apply_outcome(body_string.clone(), o, &state.sanitizer);
+                let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+                metrics::histogram!("proxy_transform_ms").record(transform_ms);
+                match result {
+                    Ok(m) => {
+                        let status = if m.applied { "ok" } else { "skipped" };
+                        tracing::info!(
+                            feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
+                            eval_ms, transform_ms, apply_status = status, "request"
+                        );
+                        (m.html, status)
+                    }
+                    Err(e) => {
+                        metrics::counter!("proxy_apply_errors_total").increment(1);
+                        tracing::warn!(error = %e, "apply error, serving original");
+                        (body_string, "error")
+                    }
                 }
-                Err(e) => {
-                    metrics::counter!("proxy_apply_errors_total").increment(1);
-                    tracing::warn!(error = %e, "apply error, serving original");
-                    (body_string, "error", transform_ms)
+            }
+        }
+    } else {
+        // 7a. Parse the JSON body. Parse failure -> serve original, skipped.
+        let parsed: serde_json::Value = match serde_json::from_str(&body_string) {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!(feature_id = %feature_id, "json parse failed, serving original");
+                return rebuild_response(status, resp_headers, body, "skipped");
+            }
+        };
+
+        // 7b. JSON applicability gate: if json_selector is set+non-empty, require
+        //     a JSONPath match; zero matches -> serve original, skipped.
+        if !json_selector_matches(&av, &parsed) {
+            tracing::info!(
+                feature_id = %feature_id, canvas = canvas_label,
+                apply_status = "skipped", reason = "json_selector_no_match", "request"
+            );
+            return rebuild_response(status, resp_headers, body, "skipped");
+        }
+
+        // 7c. Build eval context (JSON) + evaluate the classified canvas ONLY.
+        let ctx = EvaluationContextParts::from_request(
+            &headers,
+            &path,
+            &cookies,
+            body_string.clone(),
+            true,
+        );
+        let (outcome_id, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
+        let outcome = outcome_id.and_then(|id| av.find_outcome(id));
+
+        match terminal_outcome(outcome) {
+            None => {
+                log_skipped(&feature_id, canvas_label, outcome, eval_ms);
+                (body_string, "skipped")
+            }
+            Some(o) => {
+                metrics::counter!("proxy_outcomes_total", "outcome_id" => o.id.to_string())
+                    .increment(1);
+                let t_start = Instant::now();
+                let result = json_apply::apply_outcome_json(parsed, o);
+                let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+                metrics::histogram!("proxy_transform_ms").record(transform_ms);
+                match result {
+                    Ok(m) if m.applied => {
+                        // Re-serialize the mutated JSON to a string.
+                        match serde_json::to_string(&m.json) {
+                            Ok(s) => {
+                                tracing::info!(
+                                    feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
+                                    eval_ms, transform_ms, apply_status = "ok", "request"
+                                );
+                                (s, "ok")
+                            }
+                            Err(e) => {
+                                metrics::counter!("proxy_apply_errors_total").increment(1);
+                                tracing::warn!(error = %e, "json serialize failed, serving original");
+                                (body_string, "error")
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        tracing::info!(
+                            feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
+                            eval_ms, transform_ms, apply_status = "skipped", "request"
+                        );
+                        (body_string, "skipped")
+                    }
+                    Err(e) => {
+                        metrics::counter!("proxy_apply_errors_total").increment(1);
+                        tracing::warn!(error = %e, "json apply error, serving original");
+                        (body_string, "error")
+                    }
                 }
             }
         }
@@ -160,10 +234,109 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     metrics::histogram!("proxy_e2e_ms").record(e2e_start.elapsed().as_secs_f64() * 1000.0);
 
     // 9. Re-encode + rebuild.
-    let out_bytes = encoding::reencode(content_encoding.as_deref(), final_html);
+    let out_bytes = encoding::reencode(content_encoding.as_deref(), final_body);
     strip_hop_by_hop(&mut resp_headers);
     set_content_length(&mut resp_headers, out_bytes.len());
     rebuild_response(status, resp_headers, out_bytes, apply_status)
+}
+
+/// Run the classified canvas through the evaluator, returning the resolved
+/// outcome id (if any) and the eval duration in ms. Records `proxy_eval_ms`.
+async fn evaluate(
+    state: &AppState,
+    av: &ActiveVersionRead,
+    ctx: EvaluationContextParts,
+    feature_id: &str,
+    canvas_class: Canvas,
+) -> (Option<uuid::Uuid>, f64) {
+    let canvas_graph = av.canvas(canvas_class);
+    let eval_start = Instant::now();
+    let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
+    let outcome_id = evaluator
+        .evaluate(
+            canvas_graph,
+            ctx,
+            feature_id,
+            av.version_number,
+            canvas_class,
+        )
+        .await;
+    let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
+    metrics::histogram!("proxy_eval_ms").record(eval_ms);
+    (outcome_id, eval_ms)
+}
+
+/// Resolve a *terminal, applicable* outcome: `None` and builtin-ShowContent both
+/// short-circuit to no modification (the caller serves the original body).
+fn terminal_outcome(outcome: Option<&ActiveOutcome>) -> Option<&ActiveOutcome> {
+    match outcome {
+        Some(o) if !o.is_builtin_show_content() => Some(o),
+        _ => None,
+    }
+}
+
+/// Structured "no modification" log shared by both content kinds.
+fn log_skipped(
+    feature_id: &str,
+    canvas_label: &str,
+    outcome: Option<&ActiveOutcome>,
+    eval_ms: f64,
+) {
+    let outcome_id = outcome.map(|o| o.id.to_string());
+    tracing::info!(
+        feature_id = %feature_id,
+        canvas = canvas_label,
+        outcome_id = outcome_id.as_deref().unwrap_or("none"),
+        eval_ms,
+        apply_status = "skipped",
+        "request"
+    );
+}
+
+/// HTML applicability gate. True when `html_selector` is absent/empty (apply
+/// always) OR it parses and matches >=1 element. A malformed selector fails open
+/// (apply). Never panics.
+fn html_selector_matches(av: &ActiveVersionRead, body: &str) -> bool {
+    let Some(selector) = av
+        .applicability
+        .html_selector
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return true; // no gate configured -> apply.
+    };
+    let sel = match scraper::Selector::parse(selector) {
+        Ok(s) => s,
+        Err(_) => {
+            tracing::warn!(selector, "html_selector parse failed, applying (fail-open)");
+            return true;
+        }
+    };
+    let doc = scraper::Html::parse_document(body);
+    doc.select(&sel).next().is_some()
+}
+
+/// JSON applicability gate. True when `json_selector` is absent/empty (apply
+/// always) OR it parses and matches >=1 node. A malformed selector fails open
+/// (apply). Never panics.
+fn json_selector_matches(av: &ActiveVersionRead, body: &serde_json::Value) -> bool {
+    let Some(selector) = av
+        .applicability
+        .json_selector
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return true; // no gate configured -> apply.
+    };
+    match serde_json_path::JsonPath::parse(selector) {
+        Ok(path) => !path.query(body).all().is_empty(),
+        Err(_) => {
+            tracing::warn!(selector, "json_selector parse failed, applying (fail-open)");
+            true
+        }
+    }
 }
 
 /// Upstream response captured for modification or pass-through.
@@ -180,6 +353,13 @@ impl UpstreamResponse {
         self.content_type
             .as_deref()
             .map(|ct| ct.to_ascii_lowercase().contains("text/html"))
+            .unwrap_or(false)
+    }
+
+    fn is_json(&self) -> bool {
+        self.content_type
+            .as_deref()
+            .map(|ct| ct.to_ascii_lowercase().contains("application/json"))
             .unwrap_or(false)
     }
 

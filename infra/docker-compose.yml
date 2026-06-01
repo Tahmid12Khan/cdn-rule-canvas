@@ -129,14 +129,16 @@ services:
   # Static HTML origin for the end-to-end demo. Serves infra/demo-upstream/*.html.
   # Internal port 8081 (proxy UPSTREAM_BASE_URL); host port 9001 for inspection.
   demo-upstream:
-    image: nginx:1-alpine
+    # openresty = nginx + ngx_http_lua_module (needed to reduce Set-Cookie to
+    # name=value); its nginx.conf includes /etc/nginx/conf.d/*.conf like stock.
+    image: openresty/openresty:alpine
     volumes:
       - ./demo-upstream:/usr/share/nginx/html:ro
       - ./demo-upstream/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "9001:8081"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8081/article.html || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/article.html || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5

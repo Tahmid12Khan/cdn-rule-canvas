@@ -6,8 +6,14 @@ use rre_proxy::domain::processors::{meta_tags::MetaTagsProcessor, Branch, Canvas
 use serde_json::json;
 
 fn ctx(html: &str) -> rre_proxy::domain::context::EvaluationContext {
-    EvaluationContextParts::from_request(&HeaderMap::new(), "/", &HashMap::new(), html.to_string())
-        .into_context()
+    EvaluationContextParts::from_request(
+        &HeaderMap::new(),
+        "/",
+        &HashMap::new(),
+        html.to_string(),
+        false,
+    )
+    .into_context()
 }
 
 #[test]

@@ -13,6 +13,7 @@ fn ctx_with_ua(ua: &str) -> rre_proxy::domain::context::EvaluationContext {
         "/",
         &HashMap::new(),
         "<html></html>".to_string(),
+        false,
     )
     .into_context()
 }

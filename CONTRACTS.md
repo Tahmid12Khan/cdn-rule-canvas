@@ -123,6 +123,10 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   order_index INTEGER DEFAULT 0, created_at, updated_at)`, INDEX `(outcome_id, order_index)`.
 - `0005_component_config`: `ALTER TABLE rre.components ADD CONSTRAINT components_type_known CHECK (type IN
   ('html_injection','content_truncation'))`.
+- `0006_version_applicability`: (a) `ALTER TABLE rre.versions ADD COLUMN applicability JSONB NOT NULL
+  DEFAULT '{}'::jsonb` (additive; existing rows backfill to the empty gate). (b) drops & recreates
+  `components_type_known` to also allow `'json_remove','json_set','json_replace'`. Down restores the
+  0005 CHECK and drops the column.
 
 Migration order is load-bearing (0002 features WITHOUT versions FK; 0003 ALTERs in the deferrable FK
 after creating versions). Never reorder.
@@ -155,11 +159,19 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
 - Feature: `FeatureCreate { id (SLUG_RE, 3..=64), name (1..=200), r#type }`, `FeatureUpdate { name? }`,
   `FeatureRead { id, name, r#type, staging_version_id?, live_version_id?, created_at, updated_at }`.
   `SLUG_RE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`.
-- Version: `VersionCreate { description? (<=2000) }`, `VersionUpdate { description? (<=2000),
-  rule_graph?: RuleGraph }`, `VersionRead { id, feature_id, version_number, description?, status,
-  rule_graph: RuleGraph, created_by, last_updated_by, last_updated_at, created_at }`,
-  `VersionSummary` (same minus rule_graph + created_by), `PublishRequest { environment:
+- Version: `VersionCreate { description? (<=2000), rule_graph?: RuleGraph, applicability?: Applicability }`,
+  `VersionUpdate { description? (<=2000), rule_graph?: RuleGraph, applicability?: Applicability }`,
+  `VersionRead { id, feature_id, version_number, description?, status, rule_graph: RuleGraph,
+  applicability: Applicability, created_by, last_updated_by, last_updated_at, created_at }`,
+  `VersionSummary` (same minus rule_graph/applicability + created_by), `PublishRequest { environment:
   PublishEnvironment }`, `VersionListQuery { status?: VersionStatus, search?: String, #[flatten] page }`.
+  `applicability` is editable on DRAFT only (same lock as `rule_graph`); `create_version` carries it
+  forward from the source version when omitted, else defaults to `{}`. `active_version` populates it.
+- `Applicability` (`#[serde(default)]` on both fields; `{}` = apply whenever the response content-type
+  matches the feature type): `{ html_selector?: String, json_selector?: String }`. Backend validation is
+  light — each present selector must be trimmed-non-empty and `<=500` chars (`VALIDATION_ERROR`,
+  `rule_id="applicability_selector_invalid"`, `loc="applicability.<field>"`); real CSS/JSONPath parsing
+  is the proxy's job (resilient/fail-open). Stored as the `rre.versions.applicability` JSONB column.
 - Outcome: `OutcomeCreate { title (1..=100), description? (<=500) }`, `OutcomeUpdate { title?,
   description?, order_index? }`, `OutcomeRead { id, version_id, title, description?, is_builtin,
   order_index, components: Vec<ComponentRead>, created_at, updated_at }`, `ReorderItem { id: Uuid,
@@ -170,15 +182,21 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
   placement, order_index, created_at, updated_at }`.
 - `ComponentConfig` (`#[serde(tag="type", rename_all="snake_case")]`): `HtmlInjection { target_selector,
   placement_mode: HtmlPlacementMode, html_body, theme? }` (`html_injection`); `ContentTruncation {
-  target_selector, word_count: u32 (1..=10000), fade_out: bool }` (`content_truncation`).
+  target_selector, word_count: u32 (1..=10000), fade_out: bool }` (`content_truncation`);
+  `JsonRemove { target_path }` (`json_remove`); `JsonSet { target_path, value: serde_json::Value }`
+  (`json_set`); `JsonReplace { target_path, value: serde_json::Value }` (`json_replace`).
   `HtmlPlacementMode (snake_case) = replace|append|prepend|before|after`. The persisted
   `components.config` MUST include `type` equal to the row's `type` column; service deserializes into
-  `ComponentConfig` before persist; mismatch → `VALIDATION_ERROR`.
+  `ComponentConfig` before persist; mismatch → `VALIDATION_ERROR`. JSON-mutation `target_path` is a
+  SIMPLE path (dot + `[index]`, e.g. `$.user.premium`, `$.items[0].price`) — NOT a filter expression —
+  validated trimmed-non-empty and `<=500` chars; `value` (set/replace) may be any JSON incl. `null`.
+  `json_set` upserts; `json_replace` overwrites only when the path already exists; `json_remove` deletes.
+  The DB `components_type_known` CHECK (migration 0006) allows all five discriminators.
 
 ### ActiveVersionRead (§5 — proxy-facing, EXACT)
 
 ```rust
-pub struct ActiveVersionRead { pub version_number: i32, pub rule_graph: RuleGraph, pub outcomes: Vec<ActiveOutcome> }
+pub struct ActiveVersionRead { pub version_number: i32, pub rule_graph: RuleGraph, pub applicability: Applicability, pub outcomes: Vec<ActiveOutcome> }
 pub struct ActiveOutcome { pub id: Uuid, pub title: String, pub is_builtin: bool, pub order_index: i32, pub components: Vec<ActiveComponent> }
 pub struct ActiveComponent { pub id: Uuid, pub slug: String, pub r#type: String, pub config: serde_json::Value, pub placement: Placement, pub order_index: i32 }
 ```
@@ -242,12 +260,17 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
 // NodeTypeSpec — one per node type, in palette order.
 {
   "kind": "article_url",          // canonical snake_case identifier (see above) == rule_graph `type`
-  "label": "Article URL",         // node title + palette chip label
+  "label": "URL",                 // node title + palette chip label
   "category": "content",          // category id (must exist in categories[])
+  "applies_to"?: "all",           // feature-type gate: "all" (default) | "html" | "json"
   "summary": "...",               // tooltip "input info"
   "fields": [ Field, ... ],       // ordered config fields
   "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
 }
+// `applies_to` (backend `AppliesTo`, serde snake_case, `#[default] All`, `#[serde(default)]`) gates palette
+// availability by feature type; the frontend filters palette chips by the current feature's type (`all`
+// always shown). meta_tags => "html"; device_type/article_url => "all" (omitted in source); json_expression
+// => "json". The raw-JSON endpoint serves the field verbatim (omitted keys are NOT synthesized).
 
 // Field — one config control. `control` ∈ { "select" (with options[]), "text", "number" }.
 {
@@ -272,8 +295,13 @@ frontend's former `processorSchemas.ts` + `nodeTemplates.ts` (same operators, op
 messages/placeholders) so behavior is identical. The manifest file is
 `backend/config/node_types.json`; the Rust `NodeManifest` deserializer uses `serde` with snake_case
 field names (no `rename_all` camelCase) and serves it verbatim. `coming_soon`, `required`,
-`required_unless`, `default`, `placeholder`, `options`, `required_message` are all `#[serde(default)]`
-(optional).
+`required_unless`, `default`, `placeholder`, `options`, `required_message`, and `applies_to` are all
+`#[serde(default)]` (optional). The `article_url` chip label is `"URL"` (kind unchanged); the manifest
+also ships a `json_expression` node (`category: "json"`, `applies_to: "json"`; fields `json_path`/
+`operator`/`value` with operators equals|contains|starts_with|ends_with|is_one_of|exists, `value`
+`required_unless operator=exists`) and a non-coming_soon `{ "id": "json", "label": "JSON" }` category.
+No backend Rust beyond `AppliesTo`/`applies_to` is needed for the new node — manifest-driven validation
+handles its fields; the proxy adds one `CanvasProcessor` (WF2).
 
 #### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest)`)
 
@@ -289,6 +317,7 @@ the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
 | `no_cycles` | DFS detects no cycle |
 | `outcome_terminal` | Outcome nodes have ZERO outgoing edges |
 | `outcome_ref_exists` | every Outcome node's `outcome_id` exists in `rre.outcomes` for this version |
+| `outcome_reachable` | every node reachable from the canvas root can reach an Outcome (dead-ends invalid; partial branches OK). Anchored at `root_node_id`, else the unique no-incoming-edge node; SKIPPED when no single root, when the canvas is empty, or (for the no-incoming fallback) when there are zero outcome nodes |
 | `root_in_nodes` | if `root_node_id` set, it exists in `nodes` |
 | `outcome_branch_forbidden` | edges may only originate from Decision nodes |
 | `processor_kind_known` | a Decision node's processor `type` is a manifest `kind` |
@@ -389,7 +418,7 @@ exposes `pub fn router() -> Router<AppState>` merged in `api/v1/mod.rs`.
 ### ActiveVersionRead (§5 — proxy-facing, EXACT)
 
 ```rust
-pub struct ActiveVersionRead { pub version_number: i32, pub rule_graph: RuleGraph, pub outcomes: Vec<ActiveOutcome> }
+pub struct ActiveVersionRead { pub version_number: i32, pub rule_graph: RuleGraph, pub applicability: Applicability, pub outcomes: Vec<ActiveOutcome> }
 pub struct ActiveOutcome { pub id: Uuid, pub title: String, pub is_builtin: bool, pub order_index: i32, pub components: Vec<ActiveComponent> }
 pub struct ActiveComponent { pub id: Uuid, pub slug: String, pub r#type: String, pub config: serde_json::Value, pub placement: Placement, pub order_index: i32 }
 ```

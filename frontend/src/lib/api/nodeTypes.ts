@@ -38,11 +38,18 @@ export const NodeBranch = z.object({
 });
 export type NodeBranch = z.infer<typeof NodeBranch>;
 
+// Palette-availability discriminator (spec §1.2). Gates a node type by the
+// feature's content kind: "all" (default when omitted) shows everywhere,
+// "html"/"json" only for that feature type. Backend serves it verbatim.
+export const NodeAppliesTo = z.enum(["all", "html", "json"]);
+export type NodeAppliesTo = z.infer<typeof NodeAppliesTo>;
+
 export const NodeTypeSpec = z.object({
   kind: z.string(),
   label: z.string(),
   category: z.string(),
   summary: z.string(),
+  applies_to: NodeAppliesTo.optional(),
   fields: z.array(NodeFieldSpec),
   output: z.object({ branches: z.array(NodeBranch) }),
 });

@@ -104,6 +104,10 @@ export function OutcomeEditorPage({
   const queryClient = useQueryClient();
   const completeOnboarding = useOnboardingStore((s) => s.complete);
 
+  // Narrow the decorative route param to the feature content kind: it picks the
+  // component types offered (HTML injection/truncation vs JSON remove/set/replace).
+  const kind: "html" | "json" = featureType === "json" ? "json" : "html";
+
   const query = useQuery({
     queryKey: ["outcome", outcomeId],
     queryFn: () => getOutcome(outcomeId),
@@ -358,12 +362,14 @@ export function OutcomeEditorPage({
       ? components.find((c) => c.id === configTarget.componentId)
       : undefined;
   const editingType = ComponentType.safeParse(editingComponent?.type);
+  const defaultCreateType: ComponentType =
+    kind === "json" ? "json_remove" : "html_injection";
   const initialModalType: ComponentType =
     configTarget?.kind === "create"
       ? configTarget.type
       : editingType.success
         ? editingType.data
-        : "html_injection";
+        : defaultCreateType;
 
   return (
     <div className="-mx-6 -my-8 flex min-h-[calc(100vh-8rem)] flex-col bg-status-prevBg/20">
@@ -426,7 +432,11 @@ export function OutcomeEditorPage({
           />
 
           <div className="mt-4">
-            <AddComponentDrawer onPick={handleAddType} disabled={readOnly} />
+            <AddComponentDrawer
+              onPick={handleAddType}
+              disabled={readOnly}
+              featureType={kind}
+            />
           </div>
         </section>
       </div>
@@ -447,6 +457,7 @@ export function OutcomeEditorPage({
             if (!open) setConfigTarget(null);
           }}
           mode={configTarget.kind}
+          featureType={kind}
           initialSlug={editingComponent?.slug ?? ""}
           initialType={initialModalType}
           initialPlacement={

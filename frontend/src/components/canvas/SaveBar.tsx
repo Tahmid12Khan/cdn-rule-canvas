@@ -26,7 +26,12 @@ import {
   patchRuleGraph,
   type VersionRead,
 } from "@/lib/api/canvasVersions";
+import type { Applicability } from "@/lib/api/ruleGraph";
 import { publishVersion } from "@/lib/api/versions";
+import {
+  buildClientValidationUserError,
+  validateAllCanvases,
+} from "@/lib/canvas/graphValidation";
 import {
   buildValidationUserError,
   mapValidationErrors,
@@ -42,6 +47,10 @@ interface SaveBarProps {
   // Path base to navigate after Save as New Version, e.g.
   // /products/features/{type}/{slug}
   featureBase: string;
+  // The current version's applicability gate, forwarded to "Save as New
+  // Version" so the new draft keeps the same targeting (omitting it would reset
+  // the new version to "always apply").
+  applicability?: Applicability;
 }
 
 function formatSavedAt(ts: number | null): string {
@@ -52,7 +61,12 @@ function formatSavedAt(ts: number | null): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
+export function SaveBar({
+  fid,
+  vnum,
+  featureBase,
+  applicability,
+}: SaveBarProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -70,12 +84,31 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
   const completeOnboarding = useOnboardingStore((s) => s.complete);
 
   const [error, setError] = useState<UserError | null>(null);
+  // Raw server body (ApiError.rawBody) for the ErrorBanner "Show full server
+  // response" accordion (req 3). Cleared whenever a new error/success occurs.
+  const [rawResponse, setRawResponse] = useState<string | undefined>(undefined);
   const [dialogOpen, setDialogOpen] = useState(false);
   // Holds the description from the dialog's confirm so the async mutationFn
   // (which runs after the synchronous handler) can read it.
   const descriptionRef = useRef("");
 
   const isDraft = versionStatus === "draft";
+
+  // Client pre-flight validation gate (req 2): run the same cycle / dead-end
+  // rules the server enforces BEFORE the round-trip. Returns true when the graph
+  // is clean (proceed), false when blocked (markers + banner set, do NOT mutate).
+  // The server stays authoritative on 422.
+  function preflight(): boolean {
+    const canvases = useRuleBuilderStore.getState().canvases;
+    const result = validateAllCanvases(canvases);
+    if (result.problems.length > 0) {
+      setNodeErrors(result.nodeErrors);
+      setError(buildClientValidationUserError(result.problems));
+      setRawResponse(undefined);
+      return false;
+    }
+    return true;
+  }
 
   function refreshVersionCaches() {
     // The feature query holds live_version_id used by DeploymentStatusRow, so
@@ -92,11 +125,13 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
     onSuccess: ({ rg }) => {
       clearNodeErrors();
       setError(null);
+      setRawResponse(undefined);
       markSaved(rg);
       completeOnboarding("save");
       void queryClient.invalidateQueries({ queryKey: ["version", fid, vnum] });
     },
     onError: (err) => {
+      setRawResponse(err instanceof ApiError ? err.rawBody : undefined);
       if (err instanceof ApiError && err.isValidation) {
         const canvases = useRuleBuilderStore.getState().canvases;
         const sent = serializeRuleGraph(canvases);
@@ -115,6 +150,7 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
         fid,
         descriptionRef.current,
         rg,
+        applicability,
       );
       if (status === "live") {
         try {
@@ -133,11 +169,13 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
       setDialogOpen(false);
       clearNodeErrors();
       setError(null);
+      setRawResponse(undefined);
       markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvases));
       refreshVersionCaches();
       router.push(`${featureBase}/${created.version_number}`);
     },
     onError: (err) => {
+      setRawResponse(err instanceof ApiError ? err.rawBody : undefined);
       if (err instanceof PublishAfterCreateError) {
         // The draft exists — navigate to it and explain the publish failure.
         setDialogOpen(false);
@@ -173,7 +211,7 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
     <div className="flex flex-col items-end gap-3">
       {error && (
         <div className="w-full">
-          <ErrorBanner error={error} />
+          <ErrorBanner error={error} rawResponse={rawResponse} />
         </div>
       )}
 
@@ -190,7 +228,10 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
         {isEditing && isDraft && (
           <Button
             variant="primary"
-            onClick={() => save.mutate()}
+            onClick={() => {
+              if (!preflight()) return;
+              save.mutate();
+            }}
             disabled={save.isPending || !dirty}
           >
             {save.isPending ? "Saving…" : "Save"}
@@ -207,6 +248,13 @@ export function SaveBar({ fid, vnum, featureBase }: SaveBarProps) {
         onOpenChange={setDialogOpen}
         saving={saveAsNew.isPending}
         onConfirm={(desc, status) => {
+          // Pre-flight before creating a new version too: close the dialog so the
+          // banner + node markers are visible if the graph is invalid (mirrors
+          // the 422 handling), then bail without mutating.
+          if (!preflight()) {
+            setDialogOpen(false);
+            return;
+          }
           descriptionRef.current = desc;
           saveAsNew.mutate(status);
         }}

@@ -60,4 +60,33 @@ describe("NodePalette (manifest-driven)", () => {
     const chip = screen.getByText("Meta Tags").closest("[data-chip-id]");
     expect(chip).toHaveAttribute("draggable", "false");
   });
+
+  it("hides the JSON-only category for an HTML feature", async () => {
+    renderWithQuery(
+      <NodePalette outcomes={OUTCOMES} draggable featureType="html" />,
+    );
+    await screen.findByRole("tab", { name: "Content" });
+    // json_expression is applies_to:"json" — its "JSON" category is dropped for
+    // an HTML feature.
+    expect(
+      screen.queryByRole("tab", { name: "JSON" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the JSON Expression chip and hides Meta Tags for a JSON feature", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(
+      <NodePalette outcomes={OUTCOMES} draggable featureType="json" />,
+    );
+    // JSON category appears for a JSON feature.
+    await screen.findByRole("tab", { name: "JSON" });
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    expect(screen.getByText("JSON Expression")).toBeInTheDocument();
+
+    // Meta Tags (applies_to:"html") is gated out: the Content tab now only has
+    // the "all" article_url chip, not the html-only Meta Tags chip.
+    await user.click(screen.getByRole("tab", { name: "Content" }));
+    expect(screen.queryByText("Meta Tags")).not.toBeInTheDocument();
+    expect(screen.getByText("URL")).toBeInTheDocument();
+  });
 });

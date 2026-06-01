@@ -1,8 +1,8 @@
 //! HTTP coverage for `GET /api/v1/node-types` (BACKEND CONTRACT §6/§7).
 //!
 //! Drives the real router via `tower::ServiceExt::oneshot` (no network bind) and
-//! asserts the manifest is served verbatim with snake_case keys and the three
-//! ported kinds.
+//! asserts the manifest is served verbatim with snake_case keys and the
+//! expected kinds.
 
 mod common;
 
@@ -38,14 +38,17 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
     assert!(body["categories"].is_array());
     assert!(body["node_types"].is_array());
 
-    // The three ported kinds in palette order.
+    // The ported kinds plus json_expression, in palette order.
     let kinds: Vec<&str> = body["node_types"]
         .as_array()
         .unwrap()
         .iter()
         .map(|n| n["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(kinds, ["meta_tags", "device_type", "article_url"]);
+    assert_eq!(
+        kinds,
+        ["meta_tags", "device_type", "article_url", "json_expression"]
+    );
 
     // coming_soon flag is present on a disabled category.
     let user = body["categories"]

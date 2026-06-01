@@ -138,6 +138,49 @@ describe("SaveBar — Save as New Version", () => {
     );
   });
 
+  it("pre-flight gate blocks Save-as-New on a dead-end graph (no server call)", async () => {
+    const user = userEvent.setup();
+    // A decision node with no outgoing edge -> it can't reach an outcome. The
+    // client pre-flight should block before any POST.
+    const deadEnd: RuleGraph = {
+      anonymous: {
+        root_node_id: "d1",
+        nodes: [
+          {
+            kind: "decision",
+            id: "d1",
+            processor: { type: "device_type", operator: "equals", value: "mobile" },
+            position: { x: 0, y: 0 },
+          },
+        ],
+        edges: [],
+      },
+      registered: { nodes: [], edges: [], root_node_id: null },
+      customer: { nodes: [], edges: [], root_node_id: null },
+    };
+    useRuleBuilderStore.getState().seedFromRuleGraph(deadEnd, "live", () => "X");
+
+    let createCalls = 0;
+    server.use(
+      http.post(CREATE_URL, () => {
+        createCalls += 1;
+        return HttpResponse.json(versionRead("draft"), { status: 201 });
+      }),
+    );
+
+    renderSaveBar();
+    await user.click(screen.getByRole("button", { name: /save as new version/i }));
+    await user.click(screen.getByRole("button", { name: /^create version$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/fix the rule graph before saving/i);
+    expect(createCalls).toBe(0);
+    // The offending node is highlighted via the store's nodeErrors.
+    expect(
+      Object.keys(useRuleBuilderStore.getState().nodeErrors),
+    ).toContain("d1");
+  });
+
   it("names the offending node + canvas on a 422 validation failure", async () => {
     const user = userEvent.setup();
     // Seed a single-outcome graph on the Anonymous canvas so the 422 loc

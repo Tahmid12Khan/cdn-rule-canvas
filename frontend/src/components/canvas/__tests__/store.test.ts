@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  computeJourneyPath,
   computeRootNodeId,
   isDirty,
   useRuleBuilderStore,
@@ -227,6 +228,65 @@ describe("ruleBuilderStore", () => {
     expect(useRuleBuilderStore.getState().nodeErrors.d1).toBe("cycle detected");
     s.clearNodeErrors();
     expect(useRuleBuilderStore.getState().nodeErrors).toEqual({});
+  });
+
+  it("setNodePositions bulk-updates positions and flips dirty", () => {
+    const s = useRuleBuilderStore.getState();
+    s.addNode("anonymous", decision("d1"));
+    s.addNode("anonymous", outcome("o1"));
+    useRuleBuilderStore.getState().markSaved(emptyGraph);
+    expect(useRuleBuilderStore.getState().dirty).toBe(false);
+
+    useRuleBuilderStore.getState().setNodePositions(
+      "anonymous",
+      new Map([
+        ["d1", { x: 100, y: 200 }],
+        ["o1", { x: 300, y: 400 }],
+      ]),
+    );
+    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
+    expect(nodes.find((n) => n.id === "d1")?.position).toEqual({ x: 100, y: 200 });
+    expect(nodes.find((n) => n.id === "o1")?.position).toEqual({ x: 300, y: 400 });
+    expect(useRuleBuilderStore.getState().dirty).toBe(true);
+  });
+});
+
+describe("computeJourneyPath", () => {
+  it("includes start + nodes/edges on any start->outcome path", () => {
+    const s = useRuleBuilderStore.getState();
+    s.addNode("anonymous", decision("d1"));
+    s.addNode("anonymous", outcome("o1"));
+    s.addEdge("anonymous", edge("e1", "d1", "o1"));
+    const journey = computeJourneyPath(
+      useRuleBuilderStore.getState().canvases.anonymous,
+    );
+    expect(journey.nodeIds.has("start")).toBe(true);
+    expect(journey.nodeIds.has("d1")).toBe(true);
+    expect(journey.nodeIds.has("o1")).toBe(true);
+    expect(journey.edgeIds.has("e1")).toBe(true);
+  });
+
+  it("excludes a dead-end branch that never reaches an outcome", () => {
+    const s = useRuleBuilderStore.getState();
+    s.addNode("anonymous", decision("d1"));
+    s.addNode("anonymous", outcome("o1"));
+    s.addNode("anonymous", decision("dead"));
+    s.addEdge("anonymous", edge("e_yes", "d1", "o1"));
+    // a "no" branch into a dead-end decision with no outgoing edge.
+    s.addEdge("anonymous", {
+      id: "e_no",
+      source: "d1",
+      target: "dead",
+      sourceHandle: "no",
+      type: "labeledEdge",
+      data: { branch: "no" },
+    });
+    const journey = computeJourneyPath(
+      useRuleBuilderStore.getState().canvases.anonymous,
+    );
+    expect(journey.nodeIds.has("o1")).toBe(true);
+    expect(journey.nodeIds.has("dead")).toBe(false);
+    expect(journey.edgeIds.has("e_no")).toBe(false);
   });
 });
 

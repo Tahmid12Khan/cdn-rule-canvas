@@ -10,6 +10,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
     { id: "session", label: "Session" },
     { id: "user", label: "User", coming_soon: true },
     { id: "content", label: "Content" },
+    { id: "json", label: "JSON" },
     { id: "advanced", label: "Advanced", coming_soon: true },
   ],
   node_types: [
@@ -17,6 +18,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
       kind: "meta_tags",
       label: "Meta Tags",
       category: "content",
+      applies_to: "html",
       summary: "Matches against a meta tag in the request HTML by name.",
       fields: [
         {
@@ -63,6 +65,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
       kind: "device_type",
       label: "Device Type",
       category: "session",
+      applies_to: "all",
       summary:
         "Matches against the request device type (mobile, desktop, tablet).",
       fields: [
@@ -99,9 +102,10 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
     },
     {
       kind: "article_url",
-      label: "Article URL",
+      label: "URL",
       category: "content",
-      summary: "Matches against the request article URL (path).",
+      applies_to: "all",
+      summary: "Matches against the request URL (path).",
       fields: [
         {
           name: "operator",
@@ -124,6 +128,51 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           default: "",
           placeholder: "e.g. /article",
           required_message: "Enter a value to compare against the URL",
+        },
+      ],
+      output: {
+        branches: [
+          { id: "yes", label: "Yes" },
+          { id: "no", label: "No" },
+        ],
+      },
+    },
+    {
+      kind: "json_expression",
+      label: "JSON Expression",
+      category: "json",
+      applies_to: "json",
+      summary: "Matches a JSONPath in the response body against a value.",
+      fields: [
+        {
+          name: "json_path",
+          label: "JSON path",
+          control: "text",
+          required: true,
+          default: "",
+          placeholder: "$.type",
+          required_message: "Enter a JSONPath (e.g. $.type)",
+        },
+        {
+          name: "operator",
+          label: "Operator",
+          control: "select",
+          required: true,
+          default: "contains",
+          options: [
+            { value: "equals", label: "equals" },
+            { value: "contains", label: "contains" },
+            { value: "exists", label: "exists" },
+          ],
+        },
+        {
+          name: "value",
+          label: "Value",
+          control: "text",
+          required: false,
+          required_unless: { field: "operator", value: "exists" },
+          default: "",
+          placeholder: "e.g. premium",
         },
       ],
       output: {

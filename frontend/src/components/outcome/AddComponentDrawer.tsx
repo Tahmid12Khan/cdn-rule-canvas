@@ -18,7 +18,7 @@ interface ComponentTypeOption {
   description: string;
 }
 
-const OPTIONS: ComponentTypeOption[] = [
+const HTML_OPTIONS: ComponentTypeOption[] = [
   {
     type: "html_injection",
     title: "HTML Injection",
@@ -33,16 +33,38 @@ const OPTIONS: ComponentTypeOption[] = [
   },
 ];
 
+const JSON_OPTIONS: ComponentTypeOption[] = [
+  {
+    type: "json_remove",
+    title: "JSON Remove",
+    description: "Delete the value at a path in the JSON response body.",
+  },
+  {
+    type: "json_set",
+    title: "JSON Set",
+    description: "Upsert (create or overwrite) a value at a path.",
+  },
+  {
+    type: "json_replace",
+    title: "JSON Replace",
+    description: "Overwrite a value only if the path already exists.",
+  },
+];
+
 interface AddComponentDrawerProps {
   onPick: (type: ComponentType) => void;
   disabled?: boolean;
+  // Feature content kind — picks the offered component types (req JSON).
+  featureType?: "html" | "json";
 }
 
 export function AddComponentDrawer({
   onPick,
   disabled = false,
+  featureType = "html",
 }: AddComponentDrawerProps) {
   const [open, setOpen] = useState(false);
+  const options = featureType === "json" ? JSON_OPTIONS : HTML_OPTIONS;
 
   function handlePick(type: ComponentType) {
     setOpen(false);
@@ -90,7 +112,7 @@ export function AddComponentDrawer({
           </div>
 
           <div className="flex flex-col gap-3 overflow-y-auto px-6 py-5">
-            {OPTIONS.map((option) => (
+            {options.map((option) => (
               <button
                 key={option.type}
                 type="button"

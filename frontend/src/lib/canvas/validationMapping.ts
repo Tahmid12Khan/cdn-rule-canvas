@@ -83,6 +83,8 @@ function reasonFor(detail: ApiErrorDetail): string {
       return "reference outcomes that don't exist in this version";
     case "no_cycles":
       return "form a cycle (a rule can't loop back on itself)";
+    case "outcome_reachable":
+      return "have no path to an outcome (every branch must end at an outcome)";
     case "branch_unique":
       return "have duplicate branches from the same node";
     case "outcome_terminal":

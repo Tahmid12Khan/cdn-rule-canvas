@@ -58,4 +58,42 @@ describe("ErrorBanner", () => {
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
+
+  it("does not render the full-response accordion without rawResponse", () => {
+    render(<ErrorBanner message="Boom" />);
+    expect(
+      screen.queryByText(/show full server response/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the raw server response in a collapsible accordion", () => {
+    render(
+      <ErrorBanner
+        message="Boom"
+        rawResponse={'{"error":{"code":"INTERNAL_ERROR"}}'}
+      />,
+    );
+    expect(
+      screen.getByText(/show full server response/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/INTERNAL_ERROR/)).toBeInTheDocument();
+  });
+
+  it("truncates a long body to ~1000 words then shows a Show full toggle", async () => {
+    const user = userEvent.setup();
+    // 1500 distinct words so the first 1000 are kept, the rest dropped.
+    const words = Array.from({ length: 1500 }, (_, i) => `w${i}`);
+    const raw = words.join(" ");
+    render(<ErrorBanner message="Boom" rawResponse={raw} />);
+
+    const pre = screen.getByText(/^w0 /);
+    // Word 999 is the last kept; word 1000+ is truncated away.
+    expect(pre.textContent).toContain("w999");
+    expect(pre.textContent).not.toContain("w1000");
+    expect(pre.textContent).toContain("…");
+
+    // The "Show full" toggle expands to the untruncated body.
+    await user.click(screen.getByRole("button", { name: /show full/i }));
+    expect(screen.getByText(/w1000/)).toBeInTheDocument();
+  });
 });

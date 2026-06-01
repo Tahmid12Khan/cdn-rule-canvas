@@ -18,6 +18,10 @@ export const HtmlPlacementMode = z.enum([
 ]);
 export type HtmlPlacementMode = z.infer<typeof HtmlPlacementMode>;
 
+// `target_path` is a SIMPLE path (dot + [index], e.g. `$.user.premium`) — the
+// proxy walks the parsed path. Mirrors BACKEND §2.3 ComponentConfig JSON arms.
+const JsonTargetPath = z.string().min(1).max(500);
+
 export const ComponentConfig = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("html_injection"),
@@ -32,10 +36,30 @@ export const ComponentConfig = z.discriminatedUnion("type", [
     word_count: z.number().int().min(1).max(10000),
     fade_out: z.boolean().default(false),
   }),
+  z.object({
+    type: z.literal("json_remove"),
+    target_path: JsonTargetPath,
+  }),
+  z.object({
+    type: z.literal("json_set"),
+    target_path: JsonTargetPath,
+    value: z.unknown(),
+  }),
+  z.object({
+    type: z.literal("json_replace"),
+    target_path: JsonTargetPath,
+    value: z.unknown(),
+  }),
 ]);
 export type ComponentConfig = z.infer<typeof ComponentConfig>;
 
-export const ComponentType = z.enum(["html_injection", "content_truncation"]);
+export const ComponentType = z.enum([
+  "html_injection",
+  "content_truncation",
+  "json_remove",
+  "json_set",
+  "json_replace",
+]);
 export type ComponentType = z.infer<typeof ComponentType>;
 
 export const ComponentRead = z.object({

@@ -386,6 +386,7 @@ async fn update_description_allowed_on_any_status() {
     let body = VersionUpdate {
         description: Some("edited".to_string()),
         rule_graph: None,
+        applicability: None,
     };
     let updated = version_service::update(pool, FID, v1, body, &state.node_manifest)
         .await
@@ -406,6 +407,7 @@ async fn update_rule_graph_on_non_draft_is_edit_locked() {
     let body = VersionUpdate {
         description: None,
         rule_graph: Some(Default::default()),
+        applicability: None,
     };
     let err = version_service::update(pool, FID, v1, body, &state.node_manifest)
         .await
@@ -498,6 +500,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
         VersionCreate {
             description: Some("save as new".to_string()),
             rule_graph: Some(graph),
+            applicability: None,
         },
         &state.node_manifest,
     )

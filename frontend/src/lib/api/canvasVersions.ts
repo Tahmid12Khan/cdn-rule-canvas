@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { apiGet, apiSend } from "@/lib/api/client";
 import { VersionStatus } from "@/lib/api/enums";
-import { RuleGraph } from "@/lib/api/ruleGraph";
+import { Applicability, RuleGraph } from "@/lib/api/ruleGraph";
 
 export const VersionRead = z.object({
   id: z.string().uuid(),
@@ -17,6 +17,9 @@ export const VersionRead = z.object({
   description: z.string().nullable(),
   status: VersionStatus,
   rule_graph: RuleGraph,
+  // Defaults to {} on the wire; optional here for forward-compat with older
+  // backends that don't yet serialize the column.
+  applicability: Applicability.optional(),
   created_by: z.string(),
   last_updated_by: z.string(),
   last_updated_at: z.string(),
@@ -27,6 +30,7 @@ export type VersionRead = z.infer<typeof VersionRead>;
 export const VersionUpdate = z.object({
   description: z.string().max(2000).optional(),
   rule_graph: RuleGraph.optional(),
+  applicability: Applicability.optional(),
 });
 export type VersionUpdate = z.infer<typeof VersionUpdate>;
 
@@ -36,6 +40,7 @@ export const VersionCreate = z.object({
   // carried-forward outcome refs to the new version's outcome ids (so the
   // returned rule_graph already references the new ids — no follow-up PATCH).
   rule_graph: RuleGraph.optional(),
+  applicability: Applicability.optional(),
 });
 export type VersionCreate = z.infer<typeof VersionCreate>;
 
@@ -47,7 +52,12 @@ export const updateVersion = (
   vnum: number,
   body: VersionUpdate,
 ): Promise<VersionRead> =>
-  apiSend("PATCH", `/api/v1/features/${fid}/versions/${vnum}`, VersionRead, body);
+  apiSend(
+    "PATCH",
+    `/api/v1/features/${fid}/versions/${vnum}`,
+    VersionRead,
+    body,
+  );
 
 // PATCH the current DRAFT version's rule_graph (BACKEND §7 PATCH version).
 export const patchRuleGraph = (
@@ -55,6 +65,14 @@ export const patchRuleGraph = (
   vnum: number,
   rule_graph: z.infer<typeof RuleGraph>,
 ): Promise<VersionRead> => updateVersion(fid, vnum, { rule_graph });
+
+// PATCH the current DRAFT version's applicability gate (spec §2.2 / req 8).
+// DRAFT-only on the server (same lock as rule_graph).
+export const patchApplicability = (
+  fid: string,
+  vnum: number,
+  applicability: Applicability,
+): Promise<VersionRead> => updateVersion(fid, vnum, { applicability });
 
 export const createVersion = (
   fid: string,
@@ -67,8 +85,16 @@ export const createVersion = (
 // ids, and remaps the sent rule_graph's outcome refs server-side. The returned
 // VersionRead's rule_graph already references the new ids — no follow-up PATCH
 // (the old two-step create+PATCH raced on the stale outcome ids and 422'd).
+// `applicability` is forwarded so the new version keeps the current version's
+// targeting gate (omitting it would reset the new version to "always apply").
 export const createVersionFromGraph = (
   fid: string,
   description: string,
   rule_graph: z.infer<typeof RuleGraph>,
-): Promise<VersionRead> => createVersion(fid, { description, rule_graph });
+  applicability?: Applicability,
+): Promise<VersionRead> =>
+  createVersion(fid, {
+    description,
+    rule_graph,
+    ...(applicability ? { applicability } : {}),
+  });

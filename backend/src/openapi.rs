@@ -12,14 +12,15 @@ use crate::{
     models::enums::{FeatureType, Placement, VersionStatus},
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
+        applicability::Applicability,
         component::{
             ComponentConfig, ComponentCreate, ComponentRead, ComponentUpdate, HtmlPlacementMode,
         },
         feature::{FeatureCreate, FeatureRead, FeatureUpdate},
         health::HealthResponse,
         node_type::{
-            BranchSpec, Category, Control, Field, NodeManifest, NodeTypeSpec, Option_, Output,
-            RequiredUnless,
+            AppliesTo, BranchSpec, Category, Control, Field, NodeManifest, NodeTypeSpec, Option_,
+            Output, RequiredUnless,
         },
         outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem},
         rule_graph::{Branch, CanvasGraph, Edge, Node, Position, ProcessorConfig, RuleGraph},
@@ -87,6 +88,7 @@ use crate::{
         VersionSummary,
         PublishRequest,
         PublishEnvironment,
+        Applicability,
         // Outcome / Component
         OutcomeCreate,
         OutcomeUpdate,
@@ -109,6 +111,7 @@ use crate::{
         NodeManifest,
         Category,
         NodeTypeSpec,
+        AppliesTo,
         Field,
         Control,
         RequiredUnless,

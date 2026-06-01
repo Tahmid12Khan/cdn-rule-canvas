@@ -90,6 +90,20 @@ pub struct Category {
     pub coming_soon: bool,
 }
 
+/// Feature-type gate for palette availability. The frontend filters palette
+/// chips by the current feature's type; `All` is always shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliesTo {
+    /// Available for any feature type (default when omitted).
+    #[default]
+    All,
+    /// Available only for HTML features (e.g. reads response HTML).
+    Html,
+    /// Available only for JSON features (e.g. reads response JSON).
+    Json,
+}
+
 /// One node-type specification.
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct NodeTypeSpec {
@@ -99,6 +113,9 @@ pub struct NodeTypeSpec {
     pub label: String,
     /// Category id (must exist in `NodeManifest::categories`).
     pub category: String,
+    /// Feature-type gate for palette availability (`all` when omitted).
+    #[serde(default)]
+    pub applies_to: AppliesTo,
     /// Tooltip "input info".
     pub summary: String,
     /// Ordered config fields.
@@ -201,10 +218,13 @@ mod tests {
             .iter()
             .map(|s| s.kind.as_str())
             .collect();
-        assert_eq!(kinds, ["meta_tags", "device_type", "article_url"]);
+        assert_eq!(
+            kinds,
+            ["meta_tags", "device_type", "article_url", "json_expression"]
+        );
 
-        // 13 palette categories, with `user` flagged coming_soon.
-        assert_eq!(loaded.typed.categories.len(), 13);
+        // 14 palette categories, with `user` flagged coming_soon and `json` not.
+        assert_eq!(loaded.typed.categories.len(), 14);
         let user = loaded
             .typed
             .categories
@@ -212,6 +232,21 @@ mod tests {
             .find(|c| c.id == "user")
             .unwrap();
         assert!(user.coming_soon);
+        let json_cat = loaded
+            .typed
+            .categories
+            .iter()
+            .find(|c| c.id == "json")
+            .unwrap();
+        assert!(!json_cat.coming_soon);
+
+        // applies_to flows from the manifest: meta_tags=html, json_expression=json,
+        // article_url defaults to all (key omitted in source).
+        let by_kind = loaded.typed.index();
+        assert_eq!(by_kind["meta_tags"].applies_to, AppliesTo::Html);
+        assert_eq!(by_kind["json_expression"].applies_to, AppliesTo::Json);
+        assert_eq!(by_kind["article_url"].applies_to, AppliesTo::All);
+        assert_eq!(by_kind["device_type"].applies_to, AppliesTo::All);
 
         // Verbatim: the served raw JSON preserves the exact source keys and does
         // not synthesize omitted optional keys. meta_tags' `value` field carries
@@ -227,6 +262,11 @@ mod tests {
         assert!(dev_operator.get("placeholder").is_none());
         assert!(dev_operator.get("required_unless").is_none());
         assert!(dev_operator.get("required_message").is_none());
+
+        // Verbatim: `applies_to` is present on meta_tags (html) and omitted on the
+        // defaulted article_url (the field is not synthesized in the raw output).
+        assert_eq!(raw["node_types"][0]["applies_to"], "html");
+        assert!(raw["node_types"][2].get("applies_to").is_none());
     }
 
     /// `index` keys every spec by its snake_case kind for O(1) lookup.

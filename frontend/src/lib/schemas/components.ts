@@ -51,16 +51,60 @@ export const ContentTruncationConfig = z.object({
 });
 export type ContentTruncationConfig = z.infer<typeof ContentTruncationConfig>;
 
+// ---- JSON mutation (full-body) — mirrors BACKEND §2.3 ----------------------
+//
+// `target_path` is a SIMPLE path (dot + [index], e.g. `$.user.premium`,
+// `$.items[0].price`) — NOT a filter expression (those are read-only / for the
+// json_expression node + applicability). The proxy walks the parsed path.
+
+const TargetPath = z
+  .string()
+  .min(1, "Enter a JSON path (e.g. $.user.premium)")
+  .max(500, "JSON path is too long — keep it under 500 characters");
+
+// type = "json_remove" — delete the value(s) at target_path.
+export const JsonRemoveConfig = z.object({
+  type: z.literal("json_remove"),
+  target_path: TargetPath,
+});
+export type JsonRemoveConfig = z.infer<typeof JsonRemoveConfig>;
+
+// type = "json_set" — upsert (create or overwrite) the value at target_path.
+export const JsonSetConfig = z.object({
+  type: z.literal("json_set"),
+  target_path: TargetPath,
+  value: z.unknown(),
+});
+export type JsonSetConfig = z.infer<typeof JsonSetConfig>;
+
+// type = "json_replace" — overwrite ONLY if target_path already exists.
+export const JsonReplaceConfig = z.object({
+  type: z.literal("json_replace"),
+  target_path: TargetPath,
+  value: z.unknown(),
+});
+export type JsonReplaceConfig = z.infer<typeof JsonReplaceConfig>;
+
 // ---- Discriminated union (mirrors BACKEND §5 ComponentConfig) --------------
 
 export const ComponentConfig = z.discriminatedUnion("type", [
   HtmlInjectionConfig,
   ContentTruncationConfig,
+  JsonRemoveConfig,
+  JsonSetConfig,
+  JsonReplaceConfig,
 ]);
 export type ComponentConfig = z.infer<typeof ComponentConfig>;
 
-// The two creatable component types in the MVP.
-export const ComponentType = z.enum(["html_injection", "content_truncation"]);
+// The creatable component types. HTML features use the first two; JSON features
+// use the json_* trio (the UI picks the tab set by feature type).
+export const ComponentType = z.enum([
+  "html_injection",
+  "content_truncation",
+  "json_remove",
+  "json_set",
+  "json_replace",
+]);
 export type ComponentType = z.infer<typeof ComponentType>;
 
 // ---- Write payloads (mirror BACKEND §5 ComponentCreate / ComponentUpdate) --
@@ -92,6 +136,9 @@ export function defaultConfigFor(type: "html_injection"): HtmlInjectionConfig;
 export function defaultConfigFor(
   type: "content_truncation",
 ): ContentTruncationConfig;
+export function defaultConfigFor(type: "json_remove"): JsonRemoveConfig;
+export function defaultConfigFor(type: "json_set"): JsonSetConfig;
+export function defaultConfigFor(type: "json_replace"): JsonReplaceConfig;
 export function defaultConfigFor(type: ComponentType): ComponentConfig;
 export function defaultConfigFor(type: ComponentType): ComponentConfig {
   switch (type) {
@@ -109,6 +156,23 @@ export function defaultConfigFor(type: ComponentType): ComponentConfig {
         target_selector: "",
         word_count: 100,
         fade_out: false,
+      };
+    case "json_remove":
+      return {
+        type: "json_remove",
+        target_path: "",
+      };
+    case "json_set":
+      return {
+        type: "json_set",
+        target_path: "",
+        value: null,
+      };
+    case "json_replace":
+      return {
+        type: "json_replace",
+        target_path: "",
+        value: null,
       };
   }
 }

@@ -52,7 +52,12 @@ pub struct EvaluationContext {
     pub request_cookies: HashMap<String, String>,
     pub device: DeviceType,
     /// `<meta name="X" content="Y">` tags from the response, keyed by `name`.
+    /// Empty for JSON responses.
     pub meta_tags: HashMap<String, String>,
+    /// Parsed response body for a JSON response. `serde_json::Value` is
+    /// `Send + Sync` (unlike `scraper::Html`), so the adapter stays shareable.
+    /// `None` for HTML responses or when the JSON body fails to parse.
+    pub response_json: Option<Value>,
 }
 
 /// `Send` carrier: everything in `EvaluationContext` except the `!Send`
@@ -63,16 +68,22 @@ pub struct EvaluationContextParts {
     pub request_path: String,
     pub request_cookies: HashMap<String, String>,
     pub device: DeviceType,
+    /// Raw response body (HTML or JSON, per `is_json`).
     pub html: String,
+    /// When true, `html` carries a JSON body: `into_context` parses it into
+    /// `response_json` and leaves `meta_tags` empty (no HTML parse).
+    pub is_json: bool,
 }
 
 impl EvaluationContextParts {
-    /// Build the `Send` carrier from request data. `html` is kept as a `String`.
+    /// Build the `Send` carrier from request data. `body` is kept as a `String`;
+    /// `is_json` selects how `into_context` interprets it.
     pub fn from_request(
         headers: &HeaderMap,
         path: &str,
         cookies: &HashMap<String, String>,
-        html: String,
+        body: String,
+        is_json: bool,
     ) -> Self {
         let device = headers
             .get(http::header::USER_AGENT)
@@ -85,14 +96,27 @@ impl EvaluationContextParts {
             request_path: path.to_string(),
             request_cookies: cookies.clone(),
             device,
-            html,
+            html: body,
+            is_json,
         }
     }
 
-    /// Reconstruct the full context, parsing HTML ONCE to extract meta tags. The
-    /// parsed `scraper::Html` is local to this call and never escapes (keeping
+    /// Reconstruct the full context. For JSON, parse the body into
+    /// `response_json` (meta tags empty). For HTML, parse it ONCE to extract meta
+    /// tags (the `scraper::Html` is local to this call and never escapes, keeping
     /// the returned `EvaluationContext` `Send + Sync`).
     pub fn into_context(self) -> EvaluationContext {
+        if self.is_json {
+            let response_json = serde_json::from_str(&self.html).ok();
+            return EvaluationContext {
+                request_headers: self.request_headers,
+                request_path: self.request_path,
+                request_cookies: self.request_cookies,
+                device: self.device,
+                meta_tags: HashMap::new(),
+                response_json,
+            };
+        }
         let meta_tags = extract_meta_tags(&self.html);
         EvaluationContext {
             request_headers: self.request_headers,
@@ -100,6 +124,7 @@ impl EvaluationContextParts {
             request_cookies: self.request_cookies,
             device: self.device,
             meta_tags,
+            response_json: None,
         }
     }
 

@@ -11,6 +11,7 @@ fn ctx_with_path(path: &str) -> rre_proxy::domain::context::EvaluationContext {
         path,
         &HashMap::new(),
         "<html></html>".to_string(),
+        false,
     )
     .into_context()
 }

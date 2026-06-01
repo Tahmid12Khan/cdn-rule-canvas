@@ -39,6 +39,18 @@ pub struct EvalContext {
     pub meta_tags: Option<HashMap<String, String>>,
     pub path: Option<String>,
     pub url: Option<String>,
+    /// Response JSON body for testing `json_expression` nodes (JSON features).
+    /// When present, the built context's `response_json` is populated so JSONPath
+    /// queries resolve. Takes precedence over `response_body` when both are set.
+    #[serde(default)]
+    pub response_json: Option<serde_json::Value>,
+    /// Raw response body string. Interpreted per `content_kind`: when
+    /// `content_kind == "json"`, it is parsed into `response_json`.
+    #[serde(default)]
+    pub response_body: Option<String>,
+    /// `"html"` (default) or `"json"`. Selects how `response_body` is interpreted.
+    #[serde(default)]
+    pub content_kind: Option<String>,
 }
 
 /// The wire `device_type` field on the request (matches frontend enum).
@@ -90,8 +102,9 @@ pub async fn eval_handler(
 
     // Build EvaluationContext directly from the request body — no upstream fetch.
     let device = determine_device(&req.context);
-    let meta_tags = req.context.meta_tags.unwrap_or_default();
-    let path = req.context.path.unwrap_or_default();
+    let meta_tags = req.context.meta_tags.clone().unwrap_or_default();
+    let path = req.context.path.clone().unwrap_or_default();
+    let response_json = determine_response_json(&req.context);
 
     let ctx = EvaluationContext {
         request_headers: HeaderMap::new(),
@@ -99,6 +112,7 @@ pub async fn eval_handler(
         request_cookies: HashMap::new(),
         device,
         meta_tags,
+        response_json,
     };
 
     // Translate the canvas to JDM DecisionContent (same path as production eval).
@@ -151,6 +165,27 @@ fn determine_device(ctx: &EvalContext) -> DeviceType {
         return DeviceType::from_user_agent(ua);
     }
     DeviceType::Desktop
+}
+
+/// Resolve the response JSON body for `json_expression` tests. Precedence:
+/// explicit `response_json` value > `response_body` parsed as JSON when
+/// `content_kind == "json"`. Returns `None` for HTML / unparseable input
+/// (json_expression then evaluates to No, mirroring an HTML response).
+fn determine_response_json(ctx: &EvalContext) -> Option<serde_json::Value> {
+    if let Some(v) = &ctx.response_json {
+        return Some(v.clone());
+    }
+    let is_json = ctx
+        .content_kind
+        .as_deref()
+        .map(|k| k.eq_ignore_ascii_case("json"))
+        .unwrap_or(false);
+    if is_json {
+        if let Some(body) = &ctx.response_body {
+            return serde_json::from_str(body).ok();
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

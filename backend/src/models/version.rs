@@ -24,6 +24,9 @@ pub struct Version {
     /// The rule graph, stored as JSONB. Typed into a `RuleGraph` on read in the
     /// service layer.
     pub rule_graph: serde_json::Value,
+    /// Version-level applicability gate, stored as JSONB. Typed into an
+    /// `Applicability` on read in the service layer (default `{}`).
+    pub applicability: serde_json::Value,
     /// Author of the version.
     pub created_by: String,
     /// Last user to update the version.

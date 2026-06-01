@@ -19,8 +19,10 @@ function StartNodeImpl({ id, data, selected }: NodeProps<StartNodeData>) {
 
   return (
     <div
+      // `relative z-10` for z-index parity so the start marker is never
+      // occluded by an overlapping floated decision diamond (req 4).
       className={[
-        "min-w-[80px] rounded-full border-2 bg-node-start px-4 py-1.5 text-center shadow-md transition-opacity",
+        "relative z-10 min-w-[80px] rounded-full border-2 bg-node-start px-4 py-1.5 text-center shadow-md transition-opacity",
         // Teal border so the black entry node stays visible against the dark
         // canvas (black fill blends otherwise); also reads as the entry point.
         hasError ? "border-danger ring-2 ring-danger" : "border-brand-500",

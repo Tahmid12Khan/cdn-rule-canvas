@@ -79,3 +79,44 @@ fn edges_carry_branch_source_handles() {
         .unwrap();
     assert_eq!(input_edge.target_id.as_ref(), "n_meta__proc");
 }
+
+/// §3.8: `json_expression` is a generic open-config processor — the translator
+/// emits a CustomNode whose `kind` == the registry key, with no graph.rs change.
+#[test]
+fn json_expression_translates_to_custom_node() {
+    let canvas_json = r#"{
+      "root_node_id": "n_json",
+      "nodes": [
+        { "kind": "decision", "id": "n_json",
+          "processor": { "type": "json_expression", "json_path": "$.type", "operator": "equals", "value": "premium" },
+          "position": { "x": 0.0, "y": 0.0 } },
+        { "kind": "outcome", "id": "n_out", "outcome_id": "22222222-2222-2222-2222-222222222222",
+          "position": { "x": 200.0, "y": 0.0 } }
+      ],
+      "edges": [
+        { "id": "e1", "source_node_id": "n_json", "target_node_id": "n_out", "branch": "yes" }
+      ]
+    }"#;
+    let canvas: CanvasGraph = serde_json::from_str(canvas_json).unwrap();
+    let dc = to_decision_content(&canvas);
+
+    // Find the CustomNode and assert its kind + config flow through verbatim.
+    let proc = dc
+        .nodes
+        .iter()
+        .find(|n| n.id.as_ref() == "n_json__proc")
+        .expect("json_expression proc node");
+    match &proc.kind {
+        zen_engine::model::DecisionNodeKind::CustomNode { content } => {
+            assert_eq!(content.kind.as_ref(), "json_expression");
+            assert_eq!(content.config.get("json_path").unwrap(), "$.type");
+            assert_eq!(content.config.get("operator").unwrap(), "equals");
+            assert_eq!(content.config.get("value").unwrap(), "premium");
+        }
+        other => panic!("expected CustomNode, got {other:?}"),
+    }
+
+    // Round-trips through serde like any other node.
+    let as_value = serde_json::to_value(&dc).unwrap();
+    let _back: DecisionContent = serde_json::from_value(as_value).unwrap();
+}

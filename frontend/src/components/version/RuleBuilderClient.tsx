@@ -16,6 +16,7 @@ import { ReadOnlyBanner } from "@/components/canvas/ReadOnlyBanner";
 import { SaveBar } from "@/components/canvas/SaveBar";
 import { TestPanel } from "@/components/canvas/TestPanel";
 import { UnsavedChangesGuard } from "@/components/canvas/UnsavedChangesGuard";
+import { ApplicabilityForm } from "@/components/version/ApplicabilityForm";
 import { DescriptionEditable } from "@/components/version/DescriptionEditable";
 import { LastUpdatedCard } from "@/components/version/LastUpdatedCard";
 import { OutcomeListSection } from "@/components/version/OutcomeListSection";
@@ -90,6 +91,10 @@ export function RuleBuilderClient({
   const canMakeLive = version.status !== "live";
   const [makeLiveOpen, setMakeLiveOpen] = useState(false);
 
+  // Narrow the decorative route param to the feature content kind used by the
+  // palette filter, TestPanel inputs, applicability gate and component forms.
+  const featureType: "html" | "json" = type === "json" ? "json" : "html";
+
   // Title resolver for outcome nodes (denormalized display cache).
   const outcomeTitleById = useMemo(() => {
     const map = new Map(outcomes.map((o) => [o.id, o.title]));
@@ -130,7 +135,6 @@ export function RuleBuilderClient({
         open={makeLiveOpen}
         onOpenChange={setMakeLiveOpen}
       />
-
 
       <header className="space-y-3">
         <VersionHeader
@@ -209,26 +213,49 @@ export function RuleBuilderClient({
             <ReadOnlyBanner variant="readonly" />
           ))}
 
+        <ApplicabilityForm
+          fid={fid}
+          vnum={vnum}
+          applicability={version.applicability}
+          featureType={featureType}
+          editable={isDraft}
+        />
+
         <CanvasSlider selected={selected} onSelect={setSelected} />
 
         {isEditing && selectedCanvasEmpty && (
           <p className="rounded-lg border border-dashed border-brand-400 bg-brand-50 px-4 py-2 text-sm text-accent-onMuted">
-            Step 4 of 5: Drag a Meta Tags or Device Type chip (and an Outcome)
+            Step 4 of 5:{" "}
+            {featureType === "json"
+              ? "Drag a JSON Expression chip (and an Outcome)"
+              : "Drag a Meta Tags or Device Type chip (and an Outcome)"}{" "}
             from the palette onto the canvas to build a rule.
           </p>
         )}
 
         {isEditing && (
-          <NodePalette outcomes={paletteOutcomes} draggable={isEditing} />
+          <NodePalette
+            outcomes={paletteOutcomes}
+            draggable={isEditing}
+            featureType={featureType}
+          />
         )}
 
         <RuleBuilderCanvas canvasKey={selected} editable={isEditing} />
 
         <NodeConfigDrawer canvasKey={selected} />
 
-        <TestPanel outcomeTitleById={outcomeTitleById} />
+        <TestPanel
+          outcomeTitleById={outcomeTitleById}
+          featureType={featureType}
+        />
 
-        <SaveBar fid={fid} vnum={vnum} featureBase={featureBase} />
+        <SaveBar
+          fid={fid}
+          vnum={vnum}
+          featureBase={featureBase}
+          applicability={version.applicability}
+        />
       </section>
 
       <OutcomeListSection

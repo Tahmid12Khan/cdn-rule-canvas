@@ -66,7 +66,9 @@ describe("TestPanel", () => {
       ),
     );
 
-    render(<TestPanel outcomeTitleById={() => "Paywall"} />, { wrapper });
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
 
     await user.click(screen.getByRole("button", { name: /run test/i }));
 
@@ -89,7 +91,9 @@ describe("TestPanel", () => {
       http.post(`${PROXY_BASE}/__rre/eval`, () => HttpResponse.error()),
     );
 
-    render(<TestPanel outcomeTitleById={() => "Paywall"} />, { wrapper });
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
     await user.click(screen.getByRole("button", { name: /run test/i }));
 
     await waitFor(() =>

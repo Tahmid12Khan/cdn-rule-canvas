@@ -15,6 +15,7 @@ use crate::{
     repositories::{component_repository, outcome_repository, version_repository as repo},
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
+        applicability::Applicability,
         node_type::NodeManifest,
         pagination::{Page, PageParams},
         rule_graph::{Node, RuleGraph},
@@ -31,10 +32,17 @@ const SHOW_CONTENT_TITLE: &str = "Show Content";
 /// Default actor when no auth context is wired (MVP).
 const SYSTEM_ACTOR: &str = "system";
 
+/// Parse the stored applicability JSONB, defaulting to `{}` on a null/missing or
+/// otherwise un-parseable value (forward-compatible: never fail a read on it).
+fn parse_applicability(value: serde_json::Value) -> Applicability {
+    serde_json::from_value(value).unwrap_or_default()
+}
+
 /// Map a [`Version`] model to its full DTO, parsing the stored rule_graph JSON.
 fn to_read(v: Version) -> AppResult<VersionRead> {
     let rule_graph: RuleGraph = serde_json::from_value(v.rule_graph)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("corrupt rule_graph: {e}")))?;
+    let applicability = parse_applicability(v.applicability);
     Ok(VersionRead {
         id: v.id,
         feature_id: v.feature_id,
@@ -42,6 +50,7 @@ fn to_read(v: Version) -> AppResult<VersionRead> {
         description: v.description,
         status: v.status,
         rule_graph,
+        applicability,
         created_by: v.created_by,
         last_updated_by: v.last_updated_by,
         last_updated_at: v.last_updated_at,
@@ -162,6 +171,21 @@ pub async fn create_version(
             .collect();
     rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
 
+    // Applicability: caller-supplied (validated) when present, else carry forward
+    // the source version's, else the default `{}`.
+    let applicability = match body.applicability {
+        Some(a) => {
+            validate_applicability(&a)?;
+            a
+        }
+        None => match &source {
+            Some(src) => parse_applicability(src.applicability.clone()),
+            None => Applicability::default(),
+        },
+    };
+    let applicability_json =
+        serde_json::to_value(&applicability).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+
     let rule_graph_json =
         serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     let version = repo::update_fields(
@@ -169,6 +193,7 @@ pub async fn create_version(
         version.id,
         None,
         Some(&rule_graph_json),
+        Some(&applicability_json),
         SYSTEM_ACTOR,
         version.last_updated_at,
     )
@@ -176,6 +201,17 @@ pub async fn create_version(
 
     tx.commit().await?;
     to_read(version)
+}
+
+/// Validate version-level applicability (light: length-capped, non-blank
+/// selectors). Returns a 422 `VALIDATION_ERROR` on overflow / blank input.
+fn validate_applicability(applicability: &Applicability) -> AppResult<()> {
+    let details = applicability.validation_details();
+    if details.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::validation(details))
+    }
 }
 
 /// Deep-copy every outcome (and its nested components) from `source_version_id`
@@ -339,12 +375,32 @@ pub async fn update(
         None => None,
     };
 
+    // Applicability is editable on DRAFT only (same lock as rule_graph); validate
+    // the selectors when present.
+    let applicability_json = match &body.applicability {
+        Some(applicability) => {
+            if version.status != VersionStatus::Draft {
+                return Err(AppError::VersionEditLocked(format!(
+                    "Version {version_number} is {:?} and cannot be edited",
+                    version.status
+                )));
+            }
+            validate_applicability(applicability)?;
+            Some(
+                serde_json::to_value(applicability)
+                    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?,
+            )
+        }
+        None => None,
+    };
+
     let mut tx = pool.begin().await?;
     let updated = repo::update_fields(
         &mut *tx,
         version.id,
         body.description.as_deref(),
         rule_graph_json.as_ref(),
+        applicability_json.as_ref(),
         SYSTEM_ACTOR,
         Utc::now(),
     )
@@ -369,6 +425,7 @@ pub async fn update_rule_graph(
         VersionUpdate {
             description: None,
             rule_graph: Some(rule_graph),
+            applicability: None,
         },
         manifest,
     )
@@ -572,6 +629,7 @@ pub async fn active_version(
 
     let rule_graph: RuleGraph = serde_json::from_value(version.rule_graph)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("corrupt rule_graph: {e}")))?;
+    let applicability = parse_applicability(version.applicability);
 
     let outcomes = repo::list_outcomes(pool, version.id).await?;
     let outcome_ids: Vec<Uuid> = outcomes.iter().map(|o| o.id).collect();
@@ -586,6 +644,7 @@ pub async fn active_version(
     Ok(ActiveVersionRead {
         version_number: version.version_number,
         rule_graph,
+        applicability,
         outcomes: active_outcomes,
     })
 }
@@ -691,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn to_read_parses_empty_rule_graph() {
+    fn to_read_parses_empty_rule_graph_and_applicability() {
         let v = Version {
             id: Uuid::new_v4(),
             feature_id: "dn-article".to_string(),
@@ -699,6 +758,7 @@ mod tests {
             description: Some("first".to_string()),
             status: VersionStatus::Draft,
             rule_graph: serde_json::to_value(RuleGraph::default()).unwrap(),
+            applicability: serde_json::json!({ "html_selector": "#paywall" }),
             created_by: "system".to_string(),
             last_updated_by: "system".to_string(),
             last_updated_at: Utc::now(),
@@ -707,6 +767,32 @@ mod tests {
         let read = to_read(v).expect("parse");
         assert_eq!(read.version_number, 1);
         assert!(read.rule_graph.anonymous.nodes.is_empty());
+        // Applicability round-trips out of the stored JSONB.
+        assert_eq!(
+            read.applicability.html_selector.as_deref(),
+            Some("#paywall")
+        );
+        assert!(read.applicability.json_selector.is_none());
+    }
+
+    #[test]
+    fn to_read_defaults_applicability_on_null() {
+        // A null/missing applicability JSONB parses to the default `{}`.
+        let v = Version {
+            id: Uuid::new_v4(),
+            feature_id: "dn-article".to_string(),
+            version_number: 1,
+            description: None,
+            status: VersionStatus::Draft,
+            rule_graph: serde_json::to_value(RuleGraph::default()).unwrap(),
+            applicability: serde_json::Value::Null,
+            created_by: "system".to_string(),
+            last_updated_by: "system".to_string(),
+            last_updated_at: Utc::now(),
+            created_at: Utc::now(),
+        };
+        let read = to_read(v).expect("parse");
+        assert_eq!(read.applicability, Applicability::default());
     }
 
     #[test]
@@ -718,6 +804,7 @@ mod tests {
             description: None,
             status: VersionStatus::Draft,
             rule_graph: serde_json::json!({"not": "a graph"}),
+            applicability: serde_json::json!({}),
             created_by: "system".to_string(),
             last_updated_by: "system".to_string(),
             last_updated_at: Utc::now(),
@@ -736,6 +823,7 @@ mod tests {
             description: None,
             status: VersionStatus::Live,
             rule_graph: serde_json::json!({}),
+            applicability: serde_json::json!({}),
             created_by: "system".to_string(),
             last_updated_by: "alice".to_string(),
             last_updated_at: Utc::now(),
@@ -745,5 +833,16 @@ mod tests {
         assert_eq!(summary.version_number, 3);
         assert_eq!(summary.status, VersionStatus::Live);
         assert_eq!(summary.last_updated_by, "alice");
+    }
+
+    #[test]
+    fn validate_applicability_rejects_overlong_selector() {
+        let bad = Applicability {
+            html_selector: Some("a".repeat(501)),
+            json_selector: None,
+        };
+        let err = validate_applicability(&bad).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+        assert!(validate_applicability(&Applicability::default()).is_ok());
     }
 }

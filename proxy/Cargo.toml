@@ -31,6 +31,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # serde / config
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# read-only JSONPath query (applicability + json_expression). Mutation uses a
+# hand-rolled simple-path walk in applier/json_path.rs (no extra crate).
+serde_json_path = "0.7"
 serde_yaml = "0.9"
 # layered JSON config (config/default.json + {APP_ENV}.json + env override).
 config = { version = "0.14", default-features = false, features = ["json"] }

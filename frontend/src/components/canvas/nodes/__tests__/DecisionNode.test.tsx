@@ -39,9 +39,9 @@ const articleProcessor: DecisionNodeData = {
 };
 
 describe("DecisionNode (manifest-driven)", () => {
-  it("shows the manifest label as the title (article_url -> 'Article URL')", async () => {
+  it("shows the manifest label as the title (article_url -> 'URL')", async () => {
     render(<DecisionNode {...nodeProps(articleProcessor)} />, { wrapper });
-    const titles = await screen.findAllByText("Article URL");
+    const titles = await screen.findAllByText("URL");
     expect(titles.length).toBeGreaterThan(0);
   });
 
@@ -51,12 +51,42 @@ describe("DecisionNode (manifest-driven)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("decision-title")).toHaveAttribute(
         "title",
-        "Article URL",
+        "URL",
       ),
     );
     const title = screen.getByTestId("decision-title");
     expect(title).toHaveClass("truncate");
     expect(title).toHaveClass("max-w-[120px]");
+  });
+
+  it("renders the title pill IN FRONT of the diamond (relative z-20)", async () => {
+    render(<DecisionNode {...nodeProps(articleProcessor)} />, { wrapper });
+    const title = await screen.findByTestId("decision-title");
+    // The load-bearing layering: the title must be positioned + above the
+    // diamond body so a bigger diamond can't occlude the name (req 4).
+    expect(title).toHaveClass("relative");
+    expect(title).toHaveClass("z-20");
+  });
+
+  it("shows each input field's value INSIDE the diamond, one per line", async () => {
+    render(<DecisionNode {...nodeProps(articleProcessor)} />, { wrapper });
+    // Wait for the manifest to load (the inside values come from spec.fields);
+    // the container exists immediately but is empty until the spec resolves.
+    await waitFor(() =>
+      expect(screen.getByTestId("decision-values").querySelectorAll("span"))
+        .toHaveLength(2),
+    );
+    const values = screen.getByTestId("decision-values");
+    // article_url has operator "contains" + value "/news/" — both rendered as
+    // their own centered, truncated <span> lines inside the diamond body.
+    const lines = values.querySelectorAll("span");
+    expect(lines.length).toBe(2);
+    expect(values).toHaveTextContent("contains");
+    expect(values).toHaveTextContent("/news/");
+    // Centered column.
+    expect(values).toHaveClass("items-center");
+    expect(values).toHaveClass("text-center");
+    lines.forEach((line) => expect(line).toHaveClass("truncate"));
   });
 
   it("renders a tooltip on hover with fields, summary, and branches", async () => {
@@ -72,7 +102,7 @@ describe("DecisionNode (manifest-driven)", () => {
     expect(tooltip).toHaveTextContent("Value:");
     expect(tooltip).toHaveTextContent("/news/");
     // input summary
-    expect(tooltip).toHaveTextContent("Matches against the request article URL");
+    expect(tooltip).toHaveTextContent("Matches against the request URL");
     // output branches
     expect(tooltip).toHaveTextContent("Yes · No");
   });

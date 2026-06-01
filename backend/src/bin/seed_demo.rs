@@ -317,3 +317,35 @@ async fn upsert_component(
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rre_backend::schemas::node_type::LoadedManifest;
+    use rre_backend::schemas::rule_graph::RuleGraph;
+    use rre_backend::services::rule_graph_service;
+    use std::collections::HashSet;
+
+    /// The seeded anonymous canvas parses and passes ALL validation rules,
+    /// including `outcome_reachable`: `root_node_id` is set and every reachable
+    /// node reaches an outcome. Guards against a seed that the API would reject.
+    #[test]
+    fn seed_graph_validates() {
+        let graph: RuleGraph =
+            serde_json::from_value(anonymous_rule_graph()).expect("seed graph parses");
+
+        let valid_outcome_ids: HashSet<Uuid> = HashSet::from([O_REGWALL, O_PAYWALL, O_CONTENT]);
+        let manifest = LoadedManifest::load("config/node_types.json")
+            .expect("load manifest")
+            .typed;
+
+        rule_graph_service::validate(&graph, &valid_outcome_ids, &manifest)
+            .expect("seed graph must validate");
+
+        assert_eq!(
+            graph.anonymous.root_node_id.as_deref(),
+            Some("n_meta"),
+            "seed must anchor the canvas root"
+        );
+    }
+}

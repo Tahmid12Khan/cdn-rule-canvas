@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{models::enums::Placement, schemas::rule_graph::RuleGraph};
+use crate::{
+    models::enums::Placement,
+    schemas::{applicability::Applicability, rule_graph::RuleGraph},
+};
 
 /// The active (LIVE or STAGING) version for a feature, flattened for the proxy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -17,6 +20,9 @@ pub struct ActiveVersionRead {
     pub version_number: i32,
     /// The typed rule graph.
     pub rule_graph: RuleGraph,
+    /// Version-level applicability gate (default `{}`). The proxy gates whether
+    /// the feature's outcome components apply to a given response on this.
+    pub applicability: Applicability,
     /// Outcomes ordered by `order_index ASC`.
     pub outcomes: Vec<ActiveOutcome>,
 }
@@ -43,7 +49,8 @@ pub struct ActiveComponent {
     pub id: Uuid,
     /// Component slug.
     pub slug: String,
-    /// Component type discriminator (`html_injection` | `content_truncation`).
+    /// Component type discriminator (`html_injection` | `content_truncation` |
+    /// `json_remove` | `json_set` | `json_replace`). The proxy dispatches on it.
     pub r#type: String,
     /// Raw component config JSON.
     pub config: serde_json::Value,

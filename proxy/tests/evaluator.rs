@@ -45,7 +45,13 @@ fn parts(html: &str, ua: Option<&str>) -> EvaluationContextParts {
     if let Some(ua) = ua {
         headers.insert(http::header::USER_AGENT, ua.parse().unwrap());
     }
-    EvaluationContextParts::from_request(&headers, "/article/1", &HashMap::new(), html.to_string())
+    EvaluationContextParts::from_request(
+        &headers,
+        "/article/1",
+        &HashMap::new(),
+        html.to_string(),
+        false,
+    )
 }
 
 #[tokio::test]

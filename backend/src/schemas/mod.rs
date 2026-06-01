@@ -7,6 +7,7 @@ pub mod pagination;
 
 // Domain-owned leaf modules (filled by domain agents):
 pub mod active_version;
+pub mod applicability;
 pub mod component;
 pub mod feature;
 pub mod node_type;

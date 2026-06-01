@@ -56,3 +56,13 @@ export const RuleGraph = z.object({
   customer: CanvasGraph,
 });
 export type RuleGraph = z.infer<typeof RuleGraph>;
+
+// Version-level applicability gate (spec §2.2 / req 8). Both nullable: empty /
+// null = "always apply when the response content-type matches the feature".
+// `html_selector` = CSS selector that must match ≥1 element; `json_selector` =
+// JSONPath that must match ≥1 node. Mirrors the backend `Applicability` DTO.
+export const Applicability = z.object({
+  html_selector: z.string().nullish(),
+  json_selector: z.string().nullish(),
+});
+export type Applicability = z.infer<typeof Applicability>;

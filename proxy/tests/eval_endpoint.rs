@@ -257,6 +257,103 @@ async fn missing_canvas_returns_400() {
     assert_eq!(resp.status(), 422); // axum JSON extractor returns 422 for missing fields
 }
 
+/// A canvas with a single `json_expression` decision: type==premium -> n_lock,
+/// else n_show. Proves §3.7 (JSON test input) + §3.8 (registry dispatch).
+fn json_canvas() -> Value {
+    json!({
+        "root_node_id": "n_json",
+        "nodes": [
+            { "kind": "decision", "id": "n_json",
+              "processor": { "type": "json_expression", "json_path": "$.type", "operator": "equals", "value": "premium" },
+              "position": { "x": 0.0, "y": 0.0 } },
+            { "kind": "outcome", "id": "n_lock",
+              "outcome_id": "22222222-2222-2222-2222-222222222222", "position": { "x": 200.0, "y": 0.0 } },
+            { "kind": "outcome", "id": "n_show",
+              "outcome_id": "33333333-3333-3333-3333-333333333333", "position": { "x": 200.0, "y": 200.0 } }
+        ],
+        "edges": [
+            { "id": "e1", "source_node_id": "n_json", "target_node_id": "n_lock", "branch": "yes" },
+            { "id": "e2", "source_node_id": "n_json", "target_node_id": "n_show", "branch": "no"  }
+        ]
+    })
+}
+
+/// §3.7: `response_json` populates the context so json_expression evaluates.
+#[tokio::test]
+async fn json_expression_via_response_json_field() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": json_canvas(),
+        "context": { "response_json": { "type": "premium" } }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+    assert_eq!(
+        v["matched_outcome_id"].as_str(),
+        Some("22222222-2222-2222-2222-222222222222"),
+        "premium -> lock outcome"
+    );
+    assert_eq!(v["matched_node_id"].as_str(), Some("n_lock"));
+}
+
+/// §3.7: `response_body` + `content_kind:"json"` parses into response_json.
+#[tokio::test]
+async fn json_expression_via_response_body_and_content_kind() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": json_canvas(),
+        "context": { "response_body": "{\"type\":\"free\"}", "content_kind": "json" }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+    assert_eq!(
+        v["matched_outcome_id"].as_str(),
+        Some("33333333-3333-3333-3333-333333333333"),
+        "free -> show outcome"
+    );
+}
+
+/// Without any JSON body, json_expression sees no response_json -> No -> n_show.
+#[tokio::test]
+async fn json_expression_no_body_takes_no_branch() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({ "canvas": json_canvas(), "context": {} });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+    assert_eq!(
+        v["matched_node_id"].as_str(),
+        Some("n_show"),
+        "no body -> No branch -> show outcome"
+    );
+}
+
 /// CORS preflight on `/__rre/eval` should respond 200 with the correct headers.
 #[tokio::test]
 async fn cors_preflight_returns_allow_origin() {

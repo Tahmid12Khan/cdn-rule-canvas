@@ -14,7 +14,7 @@ use crate::models::{
 };
 
 const VERSION_COLUMNS: &str = "id, feature_id, version_number, description, status, \
-     rule_graph, created_by, last_updated_by, last_updated_at, created_at";
+     rule_graph, applicability, created_by, last_updated_by, last_updated_at, created_at";
 
 /// Whether a feature with the given slug exists.
 pub async fn feature_exists<'e, E>(executor: E, feature_id: &str) -> Result<bool, sqlx::Error>
@@ -153,13 +153,15 @@ where
         .await
 }
 
-/// Update a version's description and/or rule_graph. `None` fields are left
-/// untouched (COALESCE keeps the existing value). Bumps `last_updated_*`.
+/// Update a version's description, rule_graph and/or applicability. `None`
+/// fields are left untouched (COALESCE keeps the existing value). Bumps
+/// `last_updated_*`.
 pub async fn update_fields<'e, E>(
     executor: E,
     id: Uuid,
     description: Option<&str>,
     rule_graph: Option<&serde_json::Value>,
+    applicability: Option<&serde_json::Value>,
     last_updated_by: &str,
     now: DateTime<Utc>,
 ) -> Result<Version, sqlx::Error>
@@ -170,8 +172,9 @@ where
         "UPDATE rre.versions SET \
             description = COALESCE($2, description), \
             rule_graph = COALESCE($3, rule_graph), \
-            last_updated_by = $4, \
-            last_updated_at = $5 \
+            applicability = COALESCE($4, applicability), \
+            last_updated_by = $5, \
+            last_updated_at = $6 \
          WHERE id = $1 \
          RETURNING {VERSION_COLUMNS}"
     );
@@ -179,6 +182,7 @@ where
         .bind(id)
         .bind(description)
         .bind(rule_graph)
+        .bind(applicability)
         .bind(last_updated_by)
         .bind(now)
         .fetch_one(executor)

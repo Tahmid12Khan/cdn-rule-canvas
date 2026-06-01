@@ -4,9 +4,27 @@
 // disabled chips come from categories flagged `coming_soon` (and from categories
 // with no node types yet). Outcome chips remain dynamic (one per version
 // outcome). Adding a node type needs ZERO frontend change.
-import type { NodeCategory, NodeManifest, NodeTypeSpec } from "@/lib/api/nodeTypes";
+import type {
+  NodeAppliesTo,
+  NodeCategory,
+  NodeManifest,
+  NodeTypeSpec,
+} from "@/lib/api/nodeTypes";
 import { defaultProcessor } from "@/lib/canvas/manifest";
 import type { ProcessorConfig } from "@/lib/canvas/types";
+
+// The feature's content kind. A node spec's `applies_to` gates palette
+// availability: "all"/undefined shows everywhere; "html"/"json" only for that
+// feature type. (spec §1.2 / req 7)
+export type FeatureType = "html" | "json";
+
+// True when a node spec should appear in the palette for the given feature type.
+function specAppliesTo(
+  appliesTo: NodeAppliesTo | undefined,
+  featureType: FeatureType,
+): boolean {
+  return appliesTo === undefined || appliesTo === "all" || appliesTo === featureType;
+}
 
 // What a chip drops onto the canvas. Decision chips carry a default processor
 // config (intentionally requiring user edit before save); outcome chips carry
@@ -65,25 +83,39 @@ function placeholderChip(category: NodeCategory): NodeChipDef {
 export function buildPalette(
   manifest: NodeManifest | undefined,
   outcomes: OutcomeOption[],
+  featureType: FeatureType = "html",
 ): PaletteCategory[] {
   if (!manifest) return [];
 
   const specsByCategory = new Map<string, NodeTypeSpec[]>();
   for (const spec of manifest.node_types) {
+    // Filter by feature type: a json_expression node only shows for JSON
+    // features, meta_tags only for HTML, request-based nodes ("all") always.
+    if (!specAppliesTo(spec.applies_to, featureType)) continue;
     const list = specsByCategory.get(spec.category) ?? [];
     list.push(spec);
     specsByCategory.set(spec.category, list);
   }
 
-  const categories: PaletteCategory[] = manifest.categories.map((cat) => {
-    const comingSoon = cat.coming_soon === true;
-    const specs = specsByCategory.get(cat.id) ?? [];
-    const chips =
-      specs.length > 0
-        ? specs.map((s) => chipForSpec(s, comingSoon))
-        : [placeholderChip(cat)];
-    return { id: cat.id, label: cat.label, chips };
-  });
+  // A category that ends up empty after filtering (all its specs were gated out)
+  // is dropped entirely so we don't render a misleading "Coming soon"
+  // placeholder for it. A category that NEVER had specs still renders its
+  // placeholder (mirrors the manifest's full category list).
+  const hadSpecs = new Set(manifest.node_types.map((s) => s.category));
+
+  const categories: PaletteCategory[] = manifest.categories
+    .filter(
+      (cat) => !hadSpecs.has(cat.id) || specsByCategory.has(cat.id),
+    )
+    .map((cat) => {
+      const comingSoon = cat.coming_soon === true;
+      const specs = specsByCategory.get(cat.id) ?? [];
+      const chips =
+        specs.length > 0
+          ? specs.map((s) => chipForSpec(s, comingSoon))
+          : [placeholderChip(cat)];
+      return { id: cat.id, label: cat.label, chips };
+    });
 
   const outcomesCategory: PaletteCategory = {
     id: "outcomes",

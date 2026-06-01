@@ -9,7 +9,10 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::{models::enums::VersionStatus, schemas::rule_graph::RuleGraph};
+use crate::{
+    models::enums::VersionStatus,
+    schemas::{applicability::Applicability, rule_graph::RuleGraph},
+};
 
 /// Request body for `POST /features/{fid}/versions`.
 #[derive(Debug, Clone, Default, Deserialize, Validate, ToSchema)]
@@ -24,6 +27,11 @@ pub struct VersionCreate {
     /// When absent, the source version's rule_graph is cloned (and remapped).
     #[serde(default)]
     pub rule_graph: Option<RuleGraph>,
+    /// Optional applicability gate. When present it is stored on the new version;
+    /// when absent the source version's applicability is carried forward, else
+    /// the default `{}`.
+    #[serde(default)]
+    pub applicability: Option<Applicability>,
 }
 
 /// Request body for `PATCH /features/{fid}/versions/{vnum}`.
@@ -36,6 +44,10 @@ pub struct VersionUpdate {
     /// Updated rule graph (validated by `rule_graph_service` when present).
     #[serde(default)]
     pub rule_graph: Option<RuleGraph>,
+    /// Updated applicability gate. Editable on DRAFT only (same lock as
+    /// `rule_graph`); validated (length-capped selectors) when present.
+    #[serde(default)]
+    pub applicability: Option<Applicability>,
 }
 
 /// Full version representation (`GET`/`PATCH`/`POST` responses).
@@ -53,6 +65,8 @@ pub struct VersionRead {
     pub status: VersionStatus,
     /// Typed rule graph.
     pub rule_graph: RuleGraph,
+    /// Version-level applicability gate (default `{}`).
+    pub applicability: Applicability,
     /// Author.
     pub created_by: String,
     /// Last updater.

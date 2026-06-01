@@ -21,6 +21,10 @@ import clsx from "clsx";
 
 import { ContentTruncationForm } from "@/components/component-config/ContentTruncationForm";
 import { HtmlInjectionForm } from "@/components/component-config/HtmlInjectionForm";
+import {
+  JsonMutationForm,
+  type JsonMutationConfig,
+} from "@/components/component-config/JsonMutationForm";
 import { Placement } from "@/lib/api/enums";
 import {
   ComponentConfig,
@@ -35,9 +39,16 @@ const PLACEMENT_OPTIONS: { value: Placement; label: string }[] = [
   { value: "popup", label: "Pop-Up" },
 ];
 
-const TYPE_TABS: { value: ComponentType; label: string }[] = [
+// Tab set per feature content kind (spec §4): HTML features mutate the HTML
+// page; JSON features mutate the JSON body.
+const HTML_TYPE_TABS: { value: ComponentType; label: string }[] = [
   { value: "html_injection", label: "HTML Injection" },
   { value: "content_truncation", label: "Content Truncation" },
+];
+const JSON_TYPE_TABS: { value: ComponentType; label: string }[] = [
+  { value: "json_remove", label: "JSON Remove" },
+  { value: "json_set", label: "JSON Set" },
+  { value: "json_replace", label: "JSON Replace" },
 ];
 
 const FORM_ID = "component-config-form";
@@ -58,6 +69,8 @@ interface ComponentConfigModalProps {
   initialType?: ComponentType;
   initialPlacement?: Placement;
   initialConfig?: ComponentConfig;
+  // Feature content kind — picks the tab set (HTML vs JSON component types).
+  featureType?: "html" | "json";
   onSubmit: (payload: ComponentConfigSubmit) => void;
   submitting?: boolean;
 }
@@ -67,13 +80,17 @@ export function ComponentConfigModal({
   onOpenChange,
   mode = "create",
   initialSlug = "",
-  initialType = "html_injection",
+  initialType,
   initialPlacement = "inline",
   initialConfig,
+  featureType = "html",
   onSubmit,
   submitting = false,
 }: ComponentConfigModalProps) {
-  const [type, setType] = useState<ComponentType>(initialType);
+  const typeTabs = featureType === "json" ? JSON_TYPE_TABS : HTML_TYPE_TABS;
+  const [type, setType] = useState<ComponentType>(
+    initialType ?? typeTabs[0].value,
+  );
   const [slug, setSlug] = useState(initialSlug);
   const [placement, setPlacement] = useState<Placement>(initialPlacement);
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -94,6 +111,20 @@ export function ComponentConfigModal({
         : defaultConfigFor("content_truncation"),
     [initialConfig],
   );
+  // JSON mutation initial config: seed from initialConfig when its type matches
+  // the currently-selected json_* tab; otherwise a default for that tab.
+  const jsonInitial = useMemo<JsonMutationConfig>(() => {
+    const jsonType =
+      type === "json_remove" || type === "json_set" || type === "json_replace"
+        ? type
+        : "json_set";
+    if (initialConfig && initialConfig.type === jsonType) {
+      return initialConfig;
+    }
+    if (jsonType === "json_remove") return defaultConfigFor("json_remove");
+    if (jsonType === "json_replace") return defaultConfigFor("json_replace");
+    return defaultConfigFor("json_set");
+  }, [initialConfig, type]);
 
   function handleValidConfig(config: ComponentConfig) {
     const parsedSlug = ComponentCreate.shape.slug.safeParse(slug);
@@ -150,7 +181,7 @@ export function ComponentConfigModal({
               aria-label="Component type"
               className="mb-5 inline-flex rounded-lg border border-border bg-bg p-1"
             >
-              {TYPE_TABS.map((t) => {
+              {typeTabs.map((t) => {
                 const selected = type === t.value;
                 const locked = mode === "edit" && t.value !== type;
                 return (
@@ -245,11 +276,19 @@ export function ComponentConfigModal({
                 initial={htmlInitial}
                 onValidSubmit={handleValidConfig}
               />
-            ) : (
+            ) : type === "content_truncation" ? (
               <ContentTruncationForm
                 key="content_truncation"
                 formId={FORM_ID}
                 initial={truncationInitial}
+                onValidSubmit={handleValidConfig}
+              />
+            ) : (
+              <JsonMutationForm
+                key={type}
+                formId={FORM_ID}
+                type={type}
+                initial={jsonInitial}
                 onValidSubmit={handleValidConfig}
               />
             )}

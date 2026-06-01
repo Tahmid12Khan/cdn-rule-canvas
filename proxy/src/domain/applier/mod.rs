@@ -7,15 +7,23 @@
 pub mod content_truncation;
 pub mod html_injection;
 pub mod html_sanitizer;
+pub mod json_apply;
+pub mod json_path;
 pub mod orchestrator;
 pub mod placement_popup;
 pub mod placement_sticky_footer;
 
 use crate::infra::backend_client::ActiveComponent;
 
-/// Result of applying an outcome to a body.
+/// Result of applying an outcome to an HTML body.
 pub struct ModificationResult {
     pub html: String,
+    pub applied: bool,
+}
+
+/// Result of applying an outcome to a JSON body (parallel to `ModificationResult`).
+pub struct JsonModificationResult {
+    pub json: serde_json::Value,
     pub applied: bool,
 }
 
@@ -25,6 +33,8 @@ pub enum ApplyError {
     Html,
     #[error("selector rejected")]
     Selector,
+    #[error("invalid json path: {0}")]
+    JsonPath(#[from] json_path::ParsePathError),
 }
 
 /// One component renderer. Pure + idempotent.

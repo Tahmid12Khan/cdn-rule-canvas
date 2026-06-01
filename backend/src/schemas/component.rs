@@ -56,6 +56,26 @@ pub enum ComponentConfig {
         #[serde(default)]
         fade_out: bool,
     },
+    /// `type = "json_remove"` — delete the value(s) at `target_path`.
+    JsonRemove {
+        /// Simple JSON path (dot + `[index]`, e.g. `$.user.premium`) to delete.
+        target_path: String,
+    },
+    /// `type = "json_set"` — upsert (create or overwrite) the value at
+    /// `target_path`.
+    JsonSet {
+        /// Simple JSON path (dot + `[index]`) to upsert.
+        target_path: String,
+        /// The JSON value to write (any JSON, including `null`).
+        value: serde_json::Value,
+    },
+    /// `type = "json_replace"` — overwrite ONLY if `target_path` already exists.
+    JsonReplace {
+        /// Simple JSON path (dot + `[index]`) to overwrite when present.
+        target_path: String,
+        /// The JSON value to write (any JSON, including `null`).
+        value: serde_json::Value,
+    },
 }
 
 impl ComponentConfig {
@@ -65,6 +85,9 @@ impl ComponentConfig {
         match self {
             ComponentConfig::HtmlInjection { .. } => "html_injection",
             ComponentConfig::ContentTruncation { .. } => "content_truncation",
+            ComponentConfig::JsonRemove { .. } => "json_remove",
+            ComponentConfig::JsonSet { .. } => "json_set",
+            ComponentConfig::JsonReplace { .. } => "json_replace",
         }
     }
 
@@ -93,8 +116,30 @@ impl ComponentConfig {
                 }
                 Ok(())
             }
+            // JSON mutators: `target_path` is a simple path (dot + `[index]`),
+            // non-empty and length-capped. `value` (set/replace) may be any JSON.
+            ComponentConfig::JsonRemove { target_path }
+            | ComponentConfig::JsonSet { target_path, .. }
+            | ComponentConfig::JsonReplace { target_path, .. } => validate_target_path(target_path),
         }
     }
+}
+
+/// Maximum `target_path` length (chars) for JSON mutation components.
+const MAX_TARGET_PATH_LEN: usize = 500;
+
+/// Validate a JSON mutation `target_path`: trimmed-non-empty and at most
+/// [`MAX_TARGET_PATH_LEN`] chars.
+fn validate_target_path(target_path: &str) -> Result<(), String> {
+    if target_path.trim().is_empty() {
+        return Err("target_path must not be empty".to_string());
+    }
+    if target_path.chars().count() > MAX_TARGET_PATH_LEN {
+        return Err(format!(
+            "target_path must be at most {MAX_TARGET_PATH_LEN} characters"
+        ));
+    }
+    Ok(())
 }
 
 /// Create-component request body.
@@ -165,5 +210,79 @@ impl From<Component> for ComponentRead {
             created_at: c.created_at,
             updated_at: c.updated_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// JSON mutation variants deserialize from their wire shape and report the
+    /// matching `type_str()` discriminator.
+    #[test]
+    fn json_variants_round_trip_and_type_str() {
+        let remove: ComponentConfig =
+            serde_json::from_value(json!({ "type": "json_remove", "target_path": "$.user.email" }))
+                .unwrap();
+        assert_eq!(remove.type_str(), "json_remove");
+
+        let set: ComponentConfig = serde_json::from_value(
+            json!({ "type": "json_set", "target_path": "$.user.premium", "value": true }),
+        )
+        .unwrap();
+        assert_eq!(set.type_str(), "json_set");
+
+        let replace: ComponentConfig = serde_json::from_value(
+            json!({ "type": "json_replace", "target_path": "$.items[0].price", "value": 9.99 }),
+        )
+        .unwrap();
+        assert_eq!(replace.type_str(), "json_replace");
+
+        // Serializing back keeps the `type` tag.
+        let v = serde_json::to_value(&set).unwrap();
+        assert_eq!(v["type"], "json_set");
+        assert_eq!(v["target_path"], "$.user.premium");
+        assert_eq!(v["value"], true);
+    }
+
+    /// `json_set`/`json_replace` accept any JSON value, including `null`.
+    #[test]
+    fn json_set_accepts_null_value() {
+        let set = ComponentConfig::JsonSet {
+            target_path: "$.user.token".to_string(),
+            value: serde_json::Value::Null,
+        };
+        assert!(set.validate_domain().is_ok());
+    }
+
+    /// `target_path` must be trimmed-non-empty.
+    #[test]
+    fn empty_target_path_is_rejected() {
+        let remove = ComponentConfig::JsonRemove {
+            target_path: "   ".to_string(),
+        };
+        let err = remove.validate_domain().unwrap_err();
+        assert_eq!(err, "target_path must not be empty");
+    }
+
+    /// `target_path` is length-capped at 500 chars.
+    #[test]
+    fn overlong_target_path_is_rejected() {
+        let replace = ComponentConfig::JsonReplace {
+            target_path: "$.".to_string() + &"a".repeat(600),
+            value: json!(1),
+        };
+        let err = replace.validate_domain().unwrap_err();
+        assert!(err.contains("at most 500"));
+    }
+
+    /// A well-formed simple path passes.
+    #[test]
+    fn valid_target_path_passes() {
+        let remove = ComponentConfig::JsonRemove {
+            target_path: "$.items[0].price".to_string(),
+        };
+        assert!(remove.validate_domain().is_ok());
     }
 }

@@ -26,6 +26,10 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public details?: ApiErrorDetail[],
+    // The raw, unparsed response body text (req 3). Surfaced verbatim in the
+    // ErrorBanner "Show full server response" accordion. Captured once via
+    // res.text() so we never double-read the body.
+    public rawBody?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -34,6 +38,33 @@ export class ApiError extends Error {
   get isValidation(): boolean {
     return this.status === 422 || this.code === "VALIDATION_ERROR";
   }
+}
+
+// Parse the error envelope out of an already-read body string (no second
+// res.json() — a Response body can only be read once). Shared by client.ts and
+// evalTest.ts so both attach the raw body to ApiError.
+export function parseApiError(
+  status: number,
+  statusText: string,
+  rawBody: string,
+): ApiError {
+  let json: unknown = null;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    json = null;
+  }
+  const parsed = ApiErrorBody.safeParse(json);
+  const e = parsed.success
+    ? parsed.data.error
+    : { code: "INTERNAL_ERROR", message: statusText, details: undefined };
+  return new ApiError(
+    status,
+    e.code,
+    e.message,
+    e.details ?? undefined,
+    rawBody,
+  );
 }
 
 // Pagination envelope (BACKEND CONTRACT §5)
@@ -56,15 +87,8 @@ async function request<T>(
   });
 
   if (!res.ok) {
-    const parsed = ApiErrorBody.safeParse(await res.json().catch(() => null));
-    const e = parsed.success
-      ? parsed.data.error
-      : {
-          code: "INTERNAL_ERROR",
-          message: res.statusText,
-          details: undefined,
-        };
-    throw new ApiError(res.status, e.code, e.message, e.details ?? undefined);
+    const text = await res.text().catch(() => "");
+    throw parseApiError(res.status, res.statusText, text);
   }
 
   if (res.status === 204) {

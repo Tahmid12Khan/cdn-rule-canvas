@@ -13,6 +13,7 @@
 //! | `no_cycles` | the graph is acyclic |
 //! | `outcome_terminal` | Outcome nodes have zero outgoing edges |
 //! | `outcome_ref_exists` | every Outcome node's `outcome_id` exists for the version |
+//! | `outcome_reachable` | every node reachable from the canvas root can reach an Outcome |
 //! | `root_in_nodes` | a set `root_node_id` exists in `nodes` |
 //! | `outcome_branch_forbidden` | edges may only originate from Decision nodes |
 //! | `processor_kind_known` | a Decision node's processor `type` is a manifest `kind` |
@@ -198,6 +199,116 @@ fn validate_canvas(
             "graph contains a cycle".to_string(),
             "no_cycles",
         ));
+    }
+
+    // outcome_reachable: every node reachable from the canvas root must be able
+    // to reach an outcome (dead-ends are invalid; partial branches are OK).
+    validate_outcome_reachable(canvas, graph, &node_by_id, details);
+}
+
+/// `outcome_reachable`: every node reachable from the canvas root must be able to
+/// reach at least one Outcome node over resolvable edges.
+///
+/// Anchoring requires a defined start. The root is `root_node_id` when set, else
+/// the UNIQUE node with no incoming (resolvable) edge. When neither yields a
+/// single root — or the canvas is empty — the rule is SKIPPED (other rules cover
+/// misconfiguration; an empty canvas stays valid).
+fn validate_outcome_reachable(
+    canvas: &'static str,
+    graph: &CanvasGraph,
+    node_by_id: &HashMap<&str, &Node>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if graph.nodes.is_empty() {
+        return;
+    }
+
+    // Resolvable adjacency (forward) and its reverse, over edges whose endpoints
+    // both exist (dangling edges are reported by edge_endpoint_exists).
+    let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut has_incoming: HashSet<&str> = HashSet::new();
+    for edge in &graph.edges {
+        let s = edge.source_node_id.as_str();
+        let t = edge.target_node_id.as_str();
+        if node_by_id.contains_key(s) && node_by_id.contains_key(t) {
+            forward.entry(s).or_default().push(t);
+            reverse.entry(t).or_default().push(s);
+            has_incoming.insert(t);
+        }
+    }
+
+    // Determine the root: explicit root_node_id (when it resolves), else the
+    // unique node with no incoming resolvable edge. Skip if ambiguous/missing.
+    //
+    // The no-incoming fallback only anchors when the canvas has at least one
+    // outcome node — without one, "reaching an outcome" is inapplicable and a
+    // half-built canvas (a lone decision node, an unresolved edge) stays valid;
+    // an explicit root always anchors so a deliberate dead-end is still caught.
+    let root: &str = match graph.root_node_id.as_deref() {
+        Some(r) if node_by_id.contains_key(r) => r,
+        Some(_) => return, // root_in_nodes already flagged it; can't anchor.
+        None => {
+            if !graph.nodes.iter().any(Node::is_outcome) {
+                return;
+            }
+            let mut roots = graph
+                .nodes
+                .iter()
+                .map(Node::id)
+                .filter(|id| !has_incoming.contains(id));
+            match (roots.next(), roots.next()) {
+                (Some(only), None) => only,
+                _ => return, // zero or multiple roots => skip (no single start).
+            }
+        }
+    };
+
+    // can_reach_outcome: reverse-BFS from every outcome node.
+    let mut can_reach: HashSet<&str> = HashSet::new();
+    let mut queue: Vec<&str> = graph
+        .nodes
+        .iter()
+        .filter(|n| n.is_outcome())
+        .map(Node::id)
+        .collect();
+    for &start in &queue {
+        can_reach.insert(start);
+    }
+    while let Some(node) = queue.pop() {
+        if let Some(preds) = reverse.get(node) {
+            for &p in preds {
+                if can_reach.insert(p) {
+                    queue.push(p);
+                }
+            }
+        }
+    }
+
+    // reachable: forward-BFS from the root.
+    let mut reachable: HashSet<&str> = HashSet::new();
+    reachable.insert(root);
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if let Some(succ) = forward.get(node) {
+            for &t in succ {
+                if reachable.insert(t) {
+                    stack.push(t);
+                }
+            }
+        }
+    }
+
+    // Any reachable node that cannot reach an outcome is a dead-end.
+    for (idx, node) in graph.nodes.iter().enumerate() {
+        let id = node.id();
+        if reachable.contains(id) && !can_reach.contains(id) {
+            details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes[{idx}]"),
+                format!("node '{id}' cannot reach an outcome"),
+                "outcome_reachable",
+            ));
+        }
     }
 }
 
@@ -830,5 +941,58 @@ mod tests {
             root_node_id: None,
         };
         assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+    }
+
+    // 22. outcome_reachable: a dead-end decision with a set root fails (the root
+    //     node has no path to any outcome).
+    #[test]
+    fn dead_end_decision_with_root_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![decision("d1")],
+            edges: vec![],
+            root_node_id: Some("d1".to_string()),
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"outcome_reachable"));
+        assert!(details
+            .iter()
+            .any(|d| d.rule_id == "outcome_reachable"
+                && d.msg == "node 'd1' cannot reach an outcome"));
+    }
+
+    // 23. outcome_reachable: decision -> decision -> outcome chain passes.
+    #[test]
+    fn decision_chain_to_outcome_passes() {
+        let oid = Uuid::new_v4();
+        let canvas = CanvasGraph {
+            nodes: vec![decision("d1"), decision("d2"), outcome("o1", oid)],
+            edges: vec![
+                edge("e1", "d1", "d2", Branch::Yes),
+                edge("e2", "d2", "o1", Branch::Yes),
+            ],
+            root_node_id: Some("d1".to_string()),
+        };
+        let mut ids = HashSet::new();
+        ids.insert(oid);
+        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+    }
+
+    // 24. outcome_reachable: an outcome-only canvas (the unique root IS an
+    //     outcome) passes — the outcome trivially reaches itself.
+    #[test]
+    fn outcome_only_root_passes() {
+        let oid = Uuid::new_v4();
+        let canvas = CanvasGraph {
+            nodes: vec![outcome("o1", oid)],
+            edges: vec![],
+            root_node_id: None,
+        };
+        let mut ids = HashSet::new();
+        ids.insert(oid);
+        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
     }
 }

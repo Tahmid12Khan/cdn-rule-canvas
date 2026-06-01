@@ -10,6 +10,7 @@ import clsx from "clsx";
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import {
   buildPalette,
+  type FeatureType,
   type NodeChipDef,
   type OutcomeOption,
   type PaletteCategory,
@@ -20,15 +21,21 @@ interface NodePaletteProps {
   outcomes: OutcomeOption[];
   // Drag is only allowed in edit mode.
   draggable: boolean;
+  // Feature content kind — filters chips by each spec's `applies_to` (req 7).
+  featureType?: FeatureType;
 }
 
 const SEARCH_TAB = "__search";
 
-export function NodePalette({ outcomes, draggable }: NodePaletteProps) {
+export function NodePalette({
+  outcomes,
+  draggable,
+  featureType = "html",
+}: NodePaletteProps) {
   const { manifest } = useNodeTypes();
   const categories = useMemo(
-    () => buildPalette(manifest, outcomes),
-    [manifest, outcomes],
+    () => buildPalette(manifest, outcomes, featureType),
+    [manifest, outcomes, featureType],
   );
   const [activeTab, setActiveTab] = useState<string>(
     categories[0]?.id ?? SEARCH_TAB,

@@ -3,6 +3,7 @@
     { "id": "session", "label": "Session" },
     { "id": "user", "label": "User", "coming_soon": true },
     { "id": "content", "label": "Content" },
+    { "id": "json", "label": "JSON" },
     { "id": "decision-data", "label": "Decision Data", "coming_soon": true },
     { "id": "access", "label": "Access", "coming_soon": true },
     { "id": "sub-rules", "label": "Sub Rules", "coming_soon": true },
@@ -19,6 +20,7 @@
       "kind": "meta_tags",
       "label": "Meta Tags",
       "category": "content",
+      "applies_to": "html",
       "summary": "Matches against a meta tag in the request HTML by name.",
       "fields": [
         {
@@ -89,9 +91,9 @@
     },
     {
       "kind": "article_url",
-      "label": "Article URL",
+      "label": "URL",
       "category": "content",
-      "summary": "Matches against the request article URL (path).",
+      "summary": "Matches against the request URL (path).",
       "fields": [
         {
           "name": "operator",
@@ -114,6 +116,50 @@
           "default": "",
           "placeholder": "e.g. /article",
           "required_message": "Enter a value to compare against the URL"
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    },
+    {
+      "kind": "json_expression",
+      "label": "JSON Expression",
+      "category": "json",
+      "applies_to": "json",
+      "summary": "Matches a JSONPath in the response body against a value.",
+      "fields": [
+        {
+          "name": "json_path",
+          "label": "JSON path",
+          "control": "text",
+          "required": true,
+          "default": "",
+          "placeholder": "$.type",
+          "required_message": "Enter a JSONPath (e.g. $.type)"
+        },
+        {
+          "name": "operator",
+          "label": "Operator",
+          "control": "select",
+          "required": true,
+          "default": "contains",
+          "options": [
+            { "value": "equals", "label": "equals" },
+            { "value": "contains", "label": "contains" },
+            { "value": "starts_with", "label": "starts with" },
+            { "value": "ends_with", "label": "ends with" },
+            { "value": "is_one_of", "label": "is one of (comma-separated)" },
+            { "value": "exists", "label": "exists" }
+          ]
+        },
+        {
+          "name": "value",
+          "label": "Value",
+          "control": "text",
+          "required": false,
+          "required_unless": { "field": "operator", "value": "exists" },
+          "default": "",
+          "placeholder": "e.g. premium",
+          "required_message": "Enter a value, or switch operator to 'exists'"
         }
       ],
       "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }

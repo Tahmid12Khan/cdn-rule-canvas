@@ -22,11 +22,28 @@ pub enum Placement {
     Popup,
 }
 
+/// Version-level applicability gate (BACKEND CONTRACT §5). Mirrors the backend
+/// `Applicability` DTO. serde defaults, no `deny_unknown_fields` — an older
+/// backend that omits the field deserializes to the empty (apply-always) gate.
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct Applicability {
+    /// CSS selector that must match >=1 element for an HTML response's rules to
+    /// apply. None/empty = apply whenever the response content-type is HTML.
+    #[serde(default)]
+    pub html_selector: Option<String>,
+    /// JSONPath that must match >=1 node for a JSON response's rules to apply.
+    /// None/empty = apply whenever the response content-type is JSON.
+    #[serde(default)]
+    pub json_selector: Option<String>,
+}
+
 /// Active-version payload — EXACT shape from BACKEND CONTRACT §5.
 #[derive(Deserialize, Clone, Debug)]
 pub struct ActiveVersionRead {
     pub version_number: i32,
     pub rule_graph: RuleGraph,
+    #[serde(default)]
+    pub applicability: Applicability,
     pub outcomes: Vec<ActiveOutcome>,
 }
 

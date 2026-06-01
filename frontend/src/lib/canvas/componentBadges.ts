@@ -16,6 +16,9 @@ export interface ComponentBadge {
 const TYPE_LABELS: Record<ComponentConfig["type"], string> = {
   html_injection: "HTML Injection",
   content_truncation: "Content Truncation",
+  json_remove: "JSON Remove",
+  json_set: "JSON Set",
+  json_replace: "JSON Replace",
 };
 
 const PLACEMENT_MODE_LABELS: Record<string, string> = {
@@ -41,10 +44,15 @@ export function componentBadges(config: unknown): ComponentBadge[] {
     if (c.target_selector) {
       badges.push({ label: c.target_selector, tone: "info" });
     }
-  } else {
+  } else if (c.type === "content_truncation") {
     badges.push({ label: `${c.word_count} words`, tone: "info" });
     if (c.fade_out) {
       badges.push({ label: "Fade out", tone: "placement" });
+    }
+  } else {
+    // JSON mutation: summarize by the target path.
+    if (c.target_path) {
+      badges.push({ label: c.target_path, tone: "info" });
     }
   }
 

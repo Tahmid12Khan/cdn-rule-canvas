@@ -21,11 +21,19 @@ function OutcomeNodeImpl({ id, data, selected }: NodeProps<OutcomeNodeData>) {
   );
   const testActive = useRuleBuilderStore((s) => s.testHighlight !== null);
   const dimmed = testActive && !onPath && !isMatched;
+  // Always-on journey baseline (req 1): subtle steady ring when on a START ->
+  // outcome path, suppressed while a test result is active. Reads the MEMOIZED
+  // journeyPath (recomputed in the structural reducers) — a stable boolean, NOT
+  // per-node BFS.
+  const onJourney = useRuleBuilderStore((s) => s.journeyPath.nodeIds.has(id));
+  const journeyBaseline = onJourney && !testActive;
 
   return (
     <div
+      // `relative z-10` so the outcome's text/handles are never occluded by an
+      // overlapping floated decision diamond (z-index parity — req 4).
       className={[
-        "min-w-[90px] max-w-[140px] rounded-md border-2 bg-node-outcome px-3 py-2 text-center shadow-md transition-opacity",
+        "relative z-10 min-w-[90px] max-w-[140px] rounded-md border-2 bg-node-outcome px-3 py-2 text-center shadow-md transition-opacity",
         // Light neutral border so the black outcome node stays visible against
         // the dark canvas (black-on-black blends otherwise); subtle on light.
         hasError ? "border-danger ring-2 ring-danger" : "border-white/30",
@@ -34,7 +42,9 @@ function OutcomeNodeImpl({ id, data, selected }: NodeProps<OutcomeNodeData>) {
           ? "ring-4 ring-brand-500 ring-offset-2"
           : onPath
             ? "ring-4 ring-brand-400 ring-offset-2"
-            : "",
+            : journeyBaseline
+              ? "ring-1 ring-brand-400/40"
+              : "",
         dimmed ? "opacity-30" : "",
       ].join(" ")}
       data-testid="outcome-node"
