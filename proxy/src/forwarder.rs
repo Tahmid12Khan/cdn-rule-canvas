@@ -48,32 +48,32 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     let path = req.uri().path().to_string();
     let host = host(&req).unwrap_or_default();
 
-    // 1. Resolve feature. Miss -> pass-through.
-    let Some(feature_id) = state.feature_map.resolve(&host, &path) else {
+    // 1. Resolve EVERY matching feature (map order, de-duplicated). None -> pass-through.
+    //    A request can fan out to several features; we apply each in turn,
+    //    chaining the body so one feature's output feeds the next.
+    let feature_ids = state.feature_map.resolve_all(&host, &path);
+    if feature_ids.is_empty() {
         return passthrough(&state, req).await;
-    };
+    }
+    for feature_id in &feature_ids {
+        metrics::counter!("proxy_requests_total", "feature" => feature_id.clone()).increment(1);
+    }
 
-    metrics::counter!("proxy_requests_total", "feature" => feature_id.clone()).increment(1);
-
-    // 2. Classify (canvas isolation source).
+    // 2. Classify (canvas isolation source) — same canvas class for every feature.
     let canvas_class = classifier::classify(req.headers());
-
-    // 3. Active version. Fail-open on None.
-    let Some(av) = state.backend.active_version(&feature_id, Env::Live).await else {
-        return passthrough(&state, req).await;
-    };
+    let canvas_label = canvas_name(canvas_class);
 
     // Snapshot request context before consuming the request for upstream fetch.
     let headers = req.headers().clone();
     let cookies = parse_cookies(&headers);
 
-    // 4. Upstream fetch. On error -> typed ProxyError response.
+    // 3. Upstream fetch (once). On error -> typed ProxyError response.
     let upstream = match send_upstream(&state, req).await {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
 
-    // 5. Content-kind gate: HTML vs JSON. Neither -> pass-through (skipped).
+    // 4. Content-kind gate: HTML vs JSON. Neither -> pass-through (skipped).
     //    The gate keys off the RESPONSE content-type, not the feature type:
     //    a json_expression node on an HTML response simply sees no
     //    response_json and returns No (and vice versa for meta_tags on JSON).
@@ -100,132 +100,171 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         }
     };
 
-    let canvas_label = canvas_name(canvas_class);
-
-    let (final_body, apply_status) = if is_html {
-        // 6a. HTML applicability gate: if html_selector is set+non-empty, require
-        //     >=1 element match; zero matches -> serve original, skipped.
-        if !html_selector_matches(&av, &body_string) {
-            tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label,
-                apply_status = "skipped", reason = "html_selector_no_match", "request"
-            );
-            return rebuild_response(status, resp_headers, body, "skipped");
-        }
-
-        // 6b. Build eval context (HTML) + evaluate the classified canvas ONLY.
-        let ctx = EvaluationContextParts::from_request(
+    // 5. Apply each matching feature in order, chaining the running body. The
+    //    overall apply_status is "ok" if ANY feature changed the body, else
+    //    "skipped" (every feature self-gates: a non-matching feature is a no-op).
+    let (final_body, any_applied) = if is_html {
+        apply_features_html(
+            &state,
+            &feature_ids,
+            canvas_class,
+            canvas_label,
             &headers,
             &path,
             &cookies,
-            body_string.clone(),
-            false,
-        );
-        let (actions, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
-
-        if actions.is_empty() {
-            log_skipped(&feature_id, canvas_label, eval_ms);
-            (body_string, "skipped")
-        } else {
-            // Fold each matched action over the HTML body in trace order.
-            let t_start = Instant::now();
-            let mut current = body_string.clone();
-            let mut applied = false;
-            for ma in &actions {
-                let (next, changed) = json_apply::apply_action_html(
-                    current,
-                    &ma.action,
-                    &av.outcomes,
-                    &state.sanitizer,
-                );
-                current = next;
-                applied |= changed;
-            }
-            let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-            metrics::histogram!("proxy_transform_ms").record(transform_ms);
-            let status = if applied { "ok" } else { "skipped" };
-            tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label,
-                actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
-            );
-            (current, status)
-        }
+            body_string,
+        )
+        .await
     } else {
-        // 7a. Parse the JSON body. Parse failure -> serve original, skipped.
-        let parsed: serde_json::Value = match serde_json::from_str(&body_string) {
-            Ok(v) => v,
+        // JSON: parse once. Parse failure -> serve original, skipped.
+        match serde_json::from_str::<serde_json::Value>(&body_string) {
+            Ok(parsed) => {
+                apply_features_json(
+                    &state,
+                    &feature_ids,
+                    canvas_class,
+                    canvas_label,
+                    &headers,
+                    &path,
+                    &cookies,
+                    parsed,
+                    &body_string,
+                )
+                .await
+            }
             Err(_) => {
-                tracing::warn!(feature_id = %feature_id, "json parse failed, serving original");
+                tracing::warn!("json parse failed, serving original");
                 return rebuild_response(status, resp_headers, body, "skipped");
-            }
-        };
-
-        // 7b. JSON applicability gate: if json_selector is set+non-empty, require
-        //     a JSONPath match; zero matches -> serve original, skipped.
-        if !json_selector_matches(&av, &parsed) {
-            tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label,
-                apply_status = "skipped", reason = "json_selector_no_match", "request"
-            );
-            return rebuild_response(status, resp_headers, body, "skipped");
-        }
-
-        // 7c. Build eval context (JSON) + evaluate the classified canvas ONLY.
-        let ctx = EvaluationContextParts::from_request(
-            &headers,
-            &path,
-            &cookies,
-            body_string.clone(),
-            true,
-        );
-        let (actions, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
-
-        if actions.is_empty() {
-            log_skipped(&feature_id, canvas_label, eval_ms);
-            (body_string, "skipped")
-        } else {
-            // Fold each matched action over the parsed JSON body in trace order.
-            let t_start = Instant::now();
-            let mut current = parsed;
-            let mut applied = false;
-            for ma in &actions {
-                applied |= json_apply::apply_action_json(&mut current, &ma.action, &av.outcomes);
-            }
-            let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-            metrics::histogram!("proxy_transform_ms").record(transform_ms);
-
-            if !applied {
-                tracing::info!(
-                    feature_id = %feature_id, canvas = canvas_label,
-                    actions = actions.len(), eval_ms, transform_ms, apply_status = "skipped", "request"
-                );
-                (body_string, "skipped")
-            } else {
-                match serde_json::to_string(&current) {
-                    Ok(s) => {
-                        tracing::info!(
-                            feature_id = %feature_id, canvas = canvas_label,
-                            actions = actions.len(), eval_ms, transform_ms, apply_status = "ok", "request"
-                        );
-                        (s, "ok")
-                    }
-                    Err(e) => {
-                        metrics::counter!("proxy_apply_errors_total").increment(1);
-                        tracing::warn!(error = %e, "json serialize failed, serving original");
-                        (body_string, "error")
-                    }
-                }
             }
         }
     };
 
+    let apply_status = if any_applied { "ok" } else { "skipped" };
     metrics::histogram!("proxy_e2e_ms").record(e2e_start.elapsed().as_secs_f64() * 1000.0);
 
-    // 9. Re-encode + rebuild.
+    // 6. Re-encode + rebuild.
     let out_bytes = encoding::reencode(content_encoding.as_deref(), final_body);
     strip_hop_by_hop(&mut resp_headers);
     set_content_length(&mut resp_headers, out_bytes.len());
     rebuild_response(status, resp_headers, out_bytes, apply_status)
+}
+
+/// Apply every matching feature's actions to an HTML body, in order, chaining
+/// the result. Each feature: active-version lookup (None -> skip), html_selector
+/// applicability gate (no match -> skip), eval the classified canvas, fold its
+/// matched actions. Returns the final body and whether ANY feature changed it.
+#[allow(clippy::too_many_arguments)]
+async fn apply_features_html(
+    state: &AppState,
+    feature_ids: &[String],
+    canvas_class: Canvas,
+    canvas_label: &str,
+    headers: &HeaderMap,
+    path: &str,
+    cookies: &HashMap<String, String>,
+    mut current: String,
+) -> (String, bool) {
+    let mut any_applied = false;
+    for feature_id in feature_ids {
+        let Some(av) = state.backend.active_version(feature_id, Env::Live).await else {
+            continue;
+        };
+        if !html_selector_matches(&av, &current) {
+            tracing::info!(
+                feature_id = %feature_id, canvas = canvas_label,
+                apply_status = "skipped", reason = "html_selector_no_match", "request"
+            );
+            continue;
+        }
+        let ctx =
+            EvaluationContextParts::from_request(headers, path, cookies, current.clone(), false);
+        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
+        if actions.is_empty() {
+            log_skipped(feature_id, canvas_label, eval_ms);
+            continue;
+        }
+        let t_start = Instant::now();
+        let mut applied = false;
+        for ma in &actions {
+            let (next, changed) =
+                json_apply::apply_action_html(current, &ma.action, &av.outcomes, &state.sanitizer);
+            current = next;
+            applied |= changed;
+        }
+        let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+        metrics::histogram!("proxy_transform_ms").record(transform_ms);
+        let status = if applied { "ok" } else { "skipped" };
+        tracing::info!(
+            feature_id = %feature_id, canvas = canvas_label,
+            actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
+        );
+        any_applied |= applied;
+    }
+    (current, any_applied)
+}
+
+/// Apply every matching feature's actions to a JSON body, in order, chaining the
+/// result. Each feature: active-version lookup (None -> skip), json_selector
+/// applicability gate (no match -> skip), eval against the CURRENT (chained)
+/// body so a later feature sees an earlier one's edits, fold its matched actions.
+/// Returns the serialized final body and whether ANY feature changed it.
+#[allow(clippy::too_many_arguments)]
+async fn apply_features_json(
+    state: &AppState,
+    feature_ids: &[String],
+    canvas_class: Canvas,
+    canvas_label: &str,
+    headers: &HeaderMap,
+    path: &str,
+    cookies: &HashMap<String, String>,
+    mut current: serde_json::Value,
+    original: &str,
+) -> (String, bool) {
+    let mut any_applied = false;
+    for feature_id in feature_ids {
+        let Some(av) = state.backend.active_version(feature_id, Env::Live).await else {
+            continue;
+        };
+        if !json_selector_matches(&av, &current) {
+            tracing::info!(
+                feature_id = %feature_id, canvas = canvas_label,
+                apply_status = "skipped", reason = "json_selector_no_match", "request"
+            );
+            continue;
+        }
+        // Eval reads response_json from the body string, so feed it the CURRENT
+        // (already-chained) body — not the original — for correct chaining.
+        let ctx_body = serde_json::to_string(&current).unwrap_or_default();
+        let ctx = EvaluationContextParts::from_request(headers, path, cookies, ctx_body, true);
+        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
+        if actions.is_empty() {
+            log_skipped(feature_id, canvas_label, eval_ms);
+            continue;
+        }
+        let t_start = Instant::now();
+        let mut applied = false;
+        for ma in &actions {
+            applied |= json_apply::apply_action_json(&mut current, &ma.action, &av.outcomes);
+        }
+        let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+        metrics::histogram!("proxy_transform_ms").record(transform_ms);
+        let status = if applied { "ok" } else { "skipped" };
+        tracing::info!(
+            feature_id = %feature_id, canvas = canvas_label,
+            actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
+        );
+        any_applied |= applied;
+    }
+    // Serialize the final chained body. A serialize error (≈never for a Value)
+    // falls back to the original untouched body.
+    match serde_json::to_string(&current) {
+        Ok(s) => (s, any_applied),
+        Err(e) => {
+            metrics::counter!("proxy_apply_errors_total").increment(1);
+            tracing::warn!(error = %e, "json serialize failed, serving original");
+            (original.to_string(), false)
+        }
+    }
 }
 
 /// Run the classified canvas through the evaluator, returning the ordered matched
