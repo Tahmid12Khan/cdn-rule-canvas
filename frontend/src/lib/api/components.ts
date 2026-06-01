@@ -1,0 +1,85 @@
+import { z } from "zod";
+
+import { apiSend } from "@/lib/api/client";
+import { Placement } from "@/lib/api/enums";
+
+// Component DTOs — mirror BACKEND CONTRACT §5 (ComponentRead/Create/Update +
+// the typed ComponentConfig discriminated union). On READ, `config` is an
+// opaque serde_json::Value (`z.unknown()`); the editor re-parses it with
+// `ComponentConfig` before populating a config form. On WRITE, `config` MUST be
+// a valid `ComponentConfig` whose `type` matches the row `type` column.
+
+export const HtmlPlacementMode = z.enum([
+  "replace",
+  "append",
+  "prepend",
+  "before",
+  "after",
+]);
+export type HtmlPlacementMode = z.infer<typeof HtmlPlacementMode>;
+
+export const ComponentConfig = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("html_injection"),
+    target_selector: z.string().min(1),
+    placement_mode: HtmlPlacementMode,
+    html_body: z.string(),
+    theme: z.string().nullish(),
+  }),
+  z.object({
+    type: z.literal("content_truncation"),
+    target_selector: z.string().min(1),
+    word_count: z.number().int().min(1).max(10000),
+    fade_out: z.boolean().default(false),
+  }),
+]);
+export type ComponentConfig = z.infer<typeof ComponentConfig>;
+
+export const ComponentType = z.enum(["html_injection", "content_truncation"]);
+export type ComponentType = z.infer<typeof ComponentType>;
+
+export const ComponentRead = z.object({
+  id: z.string().uuid(),
+  outcome_id: z.string().uuid(),
+  slug: z.string(),
+  type: z.string(),
+  config: z.unknown(), // serde_json::Value on read
+  placement: Placement,
+  order_index: z.number().int(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ComponentRead = z.infer<typeof ComponentRead>;
+
+export const ComponentCreate = z.object({
+  slug: z.string().min(1).max(120),
+  type: z.string(),
+  config: ComponentConfig,
+  placement: Placement,
+  order_index: z.number().int().optional(),
+});
+export type ComponentCreate = z.infer<typeof ComponentCreate>;
+
+export const ComponentUpdate = z.object({
+  slug: z.string().optional(),
+  type: z.string().optional(),
+  config: ComponentConfig.optional(),
+  placement: Placement.optional(),
+  order_index: z.number().int().optional(),
+});
+export type ComponentUpdate = z.infer<typeof ComponentUpdate>;
+
+export const addComponent = (
+  oid: string,
+  body: ComponentCreate,
+): Promise<ComponentRead> =>
+  apiSend("POST", `/api/v1/outcomes/${oid}/components`, ComponentRead, body);
+
+export const updateComponent = (
+  cid: string,
+  body: ComponentUpdate,
+): Promise<ComponentRead> =>
+  apiSend("PATCH", `/api/v1/components/${cid}`, ComponentRead, body);
+
+export const deleteComponent = (cid: string): Promise<void> =>
+  apiSend("DELETE", `/api/v1/components/${cid}`, z.void());

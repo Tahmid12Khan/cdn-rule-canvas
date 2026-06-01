@@ -1,0 +1,19 @@
+# Build context filter for the frontend image (context = frontend/).
+node_modules
+.next
+out
+.git
+.DS_Store
+
+# Secrets / local env — never copy into an image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Tests / tooling not needed for a production build
+e2e
+playwright-report
+test-results
+coverage

@@ -1,0 +1,126 @@
+/* React Flow base styles (canvas rendering). Import must precede other rules. */
+@import "reactflow/dist/style.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Semantic design tokens (WS6, Zed-like). DARK is the default; `.light` on
+     <html> flips to a light surface set. Components consume the mapped Tailwind
+     tokens (bg / bg-elevated / border / text-fg / text-muted / accent) so the
+     whole app re-themes from these variables. Single accent = brand teal. */
+  :root,
+  .dark {
+    --bg: #0e1014;
+    --bg-elevated: #14171c;
+    --bg-overlay: #1a1e24;
+    --border: #232831;
+    --border-strong: #2f3540;
+    --fg: #e6e8eb;
+    /* Body/description/table text (Task B): brighter neutral so dark-mode text
+       reads crisply (≈9.7:1 on --bg, well past WCAG AA) instead of dim/blurry. */
+    --fg-muted: #b3bac4;
+    /* Decorative / disabled chrome only — nudged up so any persistent body text
+       bridged to this (BrandHeader lede, some dialog bodies) clears AA (≈5.7:1)
+       while staying clearly more muted than --fg-muted. */
+    --fg-subtle: #868d97;
+    --accent: #0ea5a4;
+    --accent-fg: #ffffff;
+    --accent-muted: #123230;
+    /* Text/icon color for use ON --accent-muted backgrounds (badges, hints).
+       Brighter teal so it clears WCAG AA on the dark #123230 muted surface
+       (≈7.4:1) — plain brand-700 #0f766e was only 2.52:1. */
+    --accent-on-muted: #2dd4bf;
+    --danger: #f0626f;
+    --danger-bg: #2a1417;
+    --success: #4ec98a;
+    --warning: #e0a44a;
+    --radius: 6px;
+    /* canvas dotted-grid dot color (dark) */
+    --dot: #2a313c;
+  }
+
+  .light {
+    --bg: #fafafa;
+    --bg-elevated: #ffffff;
+    --bg-overlay: #ffffff;
+    --border: #e4e6ea;
+    --border-strong: #d0d3d9;
+    --fg: #1a1d21;
+    --fg-muted: #5b626c;
+    --fg-subtle: #9098a2;
+    --accent-muted: #eef9f8;
+    /* On the light #eef9f8 muted surface, brand-700 already clears AA (≈5.09:1). */
+    --accent-on-muted: #0f766e;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+    --dot: #d1d5db;
+  }
+
+  body {
+    @apply bg-bg text-fg;
+  }
+
+  /* Theme text form controls from the semantic tokens so every <input>/
+     <textarea>/<select> re-themes with the surface (fixes white-on-white in
+     dark mode). These are element selectors (lower specificity than Tailwind
+     utilities), so any component that sets its own `bg-`/`text-` utility still
+     wins — intended for inputs on already-elevated surfaces. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+  textarea,
+  select {
+    background-color: var(--bg-elevated);
+    color: var(--fg);
+    border-color: var(--border);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--fg-subtle);
+  }
+
+  /* Global focus ring for WCAG (FRONTEND CONTRACT §6). */
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Dotted-grid canvas background util (used when not relying on the React
+     Flow <Background variant="dots"/> component). */
+  .dot-grid {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: theme(backgroundSize.dot-grid);
+  }
+}
+
+/* React Flow dark-mode overrides (its dist CSS assumes a light canvas). */
+.react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+.react-flow__controls-button:hover {
+  background: var(--bg-overlay);
+}
+.react-flow__controls-button svg {
+  fill: var(--fg);
+}
+.react-flow__attribution {
+  background: transparent;
+  color: var(--fg-subtle);
+}
+
+/* Marching-ants dash for the test-a-rule traversed edges (WS4). */
+@keyframes rre-edge-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
