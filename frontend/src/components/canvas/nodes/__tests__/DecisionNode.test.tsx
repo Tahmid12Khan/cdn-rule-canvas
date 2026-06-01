@@ -68,25 +68,26 @@ describe("DecisionNode (manifest-driven)", () => {
     expect(title).toHaveClass("z-20");
   });
 
-  it("shows each input field's value INSIDE the diamond, one per line", async () => {
+  it("renders a one-line condition summary below the node (operator as a symbol)", async () => {
     render(<DecisionNode {...nodeProps(articleProcessor)} />, { wrapper });
-    // Wait for the manifest to load (the inside values come from spec.fields);
-    // the container exists immediately but is empty until the spec resolves.
-    await waitFor(() =>
-      expect(screen.getByTestId("decision-values").querySelectorAll("span"))
-        .toHaveLength(2),
+    const summary = await screen.findByTestId("decision-summary");
+    // article_url operator "contains" -> symbol "⊃"; value "/news/" (<=10, untruncated)
+    expect(summary).toHaveTextContent("⊃");
+    expect(summary).toHaveTextContent("/news/");
+    expect(summary).toHaveClass("truncate");
+  });
+
+  it("truncates a value longer than the manifest value_max_chars with an ellipsis", async () => {
+    render(
+      <DecisionNode
+        {...nodeProps({ processor: { type: "article_url", operator: "equals", value: "/some/very/long/path" } })}
+      />,
+      { wrapper },
     );
-    const values = screen.getByTestId("decision-values");
-    // article_url has operator "contains" + value "/news/" — both rendered as
-    // their own centered, truncated <span> lines inside the diamond body.
-    const lines = values.querySelectorAll("span");
-    expect(lines.length).toBe(2);
-    expect(values).toHaveTextContent("contains");
-    expect(values).toHaveTextContent("/news/");
-    // Centered column.
-    expect(values).toHaveClass("items-center");
-    expect(values).toHaveClass("text-center");
-    lines.forEach((line) => expect(line).toHaveClass("truncate"));
+    const summary = await screen.findByTestId("decision-summary");
+    // "==" symbol + first 10 chars of the value + "…"
+    expect(summary).toHaveTextContent("==");
+    expect(summary).toHaveTextContent("/some/very…");
   });
 
   it("renders a tooltip on hover with fields, summary, and branches", async () => {

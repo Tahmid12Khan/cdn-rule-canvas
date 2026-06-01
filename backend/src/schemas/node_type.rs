@@ -31,6 +31,23 @@ pub struct NodeManifest {
     pub categories: Vec<Category>,
     /// Node-type specifications (in palette order).
     pub node_types: Vec<NodeTypeSpec>,
+    /// Canvas display rules (operator symbols live per-option; this carries
+    /// the rest). Defaults when omitted from the manifest file.
+    #[serde(default)]
+    pub display: DisplayConfig,
+}
+
+/// Server-owned canvas display rules (the client only renders per these).
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct DisplayConfig {
+    /// Max chars before a value token is truncated with an ellipsis on the canvas.
+    pub value_max_chars: usize,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self { value_max_chars: 10 }
+    }
 }
 
 impl NodeManifest {
@@ -183,6 +200,9 @@ pub struct Option_ {
     pub value: Value,
     /// Human label for the option.
     pub label: String,
+    /// Optional compact operator glyph shown on the canvas summary (e.g. "==").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
 }
 
 /// A node type's output branches.
@@ -267,6 +287,21 @@ mod tests {
         // defaulted article_url (the field is not synthesized in the raw output).
         assert_eq!(raw["node_types"][0]["applies_to"], "html");
         assert!(raw["node_types"][2].get("applies_to").is_none());
+
+        // Server-owned display rules: the value truncation length and per-option
+        // operator symbols come from the manifest.
+        assert_eq!(loaded.typed.display.value_max_chars, 10);
+        let meta_op = by_kind["meta_tags"]
+            .fields
+            .iter()
+            .find(|f| f.name == "operator")
+            .unwrap();
+        let equals = meta_op
+            .options
+            .iter()
+            .find(|o| o.value == serde_json::json!("equals"))
+            .unwrap();
+        assert_eq!(equals.symbol.as_deref(), Some("=="));
     }
 
     /// `index` keys every spec by its snake_case kind for O(1) lookup.

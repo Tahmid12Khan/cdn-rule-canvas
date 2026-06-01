@@ -6,6 +6,7 @@ import type { NodeManifest } from "@/lib/api/nodeTypes";
 import type { ProcessorConfig } from "@/lib/canvas/types";
 
 export const NODE_TYPES_FIXTURE: NodeManifest = {
+  display: { value_max_chars: 10 },
   categories: [
     { id: "session", label: "Session" },
     { id: "user", label: "User", coming_soon: true },
@@ -37,9 +38,9 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required: true,
           default: "contains",
           options: [
-            { value: "contains", label: "contains" },
-            { value: "equals", label: "equals" },
-            { value: "exists", label: "exists" },
+            { value: "contains", label: "contains", symbol: "⊃" },
+            { value: "equals", label: "equals", symbol: "==" },
+            { value: "exists", label: "exists", symbol: "∃" },
           ],
         },
         {
@@ -76,8 +77,8 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required: true,
           default: "equals",
           options: [
-            { value: "equals", label: "equals" },
-            { value: "contains", label: "contains" },
+            { value: "equals", label: "equals", symbol: "==" },
+            { value: "contains", label: "contains", symbol: "⊃" },
           ],
         },
         {
@@ -114,10 +115,10 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required: true,
           default: "contains",
           options: [
-            { value: "contains", label: "contains" },
-            { value: "matches", label: "matches" },
-            { value: "starts_with", label: "starts_with" },
-            { value: "equals", label: "equals" },
+            { value: "contains", label: "contains", symbol: "⊃" },
+            { value: "matches", label: "matches", symbol: "~=" },
+            { value: "starts_with", label: "starts_with", symbol: "^=" },
+            { value: "equals", label: "equals", symbol: "==" },
           ],
         },
         {
@@ -160,9 +161,9 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required: true,
           default: "contains",
           options: [
-            { value: "equals", label: "equals" },
-            { value: "contains", label: "contains" },
-            { value: "exists", label: "exists" },
+            { value: "equals", label: "equals", symbol: "==" },
+            { value: "contains", label: "contains", symbol: "⊃" },
+            { value: "exists", label: "exists", symbol: "∃" },
           ],
         },
         {

@@ -39,9 +39,9 @@
           "required": true,
           "default": "contains",
           "options": [
-            { "value": "contains", "label": "contains" },
-            { "value": "equals", "label": "equals" },
-            { "value": "exists", "label": "exists" }
+            { "value": "contains", "label": "contains", "symbol": "⊃" },
+            { "value": "equals", "label": "equals", "symbol": "==" },
+            { "value": "exists", "label": "exists", "symbol": "∃" }
           ]
         },
         {
@@ -70,8 +70,8 @@
           "required": true,
           "default": "equals",
           "options": [
-            { "value": "equals", "label": "equals" },
-            { "value": "contains", "label": "contains" }
+            { "value": "equals", "label": "equals", "symbol": "==" },
+            { "value": "contains", "label": "contains", "symbol": "⊃" }
           ]
         },
         {
@@ -102,10 +102,10 @@
           "required": true,
           "default": "contains",
           "options": [
-            { "value": "contains", "label": "contains" },
-            { "value": "matches", "label": "matches" },
-            { "value": "starts_with", "label": "starts_with" },
-            { "value": "equals", "label": "equals" }
+            { "value": "contains", "label": "contains", "symbol": "⊃" },
+            { "value": "matches", "label": "matches", "symbol": "~=" },
+            { "value": "starts_with", "label": "starts_with", "symbol": "^=" },
+            { "value": "equals", "label": "equals", "symbol": "==" }
           ]
         },
         {
@@ -143,12 +143,12 @@
           "required": true,
           "default": "contains",
           "options": [
-            { "value": "equals", "label": "equals" },
-            { "value": "contains", "label": "contains" },
-            { "value": "starts_with", "label": "starts with" },
-            { "value": "ends_with", "label": "ends with" },
-            { "value": "is_one_of", "label": "is one of (comma-separated)" },
-            { "value": "exists", "label": "exists" }
+            { "value": "equals", "label": "equals", "symbol": "==" },
+            { "value": "contains", "label": "contains", "symbol": "⊃" },
+            { "value": "starts_with", "label": "starts with", "symbol": "^=" },
+            { "value": "ends_with", "label": "ends with", "symbol": "=$" },
+            { "value": "is_one_of", "label": "is one of (comma-separated)", "symbol": "∈" },
+            { "value": "exists", "label": "exists", "symbol": "∃" }
           ]
         },
         {
@@ -164,5 +164,6 @@
       ],
       "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
     }
-  ]
+  ],
+  "display": { "value_max_chars": 10 }
 }

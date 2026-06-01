@@ -251,7 +251,12 @@ once at startup into `Arc<NodeManifest>` (in `AppState`) and served verbatim at
 `CanvasProcessor` impl for eval logic); ZERO frontend changes, ZERO backend Rust changes.
 
 ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top level):
-`{ categories: Category[], node_types: NodeTypeSpec[] }`.
+`{ categories: Category[], node_types: NodeTypeSpec[], display?: Display }`.
+
+```jsonc
+// Display — optional top-level, server-owned canvas-summary rules.
+{ "value_max_chars": 10 }   // value_max_chars defaults 10; #[serde(default)] (optional)
+```
 
 ```jsonc
 // Category — drives the palette; coming_soon categories render as disabled chips.
@@ -281,9 +286,11 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
   "required_unless"?: { "field": "<name>", "value": "<v>" },  // required unless sibling field == value
   "default"?: <any>,                         // dropped-node default; missing → empty
   "placeholder"?: "string",                  // text/number inputs
-  "options"?: [ { "value": "contains", "label": "contains" }, ... ],  // select only
+  "options"?: [ { "value": "contains", "label": "contains", "symbol"?: "⊃" }, ... ],  // select only
   "required_message"?: "string"              // user-facing message when required/required_unless fails
 }
+// Option `symbol`: optional compact operator glyph (e.g. equals → "==", contains → "⊃") used ONLY in the
+// canvas condition summary; the dropdown/forms and hover tooltip still use `label`. `#[serde(default)]`.
 
 // Branch — one output edge target on a NodeTypeSpec's `output.branches`.
 { "id": "yes", "label": "Yes" }              // id ∈ { "yes", "no" } (matches rule_graph Branch)
@@ -302,6 +309,11 @@ also ships a `json_expression` node (`category: "json"`, `applies_to: "json"`; f
 `required_unless operator=exists`) and a non-coming_soon `{ "id": "json", "label": "JSON" }` category.
 No backend Rust beyond `AppliesTo`/`applies_to` is needed for the new node — manifest-driven validation
 handles its fields; the proxy adds one `CanvasProcessor` (WF2).
+
+Canvas rendering contract: a decision node shows the manifest `label` as its title and a one-line
+condition summary built by joining each field's display token in field order — select-with-`symbol` →
+`symbol`, select → option `label`, text/number → value truncated to `display.value_max_chars` + `…`. This
+is generic (no per-node-type code); the operator symbols and truncation length are server-owned (manifest).
 
 #### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest)`)
 

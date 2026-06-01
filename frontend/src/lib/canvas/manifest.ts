@@ -2,7 +2,7 @@
 // form (spec Part E). They implement the LOCKED validation + display rules so
 // the frontend mirrors the backend (rule_graph_service::validate) exactly, with
 // ZERO per-node-type code. No React here.
-import type { NodeFieldSpec, NodeTypeSpec } from "@/lib/api/nodeTypes";
+import type { NodeDisplayConfig, NodeFieldSpec, NodeTypeSpec } from "@/lib/api/nodeTypes";
 import type { ProcessorConfig } from "@/lib/canvas/types";
 
 // Build a dropped-node default config from a spec: `type` = kind, then each
@@ -95,4 +95,41 @@ export function nodeTitle(
   processor: ProcessorConfig,
 ): string {
   return spec?.label ?? processor.type;
+}
+
+const DEFAULT_VALUE_MAX_CHARS = 10;
+
+// One token for the canvas condition summary: a select with a server-defined
+// symbol -> the symbol; a select without -> the option label; text/number ->
+// the value truncated to the server's value_max_chars + "…". Empty -> null.
+export function fieldSummaryToken(
+  field: NodeFieldSpec,
+  processor: ProcessorConfig,
+  maxChars: number,
+): string | null {
+  const value = processor[field.name];
+  if (value === undefined || value === null || value === "") return null;
+  if (field.control === "select") {
+    const opt = (field.options ?? []).find((o) => o.value === value);
+    if (opt?.symbol) return opt.symbol;
+    if (opt) return opt.label;
+    return String(value);
+  }
+  const s = String(value);
+  return s.length > maxChars ? s.slice(0, maxChars) + "…" : s;
+}
+
+// The node's one-line condition summary: non-empty field tokens in field
+// order, joined by spaces (e.g. "paywall ⊃ true", "== mobile"). The symbols
+// and truncation length are server-owned (manifest); this only renders them.
+export function nodeSummary(
+  spec: NodeTypeSpec,
+  processor: ProcessorConfig,
+  display: NodeDisplayConfig | undefined,
+): string {
+  const max = display?.value_max_chars ?? DEFAULT_VALUE_MAX_CHARS;
+  return spec.fields
+    .map((f) => fieldSummaryToken(f, processor, max))
+    .filter((t): t is string => t !== null)
+    .join(" ");
 }

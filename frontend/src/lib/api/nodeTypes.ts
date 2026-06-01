@@ -14,6 +14,7 @@ export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 export const NodeFieldOption = z.object({
   value: z.unknown(),
   label: z.string(),
+  symbol: z.string().optional(),
 });
 export type NodeFieldOption = z.infer<typeof NodeFieldOption>;
 
@@ -62,9 +63,13 @@ export const NodeCategory = z.object({
 });
 export type NodeCategory = z.infer<typeof NodeCategory>;
 
+export const NodeDisplayConfig = z.object({ value_max_chars: z.number() });
+export type NodeDisplayConfig = z.infer<typeof NodeDisplayConfig>;
+
 export const NodeManifest = z.object({
   categories: z.array(NodeCategory),
   node_types: z.array(NodeTypeSpec),
+  display: NodeDisplayConfig.optional(),
 });
 export type NodeManifest = z.infer<typeof NodeManifest>;
 
