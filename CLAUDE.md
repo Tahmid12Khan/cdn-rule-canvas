@@ -33,8 +33,10 @@ Rule eval = translate canvas `rule_graph` → JDM `DecisionContent` (`proxy/src/
 
 ## Local fast-debug loop (no full compose)
 
-1. `docker compose --env-file infra/.env -f infra/docker-compose.yml up -d postgres`
-2. `cp backend/.env.example backend/.env && cd backend && PATH="$HOME/.cargo/bin:$PATH" cargo run --bin rre-backend` (embedded `sqlx::migrate!` runs at startup; `cargo run --bin seed_demo` seeds `dn-article`)
+1. **db + upstream**: `docker compose --env-file infra/.env -f infra/docker-compose.yml up -d postgres demo-upstream` (postgres :5432; demo-upstream is the proxy's upstream at :9001)
+2. `cp backend/.env.example backend/.env && cd backend && PATH="$HOME/.cargo/bin:$PATH" cargo run --bin rre-backend` (embedded `sqlx::migrate!` runs at startup — restart the backend to apply a new migration; `cargo run --bin seed_demo` seeds `dn-article`)
 3. `cp frontend/.env.local.example frontend/.env.local && cd frontend && npm run dev` → dashboard at **`/products/features`** (not `/features`)
+4. **proxy** (from repo root): `PATH="$HOME/.cargo/bin:$PATH" UPSTREAM_BASE_URL=http://localhost:9001 BACKEND_BASE_URL=http://localhost:8000 cargo run --manifest-path proxy/Cargo.toml`
+   - **The two env overrides are REQUIRED natively**: `proxy/config/default.json` points at docker hostnames (`demo-upstream:8081`, `backend:8000`) that don't resolve outside compose → upstream 502 + `active_version=miss` in the log. (Inside `make up` they resolve, so no overrides needed there.)
 
 Demo: proxy applies rules at http://localhost:9000/article.html (default UA→paywall, mobile UA→regwall); raw upstream at http://localhost:9001/article.html.
