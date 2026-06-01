@@ -1,5 +1,7 @@
 # Task 06 — Features List Page (Frontend)
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Build the Features list screen (§4.2) and the global app shell (top nav per §4.1). Wire to the real backend with TanStack Query. No version interaction yet — clicking a feature navigates to a stub Version List page (filled in Task 08).
 

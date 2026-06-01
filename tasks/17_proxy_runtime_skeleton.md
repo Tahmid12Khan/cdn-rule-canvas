@@ -33,6 +33,14 @@ Task 04.
    └── Dockerfile
    ```
 2. Deps: `axum`, `tokio` (`full`), `tower`, `tower-http` (`trace`), `hyper`, `reqwest` (`stream`), `serde`, `envy`, `dotenvy`, `tracing`, `tracing-subscriber` (`json`), `uuid` (`v4`). Dev: `wiremock`, `http-body-util`.
+   - **zen rule engine (added now so later tasks don't churn `Cargo.toml`).** Depend on zen via **path**, mirroring the working `playground/Cargo.toml` template:
+     ```toml
+     zen-engine     = { path = "../core/engine" }
+     zen-expression = { path = "../core/expression" }
+     # zen-types is re-exported through zen-engine (`zen_engine::model`, etc.).
+     # Only add `zen-types = { path = "../core/types" }` if a type must be named directly.
+     ```
+   - **Runtime constraint to bake in from day one:** `zen_expression::variable::Variable` uses `Rc` internally and is **`!Send`**, so a zen `decision.evaluate(...)` cannot be `.await`ed directly on the multi-threaded Axum runtime. Evaluation (build `Variable` → evaluate → serialize back to `serde_json::Value`) must run inside `tokio::task::spawn_blocking` on a `new_current_thread` runtime, with only `Send` `serde_json::Value` crossing the boundary — exactly as `playground/src/main.rs` does today. The skeleton's `AppState` / forwarder pipeline should be structured to accommodate this (Task 18 fills in the call); do not assume the engine can be awaited inline.
 3. `build_app(state)` returns an Axum `Router` with one catch-all `fallback` route → `forwarder::forward(state, req)`.
 4. `forwarder.rs` uses a shared `reqwest::Client` (built once at startup, held in `AppState`, reused for connection pooling).
 5. Hop-by-hop header list per RFC 7230 §6.1 stripped both directions.

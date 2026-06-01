@@ -1,5 +1,7 @@
 # Task 12 — Node Palette & Drag-Drop
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Build the horizontal scrollable category palette (§4.5) and wire drag-and-drop so users can drop `MetaTags` and `DeviceType` decision nodes plus user-defined Outcome nodes onto the canvas. Connecting nodes with edges is included.
 

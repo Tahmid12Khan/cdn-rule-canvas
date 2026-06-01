@@ -1,5 +1,7 @@
 # Task 13 — Decision Node Configuration Modal
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Open a side panel (or modal) when a decision node is double-clicked, letting the user configure its processor. Cover **Meta Tags** and **Device Type**. Resolves open question §9.1 for MVP.
 

@@ -1,5 +1,7 @@
 # Task 11 — Rule Builder Canvas Scaffold (Frontend)
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Render the Version Detail page (§4.4 header + §4.5 canvas) using React Flow. The canvas is read-only by default with dotted-grid background, zoom controls, full-screen button, template-library placeholder, and the Anonymous/Registered/Customer slider. No drag-drop yet — that lands in Task 12.
 

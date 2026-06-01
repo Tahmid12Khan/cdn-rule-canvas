@@ -1,7 +1,7 @@
 # Task 19 — Proxy Outcome Applier (Response Modification)
 
 ## Goal
-Apply the outcome identified in Task 18 to the upstream HTML response. Implement the two MVP component types: **HTML Injection** and **Content Truncation**, plus the pass-through `ShowContent` builtin.
+Apply the outcome identified in Task 18 to the upstream HTML response. The `outcome_id` is produced by the zen `DecisionEngine` evaluation in Task 18 (parsed from `DecisionGraphResponse.result`'s `{ outcomeId }` payload); this task simply maps that id to its component config and renders. Implement the two MVP component types: **HTML Injection** and **Content Truncation**, plus the pass-through `ShowContent` builtin.
 
 ## Dependencies
 Task 16, 18.
@@ -27,7 +27,7 @@ Task 16, 18.
 2. `applier/html_injection.rs`, `applier/content_truncation.rs`, `applier/placement_sticky_footer.rs`, `applier/placement_popup.rs`.
 3. `applier/orchestrator.rs::apply_outcome(html, outcome) -> ModificationResult`.
 4. `applier/html_sanitizer.rs` wrapping `ammonia`.
-5. `forwarder.rs` extended: after `evaluator::evaluate` returns an outcome id, look up its config from the cached payload, invoke the orchestrator, write back the modified HTML.
+5. `forwarder.rs` extended: after `evaluator::evaluate` returns an outcome id (from the zen `DecisionEngine` evaluation in Task 18 — the applier is decoupled from how the id was computed), look up its config from the cached payload, invoke the orchestrator, write back the modified HTML.
 6. Gzip helper `proxy/src/infra/encoding.rs` (via `flate2`).
 7. Tests:
    - `html_injection.rs` — each placement mode produces correct DOM.

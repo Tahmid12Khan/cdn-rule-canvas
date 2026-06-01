@@ -3,6 +3,8 @@
 ## Goal
 Formalize the rule graph JSON schema (§3.5) covering Decision Nodes (with MetaTags + DeviceType as the MVP processors), Outcome terminals, and edges. Add server-side validation that the graph is well-formed before persisting in `version.rule_graph`.
 
+> **Note:** This task owns the **canvas `rule_graph` serde schema + validation only**. The exact same persisted JSON is later consumed at runtime by the proxy's **JDM translator** (Task 18), which converts `CanvasGraph` → `zen_engine::model::DecisionContent` and evaluates it with `zen_engine::DecisionEngine`. Keep the schema stable and well-documented so the translator can rely on it; do **not** add proxy/evaluation concerns here.
+
 ## Dependencies
 Task 07, 09.
 
@@ -50,4 +52,4 @@ Task 07, 09.
 3. `cargo test` green.
 
 ## Done When
-PR merged. Graph schema doc auto-generated to `docs/rule_graph_schema.md` via a `schemars` JSON-schema export (small binary in `src/bin/`).
+PR merged. Graph schema doc auto-generated to `docs/rule_graph_schema.md` via a `schemars` JSON-schema export (small binary in `src/bin/`). The proxy team (Task 18) confirms the published schema is sufficient input for the JDM translator (every processor `type` and edge `branch` value maps to a translatable JDM construct).

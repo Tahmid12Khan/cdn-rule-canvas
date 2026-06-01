@@ -1,5 +1,7 @@
 # Task 08 — Feature Version List Page (Frontend)
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Build the Feature Version List page (§4.3) — the deployment-status header row, the versions table with status pills, search, pagination, row context menu, and the `+ Add A New Version` action.
 

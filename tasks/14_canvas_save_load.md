@@ -1,5 +1,7 @@
 # Task 14 — Persist Rule Graph (Save / Save as New Version)
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Connect the in-memory rule graph from Tasks 11–13 to the backend. Implement both **Save** (PATCH current DRAFT) and **Save as New Version** (POST new version). Edits blocked unless version is `DRAFT`.
 

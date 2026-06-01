@@ -1,5 +1,7 @@
 # Task 15 — Edit Outcome Page
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Build the Edit Outcome screen (§4.6) — title/description, components list with reordering, content-control behaviors, placement-specific component shortcuts, and Cancel/Save footer.
 

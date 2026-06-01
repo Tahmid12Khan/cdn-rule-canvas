@@ -1,5 +1,7 @@
 # Task 01 — Frontend Scaffold
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Stand up a Next.js (latest stable, App Router) + TypeScript (latest stable) + Tailwind project on the active Node.js LTS, with linting, formatting, and a unit-test harness. Deliver a styled landing page that visibly confirms the toolchain works.
 

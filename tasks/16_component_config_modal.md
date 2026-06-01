@@ -1,5 +1,7 @@
 # Task 16 — Component Configuration Modal
 
+> **Note:** Build fresh React components with TailwindCSS per the design sections; `playground/static/flow.html` is a REFERENCE ONLY for React Flow usage — do NOT copy or embed that monolithic HTML file.
+
 ## Goal
 Build the component config modal (§4.7) supporting two MVP component types: **HTML Injection** and **Content Truncation**. Includes the Visual/HTML editor toggle for the rich-text HTML field.
 
