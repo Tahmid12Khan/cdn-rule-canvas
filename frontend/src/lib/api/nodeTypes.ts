@@ -41,8 +41,12 @@ export const NodeFieldSpec = z.object({
 });
 export type NodeFieldSpec = z.infer<typeof NodeFieldSpec>;
 
+// `id` is the manifest output-branch identifier (display metadata). Decision
+// nodes use "yes"/"no"; expression nodes use a single passthrough "out" branch
+// (expression-nodes-spec §2). Mirror the backend `BranchSpec.id: String` — keep
+// this a free string so new node types add branches with ZERO frontend change.
 export const NodeBranch = z.object({
-  id: z.enum(["yes", "no"]),
+  id: z.string(),
   label: z.string(),
 });
 export type NodeBranch = z.infer<typeof NodeBranch>;

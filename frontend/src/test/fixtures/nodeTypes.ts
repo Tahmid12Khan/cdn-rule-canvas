@@ -213,7 +213,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required_message: "Enter the maximum array length",
         },
       ],
-      output: { branches: [{ id: "yes", label: "Next" }] },
+      output: { branches: [{ id: "out", label: "Next" }] },
     },
     {
       kind: "add_attribute",
@@ -243,7 +243,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required_message: "Enter the value to set",
         },
       ],
-      output: { branches: [{ id: "yes", label: "Next" }] },
+      output: { branches: [{ id: "out", label: "Next" }] },
     },
     {
       kind: "apply_outcome",
@@ -262,7 +262,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           required_message: "Pick an outcome to apply",
         },
       ],
-      output: { branches: [{ id: "yes", label: "Next" }] },
+      output: { branches: [{ id: "out", label: "Next" }] },
     },
   ],
 };
