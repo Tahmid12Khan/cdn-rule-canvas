@@ -33,6 +33,8 @@ Rule eval = translate canvas `rule_graph` → JDM `DecisionContent` (`proxy/src/
 
 ## Local fast-debug loop (no full compose)
 
+**`make dev`** (= `./scripts/dev.sh`) runs the whole loop in one command: frees native ports 3000/8000/9000, starts postgres + demo-upstream in docker, runs backend/frontend/proxy natively (logs → `.devlogs/`, tailed live), and seeds nothing unless `--seed` is passed (`./scripts/dev.sh --seed`). It's re-runnable (kills the prior run's port owners first); Ctrl-C stops the native services but leaves the docker db + upstream up (`make down` to stop those). The manual steps below are the equivalent done by hand:
+
 1. **db + upstream**: `docker compose --env-file infra/.env -f infra/docker-compose.yml up -d postgres demo-upstream` (postgres :5432; demo-upstream is the proxy's upstream at :9001)
 2. `cp backend/.env.example backend/.env && cd backend && PATH="$HOME/.cargo/bin:$PATH" cargo run --bin rre-backend` (embedded `sqlx::migrate!` runs at startup — restart the backend to apply a new migration; `cargo run --bin seed_demo` seeds `dn-article`)
 3. `cp frontend/.env.local.example frontend/.env.local && cd frontend && npm run dev` → dashboard at **`/products/features`** (not `/features`)

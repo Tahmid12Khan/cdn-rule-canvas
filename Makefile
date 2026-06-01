@@ -10,7 +10,7 @@ COMPOSE      := docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down down-clean seed logs ps restart \
+.PHONY: help up down down-clean dev seed logs ps restart \
         backend-check proxy-check frontend-check check
 
 help: ## Show this help
@@ -25,6 +25,9 @@ down: ## Stop the stack (keeps the postgres volume)
 
 down-clean: ## Stop the stack AND drop the postgres volume (rre-pg-data)
 	@./scripts/down.sh --volumes
+
+dev: ## Local fast loop: db+upstream in docker, backend/frontend/proxy native (frees ports first; Ctrl-C stops them)
+	@./scripts/dev.sh
 
 seed: ## Re-run the idempotent demo seeder against the running backend
 	@$(COMPOSE) exec -T backend seed_demo
