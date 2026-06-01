@@ -1,0 +1,31 @@
+# Build context filter for the repo-root Docker builds (backend + proxy).
+# Keeps secrets and bulky/irrelevant artifacts out of the image context.
+.git
+.github
+.idea
+.cursor
+.DS_Store
+
+# Rust build artifacts (rebuilt inside the image)
+target
+**/target
+
+# Node artifacts (frontend has its own context/Dockerfile)
+node_modules
+**/node_modules
+frontend/.next
+frontend/out
+
+# Secrets / local env — never copy into an image
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+
+# Docs / local tooling not needed in the runtime image
+docs
+tasks
+test-data
+examples
+*.workflow.js

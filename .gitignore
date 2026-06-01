@@ -1,11 +1,20 @@
 .DS_Store
 .temp
 
-/target
-/Cargo.lock
+target
+Cargo.lock
 
 .idea
+.cursor
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+!.env.local.example
 .env.docker
+*.pem
+*.key
 
 node_modules
 index.node
