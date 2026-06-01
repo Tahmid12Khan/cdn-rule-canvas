@@ -16,23 +16,27 @@ const OUTCOME_UUID = "11111111-1111-1111-1111-111111111111";
 const graph: RuleGraph = {
   anonymous: {
     nodes: [
+      { kind: "start", id: "start", position: { x: 0, y: 0 } },
       {
         kind: "decision",
         id: "d1",
         processor: { type: "device_type", operator: "equals", value: "mobile" },
-        position: { x: 0, y: 0 },
+        position: { x: 0, y: 100 },
       },
       {
-        kind: "outcome",
+        kind: "expression",
         id: "o1",
-        outcome_id: OUTCOME_UUID,
-        position: { x: 100, y: 100 },
+        action: { type: "apply_outcome", outcome_id: OUTCOME_UUID },
+        position: { x: 100, y: 200 },
       },
+      { kind: "end", id: "end", position: { x: 100, y: 300 } },
     ],
     edges: [
+      { id: "e0", source_node_id: "start", target_node_id: "d1", branch: "yes" },
       { id: "e1", source_node_id: "d1", target_node_id: "o1", branch: "yes" },
+      { id: "e2", source_node_id: "o1", target_node_id: "end", branch: "yes" },
     ],
-    root_node_id: "d1",
+    root_node_id: "start",
   },
   registered: { nodes: [], edges: [], root_node_id: null },
   customer: { nodes: [], edges: [], root_node_id: null },
@@ -57,7 +61,6 @@ describe("TestPanel", () => {
     server.use(
       http.post(`${PROXY_BASE}/__rre/eval`, () =>
         HttpResponse.json({
-          matched_outcome_id: OUTCOME_UUID,
           matched_node_id: "o1",
           traversed_node_ids: ["d1", "o1"],
           traversed_edge_ids: ["e1"],

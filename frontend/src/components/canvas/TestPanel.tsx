@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
+import { TransformationJourney } from "@/components/canvas/TransformationJourney";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -117,15 +118,28 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         nodeIds: new Set(res.traversed_node_ids),
         edgeIds: new Set(res.traversed_edge_ids),
         outcomeNodeId: res.matched_node_id,
-        deadEnd: res.matched_outcome_id === null,
+        deadEnd: res.matched_node_id === null,
       });
     },
   });
 
+  // The matched node is the terminal expression node on the path. The proxy no
+  // longer returns a single outcome id (the canvas now applies an ordered action
+  // pipeline, expression-nodes-spec §0/§5); recover the applied outcome's id from
+  // that node's apply_outcome action in the live canvas so the banner can name it.
   const matchedTitle = useMemo(() => {
-    if (!mutation.data?.matched_outcome_id) return null;
-    return outcomeTitleById(mutation.data.matched_outcome_id);
-  }, [mutation.data, outcomeTitleById]);
+    const matchedNodeId = mutation.data?.matched_node_id;
+    if (!matchedNodeId) return null;
+    const { canvases } = useRuleBuilderStore.getState();
+    const node = canvases[selected].nodes.find((n) => n.id === matchedNodeId);
+    if (node?.type !== "expressionNode") return null;
+    const { action, outcomeTitle } = node.data;
+    if (action.type !== "apply_outcome") return null;
+    if (outcomeTitle) return outcomeTitle;
+    const outcomeId = action.outcome_id;
+    if (typeof outcomeId !== "string" || !outcomeId) return null;
+    return outcomeTitleById(outcomeId);
+  }, [mutation.data, selected, outcomeTitleById]);
 
   function updateRow(index: number, patch: Partial<MetaRow>) {
     setMetaRows((rows) =>
@@ -346,6 +360,16 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
             onRetry={evalError.retryable ? handleRun : undefined}
           />
         </div>
+      )}
+
+      {mutation.data && mutation.data.journey.length > 0 && (
+        <TransformationJourney
+          // Remount on each run so the stepper resets to the first node (and
+          // re-glows it) rather than carrying a stale index across runs.
+          key={mutation.submittedAt}
+          journey={mutation.data.journey}
+          featureType={featureType}
+        />
       )}
     </section>
   );

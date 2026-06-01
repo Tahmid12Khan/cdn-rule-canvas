@@ -53,12 +53,29 @@ export const EvalStep = z.object({
 });
 export type EvalStep = z.infer<typeof EvalStep>;
 
+// One node in the Transformation Journey (expression-nodes-spec §5). `body_after`
+// is the body AFTER this node's action — a JSON value for JSON features, a raw
+// string for HTML. Decisions/start/end don't mutate, so theirs equals the
+// running body. `branch` is the decision's taken branch (true/false) or null for
+// non-decision nodes.
+export const JourneyStep = z.object({
+  index: z.number(),
+  node_id: z.string(),
+  kind: z.string(),
+  label: z.string(),
+  branch: z.boolean().nullable(),
+  body_after: z.unknown(),
+});
+export type JourneyStep = z.infer<typeof JourneyStep>;
+
 export const EvalResponse = z.object({
-  matched_outcome_id: z.string().nullable(),
   matched_node_id: z.string().nullable(),
   traversed_node_ids: z.array(z.string()),
   traversed_edge_ids: z.array(z.string()),
   steps: z.array(EvalStep),
+  // Additive (expression-nodes-spec §5). Absent on older proxies → defaults to
+  // an empty array so the journey view simply doesn't render.
+  journey: z.array(JourneyStep).default([]),
 });
 export type EvalResponse = z.infer<typeof EvalResponse>;
 
