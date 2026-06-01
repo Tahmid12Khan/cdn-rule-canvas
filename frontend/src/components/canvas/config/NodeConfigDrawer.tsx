@@ -14,9 +14,8 @@
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 
-import { MetaTagsForm } from "@/components/canvas/config/MetaTagsForm";
-import { DeviceTypeForm } from "@/components/canvas/config/DeviceTypeForm";
-import { ArticleUrlForm } from "@/components/canvas/config/ArticleUrlForm";
+import { GenericNodeForm } from "@/components/canvas/config/GenericNodeForm";
+import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { CanvasKey, ProcessorConfig, RFNode } from "@/lib/canvas/types";
 
@@ -37,6 +36,7 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
     (s) => s.updateNodeProcessor,
   );
   const removeNode = useRuleBuilderStore((s) => s.removeNode);
+  const { specByKind } = useNodeTypes();
 
   const node = useMemo<RFNode | undefined>(
     () => nodes.find((n) => n.id === configNodeId),
@@ -47,6 +47,7 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
   const isOutcome = node?.type === "outcomeNode";
   const isStart = node?.type === "startNode";
   const initial = isDecision ? node.data.processor : null;
+  const spec = initial ? specByKind(initial.type) : undefined;
 
   // View-only when the version is not in edit mode. Decision forms still load
   // but render disabled; Save/Delete/discard are suppressed.
@@ -153,12 +154,13 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
           </Dialog.Description>
 
           <div className="flex-1 overflow-y-auto px-5 py-4">
-            {/* Decision: render the per-processor form (disabled in view mode).
-                key on the node id so the form remounts (fresh state) when a
-                different node is opened. */}
-            {isDecision && initial?.type === "meta_tags" && (
-              <MetaTagsForm
-                key={configNodeId ?? "mt"}
+            {/* Decision: render the generic manifest-driven form (disabled in
+                view mode). key on the node id so the form remounts (fresh state)
+                when a different node is opened. */}
+            {isDecision && initial && spec && (
+              <GenericNodeForm
+                key={configNodeId ?? "node"}
+                spec={spec}
                 initial={initial}
                 disabled={readOnly}
                 onChange={(d, v) => {
@@ -167,27 +169,11 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
                 }}
               />
             )}
-            {isDecision && initial?.type === "device_type" && (
-              <DeviceTypeForm
-                key={configNodeId ?? "dt"}
-                initial={initial}
-                disabled={readOnly}
-                onChange={(d, v) => {
-                  setDraft(d);
-                  setValid(v);
-                }}
-              />
-            )}
-            {isDecision && initial?.type === "article_url" && (
-              <ArticleUrlForm
-                key={configNodeId ?? "au"}
-                initial={initial}
-                disabled={readOnly}
-                onChange={(d, v) => {
-                  setDraft(d);
-                  setValid(v);
-                }}
-              />
+            {isDecision && initial && !spec && (
+              <p className="text-sm text-danger" data-testid="unknown-kind">
+                Unknown node type “{initial.type}”. This node type is not
+                available in the current node-type manifest.
+              </p>
             )}
 
             {/* Outcome: no processor form — show its label / linked outcome. */}

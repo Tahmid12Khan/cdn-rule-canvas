@@ -18,6 +18,7 @@ use rre_backend::{
     error::AppError,
     schemas::version::{PublishEnvironment, VersionCreate},
     services::version_service,
+    state::AppState,
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -36,15 +37,15 @@ async fn seed_feature(pool: &PgPool, id: &str) {
 }
 
 /// Create + publish a version to the given environment; returns its number.
-async fn publish_new(pool: &PgPool, env: PublishEnvironment) -> (Uuid, i32) {
+async fn publish_new(state: &AppState, env: PublishEnvironment) -> (Uuid, i32) {
     let body = VersionCreate {
         description: None,
         ..Default::default()
     };
-    let v = version_service::create_version(pool, FID, body)
+    let v = version_service::create_version(&state.pool, FID, body, &state.node_manifest)
         .await
         .unwrap();
-    version_service::publish(pool, FID, v.version_number, env)
+    version_service::publish(&state.pool, FID, v.version_number, env)
         .await
         .unwrap();
     (v.id, v.version_number)
@@ -91,7 +92,7 @@ async fn active_version_returns_outcomes_with_components_ordered() {
     let pool = &db.state.pool;
     seed_feature(pool, FID).await;
 
-    let (vid, vnum) = publish_new(pool, PublishEnvironment::Live).await;
+    let (vid, vnum) = publish_new(&db.state, PublishEnvironment::Live).await;
 
     // The builtin outcome is at order 0; add a second outcome with components.
     let o2 = seed_outcome(pool, vid, "Paywall", 1).await;
@@ -124,7 +125,7 @@ async fn active_version_staging_environment() {
     let pool = &db.state.pool;
     seed_feature(pool, FID).await;
 
-    let (_vid, vnum) = publish_new(pool, PublishEnvironment::Staging).await;
+    let (_vid, vnum) = publish_new(&db.state, PublishEnvironment::Staging).await;
 
     let av = version_service::active_version(pool, FID, PublishEnvironment::Staging)
         .await
@@ -151,7 +152,7 @@ async fn active_version_unknown_feature_is_404() {
 async fn active_version_http_endpoint_returns_payload() {
     let db = common::setup().await;
     seed_feature(&db.state.pool, FID).await;
-    let (_vid, vnum) = publish_new(&db.state.pool, PublishEnvironment::Live).await;
+    let (_vid, vnum) = publish_new(&db.state, PublishEnvironment::Live).await;
 
     let app = build_app(db.state.clone());
     let res = app

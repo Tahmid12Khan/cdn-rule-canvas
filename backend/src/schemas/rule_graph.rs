@@ -3,7 +3,9 @@
 //! `RuleGraph` is the top-level shape of `versions.rule_graph` JSONB: one
 //! [`CanvasGraph`] per user class (anonymous / registered / customer). Each
 //! canvas is a directed graph of [`Node`]s connected by [`Edge`]s. Decision
-//! nodes carry a [`ProcessorConfig`]; outcome nodes reference an outcome row.
+//! nodes carry a generic [`ProcessorConfig`] (a snake_case `type` discriminator
+//! plus an open field map, validated against the node-type manifest); outcome
+//! nodes reference an outcome row.
 //!
 //! This shape is STABLE and mirrored verbatim by the proxy
 //! (`proxy/src/domain/graph.rs`). Do not change it without bumping the contract.
@@ -87,82 +89,22 @@ impl Node {
     }
 }
 
-/// A decision processor. Internally tagged by `type`.
+/// A decision processor: a generic, manifest-validated shape.
+///
+/// Round-trips the SAME wire JSON the frontend and proxy exchange:
+/// `{ "type": "<kind>", "<field>": <value>, ... }`. `type` is the canonical
+/// snake_case kind (e.g. `"article_url"`); the remaining fields are an open
+/// `snake_case` map validated against the node-type manifest at the service
+/// boundary (NOT by serde variants). Unknown extra fields are preserved on
+/// round-trip and ignored by validation (forward-compatible).
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ProcessorConfig {
-    /// Match against an HTML `<meta>` tag's `content` attribute.
-    MetaTags {
-        /// The `name` of the meta tag to read.
-        tag_name: String,
-        /// How to compare the tag content.
-        operator: MetaTagsOperator,
-        /// Comparison operand (unused for `exists`).
-        #[serde(default)]
-        value: Option<String>,
-    },
-    /// Match against the request device class derived from the user agent.
-    DeviceType {
-        /// How to compare the device.
-        operator: DeviceOperator,
-        /// Target device class.
-        value: DeviceValue,
-    },
-    /// Match against the request article URL (path).
-    ArticleUrl {
-        /// How to compare the URL.
-        operator: ArticleUrlOperator,
-        /// Comparison operand (regex pattern when `operator` is `matches`).
-        value: String,
-    },
-}
-
-/// Comparison operator for the meta-tags processor.
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MetaTagsOperator {
-    /// Substring match.
-    Contains,
-    /// Exact match.
-    Equals,
-    /// Presence check (value ignored).
-    Exists,
-}
-
-/// Comparison operator for the device-type processor.
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceOperator {
-    /// Exact match.
-    Equals,
-    /// Substring match.
-    Contains,
-}
-
-/// Comparison operator for the article-url processor.
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ArticleUrlOperator {
-    /// Substring match.
-    Contains,
-    /// Regular-expression match.
-    Matches,
-    /// Prefix match.
-    StartsWith,
-    /// Exact match.
-    Equals,
-}
-
-/// Device class operand.
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceValue {
-    /// Mobile phone.
-    Mobile,
-    /// Desktop / laptop.
-    Desktop,
-    /// Tablet.
-    Tablet,
+pub struct ProcessorConfig {
+    /// The canonical snake_case kind, e.g. `"article_url"`.
+    pub r#type: String,
+    /// The remaining processor fields as a flat snake_case map.
+    #[serde(flatten)]
+    #[schema(value_type = Object)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// A directed edge between two nodes, labelled with the branch it represents.

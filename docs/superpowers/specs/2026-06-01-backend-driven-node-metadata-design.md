@@ -102,7 +102,7 @@ Field controls supported for MVP: `select` (with `options`), `text`, `number`.
 Conditional requirement (covers meta_tags' "value required unless `exists`"):
 ```jsonc
 { "name": "value", "control": "text",
-  "requiredUnless": { "field": "operator", "value": "exists" } }
+  "required_unless": { "field": "operator", "value": "exists" } }
 ```
 
 Palette categories (including the disabled "Coming soon" ones) are also declared in the manifest, so even those are backend-controlled:
@@ -110,7 +110,7 @@ Palette categories (including the disabled "Coming soon" ones) are also declared
 "categories": [
   { "id": "content",  "label": "Content" },
   { "id": "session",  "label": "Session" },
-  { "id": "user",     "label": "User",  "comingSoon": true },
+  { "id": "user",     "label": "User",  "coming_soon": true },
   ...
 ]
 ```
@@ -136,7 +136,7 @@ The three existing types (`meta_tags`, `device_type`, `article_url`) are ported 
 Processor validation becomes manifest-driven, run per decision node, emitting the same `{loc, msg, rule_id}` 422 details:
 
 - `type` must be a known manifest `kind` → else detail (`rule_id: "processor_kind_known"`).
-- For each manifest `field` with `required` (or `requiredUnless` unsatisfied): value must be present/non-empty (`rule_id: "processor_field_required"`).
+- For each manifest `field` with `required` (or `required_unless` unsatisfied): value must be present/non-empty (`rule_id: "processor_field_required"`).
 - For `select` fields: value must be one of `options[].value` (`rule_id: "processor_field_option"`).
 - Unknown extra fields: ignored (forward-compatible) — decision recorded in spec, not an error.
 
@@ -190,7 +190,7 @@ Update `CONTRACTS.md §6` to describe processor config as a manifest-validated g
 
 ### Palette — `frontend/src/lib/canvas/nodeTemplates.ts` + palette components
 
-- Categories and chips generated from the manifest (`categories` + each spec's `category`/`label`). Disabled "Coming soon" chips come from categories flagged `comingSoon`.
+- Categories and chips generated from the manifest (`categories` + each spec's `category`/`label`). Disabled "Coming soon" chips come from categories flagged `coming_soon`.
 - Default dropped-config built from each field's `default` (missing → empty), so a freshly-dropped node still nudges the user to open the config drawer (same UX as today).
 - Outcome chips remain dynamic (per current version's outcomes) — unchanged.
 - The hardcoded `STATIC_CATEGORIES` decision chips and `DEFAULT_*` consts are removed.
@@ -198,7 +198,7 @@ Update `CONTRACTS.md §6` to describe processor config as a manifest-validated g
 ### Config form — `frontend/src/components/canvas/config/NodeConfigDrawer.tsx` (+ a new generic form renderer)
 
 - A generic renderer builds controls from `fields[]`: `select` → dropdown of `options`, `text` → input, `number` → number input.
-- Validation derived from the manifest: `required`, `requiredUnless`, and `select` `options` membership — producing the same inline messages the hardcoded Zod schemas did (messages carried in the manifest where they were user-facing, e.g. placeholders/help).
+- Validation derived from the manifest: `required`, `required_unless`, and `select` `options` membership — producing the same inline messages the hardcoded Zod schemas did (messages carried in the manifest where they were user-facing, e.g. placeholders/help).
 - The hardcoded `processorSchemas.ts` Zod unions and per-type form components are removed; serialize/deserialize (`lib/canvas/serialize.ts` / `deserialize.ts`) continue to round-trip the generic `{ type, ...fields }` shape (largely unchanged, since the JSON shape is preserved).
 
 ### Type changes — `frontend/src/lib/canvas/types.ts`
@@ -210,9 +210,9 @@ Update `CONTRACTS.md §6` to describe processor config as a manifest-validated g
 ## Testing & verification
 
 - **Per-service gates:** `make backend-check`, `make proxy-check`, `make frontend-check` all green (clippy/fmt/cargo test, lint/typecheck/vitest).
-- **Backend:** unit tests for manifest loading + manifest-driven validation (known/unknown kind, required, requiredUnless, option membership) replacing the enum-based tests.
+- **Backend:** unit tests for manifest loading + manifest-driven validation (known/unknown kind, required, required_unless, option membership) replacing the enum-based tests.
 - **Proxy:** translator + processor tests updated to the snake_case kinds; existing `dn-article` evaluation regression — anonymous→paywall, mobile→regwall — unchanged.
-- **Frontend:** vitest for the generic form renderer (renders select/text, enforces required/requiredUnless), palette built from a manifest fixture, node title truncation, tooltip content. Playwright canvas round-trip still passes.
+- **Frontend:** vitest for the generic form renderer (renders select/text, enforces required/required_unless), palette built from a manifest fixture, node title truncation, tooltip content. Playwright canvas round-trip still passes.
 - **Headline acceptance — JSON-only new node:** add a test-only node type to a manifest fixture (no frontend/backend-Rust edit) and assert it appears in the palette, renders its label, validates, and (with a trivial test processor registered in the proxy) evaluates. Proves "frontend needs no change; backend change is enough."
 - **E2E demo unchanged:** `make up` → proxy still applies rules at `:9000/article.html`.
 

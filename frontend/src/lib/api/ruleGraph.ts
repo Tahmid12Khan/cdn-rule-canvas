@@ -10,41 +10,13 @@ export type Position = z.infer<typeof Position>;
 export const Branch = z.enum(["yes", "no"]);
 export type Branch = z.infer<typeof Branch>;
 
-export const MetaTagsOperator = z.enum(["contains", "equals", "exists"]);
-export type MetaTagsOperator = z.infer<typeof MetaTagsOperator>;
-
-export const DeviceOperator = z.enum(["equals", "contains"]);
-export type DeviceOperator = z.infer<typeof DeviceOperator>;
-
-export const DeviceValue = z.enum(["mobile", "desktop", "tablet"]);
-export type DeviceValue = z.infer<typeof DeviceValue>;
-
-export const ArticleUrlOperator = z.enum([
-  "contains",
-  "matches",
-  "starts_with",
-  "equals",
-]);
-export type ArticleUrlOperator = z.infer<typeof ArticleUrlOperator>;
-
-export const ProcessorConfig = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("meta_tags"),
-    tag_name: z.string(),
-    operator: MetaTagsOperator,
-    value: z.string().nullish(),
-  }),
-  z.object({
-    type: z.literal("device_type"),
-    operator: DeviceOperator,
-    value: DeviceValue,
-  }),
-  z.object({
-    type: z.literal("article_url"),
-    operator: ArticleUrlOperator,
-    value: z.string(),
-  }),
-]);
+// Generic, manifest-validated processor config (BACKEND CONTRACT §6): one
+// snake_case `type` discriminator plus an OPEN map of snake_case config fields.
+// `.passthrough()` preserves any extra fields on round-trip (forward-compatible);
+// the node-type manifest is the runtime contract, not a fixed zod union.
+export const ProcessorConfig = z
+  .object({ type: z.string() })
+  .passthrough();
 export type ProcessorConfig = z.infer<typeof ProcessorConfig>;
 
 export const GraphNode = z.discriminatedUnion("kind", [

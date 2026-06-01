@@ -13,6 +13,7 @@ pub mod health;
 // Domain-owned handler modules (each exposes `pub fn router() -> Router<AppState>`):
 pub mod components;
 pub mod features;
+pub mod node_types;
 pub mod outcomes;
 pub mod versions;
 
@@ -26,6 +27,7 @@ pub fn health_router() -> Router<AppState> {
 /// All `/api/v1/*` routes merged into one router.
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(node_types::router())
         .merge(features::router())
         .merge(versions::router())
         .merge(outcomes::router())

@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 
+import { useNodeTypes } from "@/hooks/useNodeTypes";
 import {
   buildPalette,
   type NodeChipDef,
@@ -24,7 +25,11 @@ interface NodePaletteProps {
 const SEARCH_TAB = "__search";
 
 export function NodePalette({ outcomes, draggable }: NodePaletteProps) {
-  const categories = useMemo(() => buildPalette(outcomes), [outcomes]);
+  const { manifest } = useNodeTypes();
+  const categories = useMemo(
+    () => buildPalette(manifest, outcomes),
+    [manifest, outcomes],
+  );
   const [activeTab, setActiveTab] = useState<string>(
     categories[0]?.id ?? SEARCH_TAB,
   );

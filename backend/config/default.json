@@ -1,0 +1,9 @@
+{
+  "app_env": "dev",
+  "app_version": "0.1.0",
+  "git_commit": "unknown",
+  "frontend_origin": "http://localhost:3000",
+  "bind_addr": "0.0.0.0:8000",
+  "db_max_connections": 10,
+  "node_manifest_path": "config/node_types.json"
+}

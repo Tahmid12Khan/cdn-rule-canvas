@@ -1,30 +1,21 @@
 "use client";
 
 // Decision node: blue diamond rendered via CSS rotation. The outer square is
-// rotate(45deg); the label content is counter-rotated (-45deg) so text stays
-// upright. Two source handles (id="yes" / id="no") + one target handle. The
-// processor sub-label (OPERATOR / value) renders above the diamond. (Tasks
-// 11/12/13)
-import { memo } from "react";
+// rotate(45deg); the diamond label content is counter-rotated (-45deg) so text
+// stays upright. Two source handles (id="yes" / id="no") + one target handle.
+//
+// Backend-driven (spec Part E): the title shown ABOVE the diamond is the node
+// type's manifest `label` (e.g. article_url -> "Article URL"), truncated with …
+// and shown in full on hover. The hover tooltip lists every field's current
+// value, the spec summary, and the output branches. All metadata comes from the
+// node-type manifest (useNodeTypes) — there is NO per-type code here.
+import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 
+import { useNodeTypes } from "@/hooks/useNodeTypes";
+import { fieldDisplayValue, nodeTitle } from "@/lib/canvas/manifest";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { DecisionNodeData, ProcessorConfig } from "@/lib/canvas/types";
-
-// Human sub-label: "CONTAINS / true" (meta_tags) or "EQUALS / mobile" (device).
-function processorSubLabel(p: ProcessorConfig): string {
-  if (p.type === "meta_tags") {
-    const op = p.operator.toUpperCase();
-    return p.operator === "exists" ? op : `${op} / ${p.value ?? ""}`;
-  }
-  return `${p.operator.toUpperCase()} / ${p.value}`;
-}
-
-// Short title shown inside the diamond.
-function processorTitle(p: ProcessorConfig): string {
-  if (p.type === "meta_tags") return p.tag_name?.trim() ? p.tag_name : "Meta Tags";
-  return "Device";
-}
+import type { DecisionNodeData } from "@/lib/canvas/types";
 
 function DecisionNodeImpl({ id, data, selected }: NodeProps<DecisionNodeData>) {
   const hasError = useRuleBuilderStore((s) => Boolean(s.nodeErrors[id]));
@@ -36,19 +27,33 @@ function DecisionNodeImpl({ id, data, selected }: NodeProps<DecisionNodeData>) {
   );
   const testActive = useRuleBuilderStore((s) => s.testHighlight !== null);
   const dimmed = testActive && !onPath;
-  const subLabel = processorSubLabel(data.processor);
-  const title = processorTitle(data.processor);
+
+  const { specByKind } = useNodeTypes();
+  const processor = data.processor;
+  const spec = specByKind(processor.type);
+  const title = nodeTitle(spec, processor);
+
+  // Lightweight hover popover (does NOT wrap the node in a portal/trigger that
+  // would intercept React Flow drag/handle interactions — it is a sibling
+  // overlay toggled purely by mouse enter/leave on the container).
+  const [hovered, setHovered] = useState(false);
 
   return (
     <div
-      className={["flex flex-col items-center", dimmed ? "opacity-30" : ""].join(
+      className={["relative flex flex-col items-center", dimmed ? "opacity-30" : ""].join(
         " ",
       )}
       data-testid="decision-node"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {/* processor sub-label above the diamond */}
-      <span className="mb-1 max-w-[140px] truncate rounded bg-bg-elevated/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-action-700 shadow-sm">
-        {subLabel}
+      {/* manifest label at the TOP of the node, truncated to ~16ch with … */}
+      <span
+        className="mb-1 max-w-[120px] truncate rounded bg-bg-elevated/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-action-700 shadow-sm"
+        title={title}
+        data-testid="decision-title"
+      >
+        {title}
       </span>
 
       <div className="relative h-16 w-16">
@@ -99,6 +104,36 @@ function DecisionNodeImpl({ id, data, selected }: NodeProps<DecisionNodeData>) {
         <span className="mt-1 max-w-[140px] truncate text-[10px] font-medium text-danger">
           {errorMsg}
         </span>
+      )}
+
+      {/* Hover tooltip. pointer-events-none so it never blocks drag/handles. */}
+      {hovered && spec && (
+        <div
+          role="tooltip"
+          data-testid="decision-tooltip"
+          className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-56 -translate-x-1/2 rounded-md border border-status-prevBg bg-bg-elevated p-3 text-left shadow-lg"
+        >
+          <p className="mb-1 text-xs font-semibold text-nav">{title}</p>
+          <p className="mb-2 text-[11px] text-status-prevFg">{spec.summary}</p>
+          <dl className="space-y-0.5">
+            {spec.fields.map((field) => (
+              <div key={field.name} className="flex justify-between gap-2">
+                <dt className="text-[11px] text-status-prevFg">{field.label}:</dt>
+                <dd className="truncate text-[11px] font-medium text-nav">
+                  {fieldDisplayValue(field, processor)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-2 border-t border-status-prevBg pt-1.5">
+            <p className="text-[10px] uppercase tracking-wide text-status-prev">
+              Branches
+            </p>
+            <p className="text-[11px] text-nav">
+              {spec.output.branches.map((b) => b.label).join(" · ")}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -15,6 +15,7 @@ use crate::{
     repositories::{component_repository, outcome_repository, version_repository as repo},
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
+        node_type::NodeManifest,
         pagination::{Page, PageParams},
         rule_graph::{Node, RuleGraph},
         version::{
@@ -87,6 +88,7 @@ pub async fn create_version(
     pool: &PgPool,
     feature_id: &str,
     body: VersionCreate,
+    manifest: &NodeManifest,
 ) -> AppResult<VersionRead> {
     if !repo::feature_exists(pool, feature_id).await? {
         return Err(AppError::FeatureNotFound(format!(
@@ -158,7 +160,7 @@ pub async fn create_version(
             .iter()
             .map(|o| o.id)
             .collect();
-    rule_graph_service::validate(&graph, &valid_outcome_ids)?;
+    rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
 
     let rule_graph_json =
         serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
@@ -313,6 +315,7 @@ pub async fn update(
     feature_id: &str,
     version_number: i32,
     body: VersionUpdate,
+    manifest: &NodeManifest,
 ) -> AppResult<VersionRead> {
     let version = repo::find_by_number(pool, feature_id, version_number)
         .await?
@@ -330,7 +333,7 @@ pub async fn update(
             let outcomes = outcome_repository::list_for_version(pool, version.id).await?;
             let valid_outcome_ids: std::collections::HashSet<Uuid> =
                 outcomes.iter().map(|o| o.id).collect();
-            rule_graph_service::validate(graph, &valid_outcome_ids)?;
+            rule_graph_service::validate(graph, &valid_outcome_ids, manifest)?;
             Some(serde_json::to_value(graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)
         }
         None => None,
@@ -357,6 +360,7 @@ pub async fn update_rule_graph(
     feature_id: &str,
     version_number: i32,
     rule_graph: RuleGraph,
+    manifest: &NodeManifest,
 ) -> AppResult<VersionRead> {
     update(
         pool,
@@ -366,6 +370,7 @@ pub async fn update_rule_graph(
             description: None,
             rule_graph: Some(rule_graph),
         },
+        manifest,
     )
     .await
 }

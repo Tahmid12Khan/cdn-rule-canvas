@@ -59,7 +59,8 @@ pub async fn create(
     Json(body): Json<VersionCreate>,
 ) -> AppResult<impl IntoResponse> {
     validate(&body)?;
-    let version = version_service::create_version(&state.pool, &fid, body).await?;
+    let version =
+        version_service::create_version(&state.pool, &fid, body, &state.node_manifest).await?;
     Ok((StatusCode::CREATED, Json(version)))
 }
 
@@ -131,7 +132,8 @@ pub async fn update(
     Json(body): Json<VersionUpdate>,
 ) -> AppResult<Json<VersionRead>> {
     validate(&body)?;
-    let version = version_service::update(&state.pool, &fid, vnum, body).await?;
+    let version =
+        version_service::update(&state.pool, &fid, vnum, body, &state.node_manifest).await?;
     Ok(Json(version))
 }
 

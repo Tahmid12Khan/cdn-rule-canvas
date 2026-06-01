@@ -5,7 +5,7 @@ import {
   isDirty,
   useRuleBuilderStore,
 } from "@/state/ruleBuilderStore";
-import { DEFAULT_META_TAGS } from "@/lib/canvas/nodeTemplates";
+import { META_TAGS_DEFAULT } from "@/test/fixtures/nodeTypes";
 import type { RFEdge, RFNode } from "@/lib/canvas/types";
 import type { RuleGraph } from "@/lib/api/ruleGraph";
 
@@ -14,7 +14,7 @@ function decision(id: string): RFNode {
     id,
     type: "decisionNode",
     position: { x: 0, y: 0 },
-    data: { processor: { ...DEFAULT_META_TAGS } },
+    data: { processor: { ...META_TAGS_DEFAULT } },
   };
 }
 function outcome(id: string): RFNode {
@@ -172,7 +172,7 @@ describe("ruleBuilderStore", () => {
           {
             kind: "decision" as const,
             id: "d1",
-            processor: { ...DEFAULT_META_TAGS },
+            processor: { ...META_TAGS_DEFAULT },
             position: { x: 0, y: 0 },
           },
         ],

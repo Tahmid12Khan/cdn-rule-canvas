@@ -40,8 +40,9 @@ RUN apt-get update \
     && useradd --system --uid 10002 --user-group --no-create-home rre
 
 COPY --from=builder /src/proxy/target/release/rre-proxy /usr/local/bin/rre-proxy
-# Runtime config (feature map + sanitizer allow-list). Paths default to
-# proxy/config/* relative to the working dir, so preserve that layout.
+# Runtime config: layered JSON settings (default.json + {APP_ENV}.json) plus the
+# feature map + sanitizer allow-list YAML. Resolved relative to the working dir
+# (/app/proxy/config), so preserve that layout.
 COPY proxy/config ./proxy/config
 
 ENV PROXY_BIND_ADDR=0.0.0.0:9000

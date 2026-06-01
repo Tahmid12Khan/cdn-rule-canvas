@@ -1,0 +1,4 @@
+{
+  "app_env": "dev",
+  "frontend_origin": "http://localhost:3000"
+}

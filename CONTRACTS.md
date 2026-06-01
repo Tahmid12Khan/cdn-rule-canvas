@@ -23,8 +23,15 @@ source of truth and the PROXY section mirrors it.
   `search_path`.
 - Timestamps: `TIMESTAMPTZ` ⇄ `chrono::DateTime<Utc>`, default `now()`. UUIDs `uuid::Uuid` generated
   app-side with `Uuid::new_v4()` (DB default `gen_random_uuid()` as a safety net).
-- Config: a single `Settings` struct via `envy::from_env::<Settings>()` + `dotenvy`. No scattered
-  `std::env::var` in app code.
+- Config: layered JSON via the `config` crate, deserialized once into a single `Settings` struct.
+  No scattered `std::env::var` in app code. Layers, highest-precedence last:
+  `config/default.json` (committed base) → `config/{APP_ENV}.json` (profile, `APP_ENV` default `dev`,
+  optional) → environment variables (top layer, secrets like `DATABASE_URL` and per-deploy overrides;
+  nested keys separated by `__`). `.env` is loaded by `dotenvy` only to populate env vars before the
+  env layer is read. Config file paths resolve relative to the working dir (same convention as the
+  proxy's YAML paths); the `config/` dir is copied into each crate's Docker image. Secrets stay
+  env-only — never committed to the JSON layers. DI stays idiomatic Rust: a cloneable `AppState`
+  holding `Arc<Settings>` (and `Arc<NodeManifest>`), injected via `State<AppState>`; no DI container.
 - Layering: `api/v1` (routers, `State<AppState>`) → `services` (business logic, tx boundary, domain
   errors) → `repositories` (SQLx, returns models) → `models` (`FromRow`). `schemas` holds serde DTOs.
   Routers never serialize `FromRow` structs — always map to a `*Read` DTO. Services never write SQL
@@ -191,33 +198,89 @@ pub enum Node {
     Outcome  { id: String, outcome_id: Uuid, position: Position },             // kind = "outcome"
 }
 
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ProcessorConfig {
-    MetaTags  { tag_name: String, operator: MetaTagsOperator, #[serde(default)] value: Option<String> }, // "meta_tags"
-    DeviceType { operator: DeviceOperator, value: DeviceValue },                                          // "device_type"
-    ArticleUrl { operator: ArticleUrlOperator, value: String },                                           // "article_url"
+// Generic, manifest-validated shape (replaces the fixed enum). Round-trips the SAME wire JSON the
+// frontend/proxy exchange: `{ "type": "<kind>", "<field>": <value>, ... }`. `type` is the canonical
+// snake_case identifier; the remaining fields are an open map validated against the node-type
+// manifest at the service boundary (NOT by serde variants).
+pub struct ProcessorConfig {
+    pub r#type: String,                          // canonical snake_case kind, e.g. "article_url"
+    #[serde(flatten)] pub fields: serde_json::Map<String, serde_json::Value>,
 }
-
-#[serde(rename_all = "snake_case")] pub enum MetaTagsOperator { Contains, Equals, Exists }
-#[serde(rename_all = "snake_case")] pub enum DeviceOperator { Equals, Contains }
-#[serde(rename_all = "snake_case")] pub enum DeviceValue { Mobile, Desktop, Tablet }
-#[serde(rename_all = "snake_case")] pub enum ArticleUrlOperator { Contains, Matches, StartsWith, Equals }
 
 pub struct Edge { pub id: String, pub source_node_id: String, pub target_node_id: String, pub branch: Branch }
 #[serde(rename_all = "snake_case")] pub enum Branch { Yes, No }
 pub struct Position { pub x: f64, pub y: f64 }
 ```
 
-Processor-key mapping (snake `type` -> camel JDM kind): `meta_tags` -> `"metaTags"`,
-`device_type` -> `"deviceType"`, `article_url` -> `"articleUrl"`. The camelCase keys
-equal `CanvasProcessor::kind()`. The `article_url` processor matches `operator`/`value`
-against the request path (`request_path`); `matches` is a regex.
+#### Canonical node identifier (single snake_case kind)
 
-#### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph)`)
+ONE snake_case identifier names a node type everywhere — this replaces the old
+`type` (snake_case) vs JDM `kind` (camelCase) split bridged by `ProcessorConfig::kind_key()`:
+
+> manifest `kind` == rule_graph processor `type` == proxy `CanvasProcessor::kind()` == JDM `CustomNode` kind
+
+The three existing kinds are `meta_tags`, `device_type`, `article_url` (was `metaTags`/`deviceType`/
+`articleUrl` in the JDM layer; `kind_key()` is removed). JDM kind strings are built per request and
+never persisted, so this is an internal change with no data migration — rule_graph JSONB already
+stores snake_case `type`. The `article_url` processor matches `operator`/`value` against the request
+path (`request_path`); `matches` is a regex.
+
+#### Node-type manifest (backend-owned source of truth)
+
+`backend/config/node_types.json` declares every node type plus the palette categories; it is loaded
+once at startup into `Arc<NodeManifest>` (in `AppState`) and served verbatim at
+`GET /api/v1/node-types`. Adding a node type = ONE manifest entry on the backend (plus a proxy
+`CanvasProcessor` impl for eval logic); ZERO frontend changes, ZERO backend Rust changes.
+
+ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top level):
+`{ categories: Category[], node_types: NodeTypeSpec[] }`.
+
+```jsonc
+// Category — drives the palette; coming_soon categories render as disabled chips.
+{ "id": "content", "label": "Content", "coming_soon"?: true }   // coming_soon defaults false
+
+// NodeTypeSpec — one per node type, in palette order.
+{
+  "kind": "article_url",          // canonical snake_case identifier (see above) == rule_graph `type`
+  "label": "Article URL",         // node title + palette chip label
+  "category": "content",          // category id (must exist in categories[])
+  "summary": "...",               // tooltip "input info"
+  "fields": [ Field, ... ],       // ordered config fields
+  "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+}
+
+// Field — one config control. `control` ∈ { "select" (with options[]), "text", "number" }.
+{
+  "name": "operator",                        // wire key inside the processor object (snake_case)
+  "label": "Operator",                       // form label / tooltip key
+  "control": "select",
+  "required"?: bool,                         // default false
+  "required_unless"?: { "field": "<name>", "value": "<v>" },  // required unless sibling field == value
+  "default"?: <any>,                         // dropped-node default; missing → empty
+  "placeholder"?: "string",                  // text/number inputs
+  "options"?: [ { "value": "contains", "label": "contains" }, ... ],  // select only
+  "required_message"?: "string"              // user-facing message when required/required_unless fails
+}
+
+// Branch — one output edge target on a NodeTypeSpec's `output.branches`.
+{ "id": "yes", "label": "Yes" }              // id ∈ { "yes", "no" } (matches rule_graph Branch)
+```
+
+The three existing kinds (`meta_tags`, `device_type`, `article_url`) are ported verbatim from the
+frontend's former `processorSchemas.ts` + `nodeTemplates.ts` (same operators, options, defaults, the
+`value` `required_unless operator=exists` on `meta_tags`, and the same user-facing
+messages/placeholders) so behavior is identical. The manifest file is
+`backend/config/node_types.json`; the Rust `NodeManifest` deserializer uses `serde` with snake_case
+field names (no `rename_all` camelCase) and serves it verbatim. `coming_soon`, `required`,
+`required_unless`, `default`, `placeholder`, `options`, `required_message` are all `#[serde(default)]`
+(optional).
+
+#### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest)`)
 
 Run per-canvas (anonymous/registered/customer). Each failure emits `ValidationDetail { loc, msg,
 rule_id }`; `loc` format `rule_graph.<canvas>.<field>[idx]`. Invalid → 422 `VALIDATION_ERROR`.
-Stable `rule_id` values:
+`validate` takes `&NodeManifest` (threaded from `AppState`) so processor checks are manifest-driven —
+the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
 
 | `rule_id` | Rule |
 |---|---|
@@ -228,6 +291,16 @@ Stable `rule_id` values:
 | `outcome_ref_exists` | every Outcome node's `outcome_id` exists in `rre.outcomes` for this version |
 | `root_in_nodes` | if `root_node_id` set, it exists in `nodes` |
 | `outcome_branch_forbidden` | edges may only originate from Decision nodes |
+| `processor_kind_known` | a Decision node's processor `type` is a manifest `kind` |
+| `processor_field_required` | each `required` field (and each `required_unless` field whose condition is unsatisfied) is present and non-empty |
+| `processor_field_option` | a `select` field's value is one of its `options[].value` |
+
+Processor checks run per Decision node against the matched manifest spec. `required_unless { field,
+value }`: the field is required unless the named sibling field's current value equals `value` (when the
+sibling equals `value`, the field is optional and absence/empty is allowed). "Non-empty" means: present
+in the processor map AND not JSON `null` AND, for strings, not empty after trim. `select` option
+membership is checked only when the field has a non-empty value. Unknown extra fields on the processor
+object are ignored (forward-compatible), not an error.
 
 ### 7. REST Routes (router tree → handler → service → repo)
 
@@ -235,6 +308,9 @@ Base prefix `/api/v1`; built in `lib.rs::build_app(state)`. CORS allows `setting
 `/health`, `/healthz/db`, `/docs` live at the root.
 
 ```
+# Node-type manifest (backend-owned; served verbatim, cacheable)
+GET    /api/v1/node-types                     -> node_types::list        -> serves Arc<NodeManifest>
+
 # Features
 POST   /api/v1/features                       -> features::create        -> feature_service::create
 GET    /api/v1/features                       -> features::list          -> feature_service::list
@@ -333,7 +409,10 @@ The proxy is the production hot path. Latency overhead and correctness errors he
   `zen-engine = { path = "../core/engine" }`, `zen-expression = { path = "../core/expression" }`.
   zen-types is re-exported via `zen_engine::model::*` — do NOT add a direct `zen-types` path dep.
 - Bind addr `0.0.0.0:9000` (`PROXY_BIND_ADDR`).
-- Config: single `Settings` via `envy::from_env` + `dotenvy`. No scattered `std::env::var`.
+- Config: layered JSON via the `config` crate into a single `Settings` (same scheme as BACKEND §0:
+  `config/default.json` → `config/{APP_ENV}.json` → env vars, `__` separator; `dotenvy` loads `.env`
+  into env first). No scattered `std::env::var`. Secrets/per-deploy overrides stay env-only.
+  `feature_map.yaml` / `sanitizer.yaml` remain separate YAML (distinct config concern).
 - Logging: `tracing` + json layer (pretty in dev). NEVER log raw bodies / cookie values.
 - Layering: `middleware` -> `forwarder` (the only network IO + pipeline glue) -> `domain`
   (pure eval + pure transform) -> `infra` (feature_map, backend_client, caches, encoding).
@@ -466,7 +545,10 @@ pub struct AppState {
 - `infra::backend_client::{BackendClient, Env, ActiveVersionRead, ActiveOutcome, ActiveComponent, Placement}`.
 - `infra::compiled_cache::CompiledCache::{new, get_or_compile}`.
 - `infra::encoding::{gunzip, gzip, decode_for_modify, reencode}`.
-- `domain::graph` — verbatim rule_graph mirror + `Canvas` + `ProcessorConfig::{kind_key, to_config_value}`.
+- `domain::graph` — verbatim rule_graph mirror + `Canvas`. The Decision node's processor is a generic
+  reference `{ type: String /* canonical snake_case kind */, #[serde(flatten)] config: serde_json::Value }`
+  (replaces the `ProcessorConfig` enum + `kind_key()`/`to_config_value()`); deserializes any node type,
+  including ones added later, with no graph.rs edit.
 - `domain::translator::to_decision_content(&CanvasGraph) -> DecisionContent`.
 - `domain::processors` — `CanvasProcessor` trait, `ProcessorRegistry`, `ProcessorOutcome`, `Branch`,
   `ProcessorError`, `default_registry()`.
@@ -495,9 +577,11 @@ pub struct AppState {
 
 #### 8.2 Translator mapping (CanvasGraph -> DecisionContent)
 
-- Decision `<id>` -> CustomNode `<id>__proc` (`kind=cfg.kind_key()`, `config=cfg.to_config_value()`) +
+- Decision `<id>` -> CustomNode `<id>__proc` (`kind = processor.type` — the canonical snake_case kind,
+  used directly with no mapping; `config = processor.config` passed through unchanged) +
   SwitchNode `<id>__switch` (statements `<id>:yes` / `<id>:no`, conditions `$.branch == 'yes'|'no'`) +
-  internal edge `<id>__proc -> <id>__switch`.
+  internal edge `<id>__proc -> <id>__switch`. `CanvasProcessor::kind()` returns the same snake_case
+  identifier (e.g. `"article_url"`); registry keys on `kind()`.
 - Outcome `<id>` -> ExpressionNode `<id>__expr` (expr key `outcomeId` value `'<uuid>'`) +
   OutputNode `<id>__out` + internal edge `<id>__expr -> <id>__out`.
 - Canvas edge -> DecisionEdge from `<src>__switch` (`source_handle = "<src>:yes"|"<src>:no"`) to the

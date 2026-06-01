@@ -1,5 +1,7 @@
 import { http, HttpResponse } from "msw";
 
+import { NODE_TYPES_FIXTURE } from "@/test/fixtures/nodeTypes";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 // Base MSW handlers. Domain (LEAF) test files add their own handlers via
@@ -7,5 +9,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 export const handlers = [
   http.get(`${API_BASE}/health`, () =>
     HttpResponse.json({ status: "ok", version: "0.1.0", git_commit: "dev" }),
+  ),
+  // Node-type manifest (backend-driven node metadata). Served from a fixture so
+  // tests never depend on a live backend.
+  http.get(`${API_BASE}/api/v1/node-types`, () =>
+    HttpResponse.json(NODE_TYPES_FIXTURE),
   ),
 ];

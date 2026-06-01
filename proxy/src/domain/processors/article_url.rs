@@ -1,4 +1,4 @@
-//! `ArticleUrlProcessor` (kind = "articleUrl"). Compares `ctx.request_path`
+//! `ArticleUrlProcessor` (kind = "article_url"). Compares `ctx.request_path`
 //! against the configured value using contains / matches (regex) / starts_with /
 //! equals. The `value` is length-capped (<= 1000) and, for `matches`, compiled
 //! as a regex (an invalid pattern is a config error, never a panic).
@@ -17,7 +17,7 @@ pub struct ArticleUrlProcessor;
 
 impl CanvasProcessor for ArticleUrlProcessor {
     fn kind(&self) -> &'static str {
-        "articleUrl"
+        "article_url"
     }
 
     fn evaluate(

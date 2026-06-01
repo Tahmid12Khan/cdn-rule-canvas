@@ -1,4 +1,4 @@
-//! `MetaTagsProcessor` (kind = "metaTags"). Looks `tag_name` up in
+//! `MetaTagsProcessor` (kind = "meta_tags"). Looks `tag_name` up in
 //! `ctx.meta_tags` (pre-extracted `<meta name=… content=…>` map) and inspects the
 //! `content` value.
 //!
@@ -45,7 +45,7 @@ pub struct MetaTagsProcessor;
 
 impl CanvasProcessor for MetaTagsProcessor {
     fn kind(&self) -> &'static str {
-        "metaTags"
+        "meta_tags"
     }
 
     fn evaluate(

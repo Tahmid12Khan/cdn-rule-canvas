@@ -41,12 +41,12 @@ async fn setup_with_feature() -> (common::TestDb, AppState) {
 }
 
 /// Create a draft version (no description) and return its number.
-async fn make_version(pool: &PgPool) -> i32 {
+async fn make_version(state: &AppState) -> i32 {
     let body = VersionCreate {
         description: None,
         ..Default::default()
     };
-    version_service::create_version(pool, FID, body)
+    version_service::create_version(&state.pool, FID, body, &state.node_manifest)
         .await
         .expect("create version")
         .version_number
@@ -68,7 +68,7 @@ async fn create_seeds_draft_with_builtin_outcome() {
         ..Default::default()
     };
 
-    let v = version_service::create_version(&state.pool, FID, body)
+    let v = version_service::create_version(&state.pool, FID, body, &state.node_manifest)
         .await
         .expect("create version");
 
@@ -89,8 +89,8 @@ async fn create_seeds_draft_with_builtin_outcome() {
 #[tokio::test]
 async fn create_increments_version_number() {
     let (_db, state) = setup_with_feature().await;
-    let v1 = make_version(&state.pool).await;
-    let v2 = make_version(&state.pool).await;
+    let v1 = make_version(&state).await;
+    let v2 = make_version(&state).await;
     assert_eq!(v1, 1);
     assert_eq!(v2, 2);
 }
@@ -107,6 +107,7 @@ async fn create_first_version_seeds_exactly_one_builtin() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create first version");
@@ -133,6 +134,7 @@ async fn create_second_version_carries_forward_outcomes_and_components() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v1");
@@ -175,6 +177,7 @@ async fn create_second_version_carries_forward_outcomes_and_components() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v2");
@@ -237,6 +240,7 @@ async fn create_next_version_carries_forward_from_live_source() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v1");
@@ -262,6 +266,7 @@ async fn create_next_version_carries_forward_from_live_source() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v2");
@@ -278,9 +283,10 @@ async fn create_on_missing_feature_is_404() {
         description: None,
         ..Default::default()
     };
-    let err = version_service::create_version(&db.state.pool, "nope", body)
-        .await
-        .unwrap_err();
+    let err =
+        version_service::create_version(&db.state.pool, "nope", body, &db.state.node_manifest)
+            .await
+            .unwrap_err();
     assert!(matches!(err, AppError::FeatureNotFound(_)));
 }
 
@@ -288,8 +294,8 @@ async fn create_on_missing_feature_is_404() {
 async fn publish_live_promotes_and_demotes() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
-    let v2 = make_version(pool).await;
+    let v1 = make_version(&state).await;
+    let v2 = make_version(&state).await;
 
     let published = version_service::publish(pool, FID, v1, PublishEnvironment::Live)
         .await
@@ -311,7 +317,7 @@ async fn publish_live_promotes_and_demotes() {
 async fn publish_live_when_already_live_is_conflict() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
+    let v1 = make_version(&state).await;
     version_service::publish(pool, FID, v1, PublishEnvironment::Live)
         .await
         .unwrap();
@@ -325,7 +331,7 @@ async fn publish_live_when_already_live_is_conflict() {
 async fn unpublish_live_clears_pointer_and_sets_prev() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
+    let v1 = make_version(&state).await;
     version_service::publish(pool, FID, v1, PublishEnvironment::Live)
         .await
         .unwrap();
@@ -343,7 +349,7 @@ async fn unpublish_live_clears_pointer_and_sets_prev() {
 async fn unpublish_non_live_is_conflict() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
+    let v1 = make_version(&state).await;
     let err = version_service::unpublish(pool, FID, v1, PublishEnvironment::Live)
         .await
         .unwrap_err();
@@ -354,8 +360,8 @@ async fn unpublish_non_live_is_conflict() {
 async fn delete_draft_succeeds_but_live_is_blocked() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
-    let v2 = make_version(pool).await;
+    let v1 = make_version(&state).await;
+    let v2 = make_version(&state).await;
 
     // Draft delete works.
     version_service::delete(pool, FID, v1).await.unwrap();
@@ -372,7 +378,7 @@ async fn delete_draft_succeeds_but_live_is_blocked() {
 async fn update_description_allowed_on_any_status() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
+    let v1 = make_version(&state).await;
     version_service::publish(pool, FID, v1, PublishEnvironment::Live)
         .await
         .unwrap();
@@ -381,7 +387,9 @@ async fn update_description_allowed_on_any_status() {
         description: Some("edited".to_string()),
         rule_graph: None,
     };
-    let updated = version_service::update(pool, FID, v1, body).await.unwrap();
+    let updated = version_service::update(pool, FID, v1, body, &state.node_manifest)
+        .await
+        .unwrap();
     assert_eq!(updated.description.as_deref(), Some("edited"));
     assert_eq!(updated.status, VersionStatus::Live);
 }
@@ -390,7 +398,7 @@ async fn update_description_allowed_on_any_status() {
 async fn update_rule_graph_on_non_draft_is_edit_locked() {
     let (_db, state) = setup_with_feature().await;
     let pool = &state.pool;
-    let v1 = make_version(pool).await;
+    let v1 = make_version(&state).await;
     version_service::publish(pool, FID, v1, PublishEnvironment::Live)
         .await
         .unwrap();
@@ -399,7 +407,7 @@ async fn update_rule_graph_on_non_draft_is_edit_locked() {
         description: None,
         rule_graph: Some(Default::default()),
     };
-    let err = version_service::update(pool, FID, v1, body)
+    let err = version_service::update(pool, FID, v1, body, &state.node_manifest)
         .await
         .unwrap_err();
     assert!(matches!(err, AppError::VersionEditLocked(_)));
@@ -417,7 +425,7 @@ async fn get_unknown_version_is_404() {
 #[tokio::test]
 async fn active_version_no_live_is_404() {
     let (_db, state) = setup_with_feature().await;
-    make_version(&state.pool).await;
+    make_version(&state).await;
     let err = version_service::active_version(&state.pool, FID, PublishEnvironment::Live)
         .await
         .unwrap_err();
@@ -442,6 +450,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
             description: None,
             ..Default::default()
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v1");
@@ -490,6 +499,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
             description: Some("save as new".to_string()),
             rule_graph: Some(graph),
         },
+        &state.node_manifest,
     )
     .await
     .expect("create v2 with rule_graph must not 422");

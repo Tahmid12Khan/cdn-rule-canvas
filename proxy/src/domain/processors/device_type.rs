@@ -1,4 +1,4 @@
-//! `DeviceTypeProcessor` (kind = "deviceType"). Reads `ctx.device` (computed
+//! `DeviceTypeProcessor` (kind = "device_type"). Reads `ctx.device` (computed
 //! once from the User-Agent) and applies the configured operator/value.
 
 use serde_json::Value;
@@ -12,7 +12,7 @@ pub struct DeviceTypeProcessor;
 
 impl CanvasProcessor for DeviceTypeProcessor {
     fn kind(&self) -> &'static str {
-        "deviceType"
+        "device_type"
     }
 
     fn evaluate(

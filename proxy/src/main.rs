@@ -18,7 +18,7 @@ use rre_proxy::{build_app, observability, telemetry};
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
-    let settings = Settings::from_env()?;
+    let settings = Settings::load()?;
     telemetry::init(settings.is_dev());
     observability::init();
 

@@ -50,13 +50,13 @@ pub enum ProcessorError {
     Config(String),
 }
 
-/// One decision processor (e.g. metaTags, deviceType). Pure + sync; CPU-only.
+/// One decision processor (e.g. meta_tags, device_type). Pure + sync; CPU-only.
 /// No globals; reads `ctx` read-only.
 pub trait CanvasProcessor: Send + Sync {
     /// Stable key = JDM CustomNode content.kind = registry key.
     fn kind(&self) -> &'static str;
 
-    /// `config` = canvas `ProcessorConfig` as JSON. `ctx` is read-only.
+    /// `config` = the processor's flat config map as JSON. `ctx` is read-only.
     fn evaluate(
         &self,
         config: &serde_json::Value,

@@ -1,11 +1,15 @@
 //! Proxy-side serde mirror of the backend `rule_graph` schema
-//! (BACKEND CONTRACT §6), VERBATIM. `Deserialize + Serialize`.
+//! (BACKEND CONTRACT §6, §7), VERBATIM. `Deserialize + Serialize`.
 //!
-//! IMPORTANT: the canvas `ProcessorConfig` discriminator `type` is snake_case
-//! (`meta_tags` / `device_type`); the JDM `CustomNode` kind is camelCase
-//! (`metaTags` / `deviceType`). `ProcessorConfig::kind_key` bridges the two.
+//! A decision node's `processor` is an OPEN object: one snake_case `type`
+//! discriminator (the canonical kind — `meta_tags` / `device_type` /
+//! `article_url`) plus the remaining config fields as a flat snake_case map.
+//! The `type` is used DIRECTLY as the JDM `CustomNode` kind == registry key ==
+//! manifest `kind` (no camelCase mapping). Any node type — including ones added
+//! later — deserializes without a graph.rs edit.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// One `CanvasGraph` per user class.
@@ -30,7 +34,7 @@ pub struct CanvasGraph {
 pub enum Node {
     Decision {
         id: String,
-        processor: ProcessorConfig,
+        processor: ProcessorRef,
         position: Position,
     },
     Outcome {
@@ -50,73 +54,18 @@ impl Node {
     }
 }
 
-/// Internally-tagged by `type`.
+/// Generic, open processor reference. The `type` field is the canonical
+/// snake_case kind (used directly as the JDM `CustomNode` kind / registry key);
+/// every other field is captured flat in `config` and passed through to the
+/// processor unchanged. No fixed enum — new node types deserialize as-is.
 #[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ProcessorConfig {
-    MetaTags {
-        tag_name: String,
-        operator: MetaTagsOperator,
-        #[serde(default)]
-        value: Option<String>,
-    },
-    DeviceType {
-        operator: DeviceOperator,
-        value: DeviceValue,
-    },
-    ArticleUrl {
-        operator: ArticleUrlOperator,
-        value: String,
-    },
-}
-
-impl ProcessorConfig {
-    /// The JDM `CustomNode` content kind (camelCase). Equals the registry key.
-    pub fn kind_key(&self) -> &'static str {
-        match self {
-            ProcessorConfig::MetaTags { .. } => "metaTags",
-            ProcessorConfig::DeviceType { .. } => "deviceType",
-            ProcessorConfig::ArticleUrl { .. } => "articleUrl",
-        }
-    }
-
-    /// The full processor config serialized as JSON (`{"type":"meta_tags",...}`),
-    /// stored on the JDM `CustomNode` content.config and read by the processor.
-    pub fn to_config_value(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
-    }
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MetaTagsOperator {
-    Contains,
-    Equals,
-    Exists,
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceOperator {
-    Equals,
-    Contains,
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ArticleUrlOperator {
-    Contains,
-    Matches,
-    StartsWith,
-    Equals,
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceValue {
-    Mobile,
-    Desktop,
-    Tablet,
+pub struct ProcessorRef {
+    /// The canonical kind discriminator (`meta_tags`, `device_type`, ...).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Remaining processor config fields (operator, value, tag_name, ...).
+    #[serde(flatten)]
+    pub config: Value,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

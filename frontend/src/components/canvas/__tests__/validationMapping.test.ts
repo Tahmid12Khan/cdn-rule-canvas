@@ -137,7 +137,9 @@ describe("buildValidationUserError", () => {
     );
     expect(err.title).toBe("2 rule nodes need attention");
     expect(err.why).toContain("Anonymous canvas");
-    expect(err.why).toContain("'Reg Wall'");
+    // Decision nodes are named by their processor kind (manifest unavailable
+    // in the pure error-mapping path).
+    expect(err.why).toContain("'meta_tags'");
     expect(err.why).toContain("'Show Content'");
     expect(err.why).toContain("don't exist in this version");
     expect(err.howToFix).toMatch(/open each highlighted node/i);

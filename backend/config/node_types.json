@@ -1,0 +1,122 @@
+{
+  "categories": [
+    { "id": "session", "label": "Session" },
+    { "id": "user", "label": "User", "coming_soon": true },
+    { "id": "content", "label": "Content" },
+    { "id": "decision-data", "label": "Decision Data", "coming_soon": true },
+    { "id": "access", "label": "Access", "coming_soon": true },
+    { "id": "sub-rules", "label": "Sub Rules", "coming_soon": true },
+    { "id": "split-tests", "label": "Split Tests", "coming_soon": true },
+    { "id": "integrations", "label": "Integrations", "coming_soon": true },
+    { "id": "advanced", "label": "Advanced", "coming_soon": true },
+    { "id": "bypass", "label": "Bypass", "coming_soon": true },
+    { "id": "gift-tokens", "label": "Gift Tokens", "coming_soon": true },
+    { "id": "campaign-tokens", "label": "Campaign Tokens", "coming_soon": true },
+    { "id": "custom-segments", "label": "Custom Segments", "coming_soon": true }
+  ],
+  "node_types": [
+    {
+      "kind": "meta_tags",
+      "label": "Meta Tags",
+      "category": "content",
+      "summary": "Matches against a meta tag in the request HTML by name.",
+      "fields": [
+        {
+          "name": "tag_name",
+          "label": "Tag name",
+          "control": "text",
+          "required": true,
+          "default": "",
+          "placeholder": "e.g. paywall",
+          "required_message": "Enter the meta tag name to match (e.g. og:type)"
+        },
+        {
+          "name": "operator",
+          "label": "Operator",
+          "control": "select",
+          "required": true,
+          "default": "contains",
+          "options": [
+            { "value": "contains", "label": "contains" },
+            { "value": "equals", "label": "equals" },
+            { "value": "exists", "label": "exists" }
+          ]
+        },
+        {
+          "name": "value",
+          "label": "Value",
+          "control": "text",
+          "required": false,
+          "required_unless": { "field": "operator", "value": "exists" },
+          "default": "",
+          "placeholder": "e.g. true",
+          "required_message": "Enter a value to compare against, or switch the operator to 'exists'"
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    },
+    {
+      "kind": "device_type",
+      "label": "Device Type",
+      "category": "session",
+      "summary": "Matches against the request device type (mobile, desktop, tablet).",
+      "fields": [
+        {
+          "name": "operator",
+          "label": "Operator",
+          "control": "select",
+          "required": true,
+          "default": "equals",
+          "options": [
+            { "value": "equals", "label": "equals" },
+            { "value": "contains", "label": "contains" }
+          ]
+        },
+        {
+          "name": "value",
+          "label": "Value",
+          "control": "select",
+          "required": true,
+          "default": "mobile",
+          "options": [
+            { "value": "mobile", "label": "mobile" },
+            { "value": "desktop", "label": "desktop" },
+            { "value": "tablet", "label": "tablet" }
+          ]
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    },
+    {
+      "kind": "article_url",
+      "label": "Article URL",
+      "category": "content",
+      "summary": "Matches against the request article URL (path).",
+      "fields": [
+        {
+          "name": "operator",
+          "label": "Operator",
+          "control": "select",
+          "required": true,
+          "default": "contains",
+          "options": [
+            { "value": "contains", "label": "contains" },
+            { "value": "matches", "label": "matches" },
+            { "value": "starts_with", "label": "starts_with" },
+            { "value": "equals", "label": "equals" }
+          ]
+        },
+        {
+          "name": "value",
+          "label": "Value",
+          "control": "text",
+          "required": true,
+          "default": "",
+          "placeholder": "e.g. /article",
+          "required_message": "Enter a value to compare against the URL"
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    }
+  ]
+}

@@ -47,8 +47,9 @@ pub async fn setup() -> TestDb {
         frontend_origin: "http://localhost:3000".to_string(),
         bind_addr: "0.0.0.0:0".to_string(),
         db_max_connections: 5,
+        node_manifest_path: "config/node_types.json".to_string(),
     };
 
-    let state = AppState::new(pool, settings);
+    let state = AppState::new(pool, settings).expect("load node-type manifest");
     TestDb { container, state }
 }

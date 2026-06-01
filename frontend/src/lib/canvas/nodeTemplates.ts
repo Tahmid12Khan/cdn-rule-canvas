@@ -1,7 +1,11 @@
-// Palette chip definitions (Task 12). The palette renders every §4.5 category,
-// but only a small subset is creatable for MVP (Content → Meta Tags, Session →
-// Device Type, and one chip per Outcome of the current version). Everything
-// else renders as a disabled "Coming soon" chip.
+// Palette chip definitions (spec Part E). The palette is fully data-driven from
+// the node-type manifest (categories + node_types). Each enabled decision chip
+// carries a default processor config built from the spec's field defaults;
+// disabled chips come from categories flagged `coming_soon` (and from categories
+// with no node types yet). Outcome chips remain dynamic (one per version
+// outcome). Adding a node type needs ZERO frontend change.
+import type { NodeCategory, NodeManifest, NodeTypeSpec } from "@/lib/api/nodeTypes";
+import { defaultProcessor } from "@/lib/canvas/manifest";
 import type { ProcessorConfig } from "@/lib/canvas/types";
 
 // What a chip drops onto the canvas. Decision chips carry a default processor
@@ -24,137 +28,63 @@ export interface PaletteCategory {
   chips: NodeChipDef[];
 }
 
-// Default processor configs for the two MVP decision processors. These are
-// intentionally "incomplete" (empty value / blank tag) so the SaveBar/backend
-// validation nudges the user to open the config drawer first.
-export const DEFAULT_META_TAGS: Extract<ProcessorConfig, { type: "meta_tags" }> =
-  {
-    type: "meta_tags",
-    tag_name: "",
-    operator: "contains",
-    value: "",
-  };
-
-export const DEFAULT_DEVICE_TYPE: Extract<
-  ProcessorConfig,
-  { type: "device_type" }
-> = {
-  type: "device_type",
-  operator: "equals",
-  value: "mobile",
-};
-
-export const DEFAULT_ARTICLE_URL: Extract<
-  ProcessorConfig,
-  { type: "article_url" }
-> = {
-  type: "article_url",
-  operator: "contains",
-  value: "",
-};
-
-// Category order matches FRONTEND CONTRACT / Task 12 §4.5 (search tab leads,
-// rendered separately by the palette). "Outcomes" is populated dynamically.
-const STATIC_CATEGORIES: PaletteCategory[] = [
-  {
-    id: "session",
-    label: "Session",
-    chips: [
-      {
-        id: "session:device-type",
-        label: "Device Type",
-        enabled: true,
-        payload: { kind: "decision", processor: DEFAULT_DEVICE_TYPE },
-      },
-    ],
-  },
-  {
-    id: "user",
-    label: "User",
-    chips: [{ id: "user:logged-in", label: "Logged In", enabled: false }],
-  },
-  {
-    id: "content",
-    label: "Content",
-    chips: [
-      {
-        id: "content:meta-tags",
-        label: "Meta Tags",
-        enabled: true,
-        payload: { kind: "decision", processor: DEFAULT_META_TAGS },
-      },
-      {
-        id: "content:article-url",
-        label: "Article URL",
-        enabled: true,
-        payload: { kind: "decision", processor: DEFAULT_ARTICLE_URL },
-      },
-    ],
-  },
-  {
-    id: "decision-data",
-    label: "Decision Data",
-    chips: [{ id: "decision-data:custom", label: "Custom Field", enabled: false }],
-  },
-  {
-    id: "access",
-    label: "Access",
-    chips: [{ id: "access:entitlement", label: "Entitlement", enabled: false }],
-  },
-  {
-    id: "sub-rules",
-    label: "Sub Rules",
-    chips: [{ id: "sub-rules:reusable", label: "Reusable Rule", enabled: false }],
-  },
-  {
-    id: "split-tests",
-    label: "Split Tests",
-    chips: [{ id: "split-tests:ab", label: "A/B Test", enabled: false }],
-  },
-  {
-    id: "integrations",
-    label: "Integrations",
-    chips: [{ id: "integrations:webhook", label: "Webhook", enabled: false }],
-  },
-  // "outcomes" injected dynamically by buildPalette()
-  {
-    id: "advanced",
-    label: "Advanced",
-    chips: [{ id: "advanced:script", label: "Script", enabled: false }],
-  },
-  {
-    id: "bypass",
-    label: "Bypass",
-    chips: [{ id: "bypass:rule", label: "Bypass Rule", enabled: false }],
-  },
-  {
-    id: "gift-tokens",
-    label: "Gift Tokens",
-    chips: [{ id: "gift-tokens:grant", label: "Grant Token", enabled: false }],
-  },
-  {
-    id: "campaign-tokens",
-    label: "Campaign Tokens",
-    chips: [
-      { id: "campaign-tokens:apply", label: "Apply Campaign", enabled: false },
-    ],
-  },
-  {
-    id: "custom-segments",
-    label: "Custom Segments",
-    chips: [{ id: "custom-segments:segment", label: "Segment", enabled: false }],
-  },
-];
-
 export interface OutcomeOption {
   id: string;
   title: string;
 }
 
-// Build the full palette for a version, injecting one draggable chip per
-// outcome into the "Outcomes" category (placed in §4.5 order between
-// Integrations and Advanced).
-export function buildPalette(outcomes: OutcomeOption[]): PaletteCategory[] {
+// Build one chip per node-type spec in a category. A `coming_soon` category
+// renders all its chips disabled (even though they map to real specs); the
+// dropped-config default is built from the spec's field defaults.
+function chipForSpec(spec: NodeTypeSpec, comingSoon: boolean): NodeChipDef {
+  if (comingSoon) {
+    return { id: `node:${spec.kind}`, label: spec.label, enabled: false };
+  }
+  return {
+    id: `node:${spec.kind}`,
+    label: spec.label,
+    enabled: true,
+    payload: { kind: "decision", processor: defaultProcessor(spec) },
+  };
+}
+
+// A category with no node types yet still renders (as a disabled placeholder)
+// so the palette mirrors the manifest's full category list.
+function placeholderChip(category: NodeCategory): NodeChipDef {
+  return {
+    id: `${category.id}:coming-soon`,
+    label: "Coming soon",
+    enabled: false,
+  };
+}
+
+// Build the full palette from the manifest + the version's outcomes. Categories
+// render in manifest order; the dynamic "Outcomes" category is injected before
+// the first category that has no node types after Integrations (mirroring the
+// prior §4.5 ordering: between Integrations and Advanced).
+export function buildPalette(
+  manifest: NodeManifest | undefined,
+  outcomes: OutcomeOption[],
+): PaletteCategory[] {
+  if (!manifest) return [];
+
+  const specsByCategory = new Map<string, NodeTypeSpec[]>();
+  for (const spec of manifest.node_types) {
+    const list = specsByCategory.get(spec.category) ?? [];
+    list.push(spec);
+    specsByCategory.set(spec.category, list);
+  }
+
+  const categories: PaletteCategory[] = manifest.categories.map((cat) => {
+    const comingSoon = cat.coming_soon === true;
+    const specs = specsByCategory.get(cat.id) ?? [];
+    const chips =
+      specs.length > 0
+        ? specs.map((s) => chipForSpec(s, comingSoon))
+        : [placeholderChip(cat)];
+    return { id: cat.id, label: cat.label, chips };
+  });
+
   const outcomesCategory: PaletteCategory = {
     id: "outcomes",
     label: "Outcomes",
@@ -169,12 +99,17 @@ export function buildPalette(outcomes: OutcomeOption[]): PaletteCategory[] {
           })),
   };
 
-  const result: PaletteCategory[] = [];
-  for (const cat of STATIC_CATEGORIES) {
-    if (cat.id === "advanced") result.push(outcomesCategory);
-    result.push(cat);
+  // Inject "Outcomes" before the "advanced" category (matching prior ordering);
+  // fall back to appending if that category isn't present.
+  const advancedIdx = categories.findIndex((c) => c.id === "advanced");
+  if (advancedIdx === -1) {
+    return [...categories, outcomesCategory];
   }
-  return result;
+  return [
+    ...categories.slice(0, advancedIdx),
+    outcomesCategory,
+    ...categories.slice(advancedIdx),
+  ];
 }
 
 // DataTransfer MIME type for palette drag payloads.

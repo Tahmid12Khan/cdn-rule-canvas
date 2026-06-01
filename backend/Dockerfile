@@ -43,6 +43,11 @@ RUN apt-get update \
 COPY --from=builder /src/backend/target/release/rre-backend /usr/local/bin/rre-backend
 COPY --from=builder /src/backend/target/release/seed_demo /usr/local/bin/seed_demo
 
+# Layered JSON config (config/default.json, config/{APP_ENV}.json) and the
+# node-type manifest (config/node_types.json) are read at startup relative to
+# the working dir, so the config/ dir must be present in the runtime image.
+COPY --from=builder /src/backend/config /app/config
+
 # Migrations are embedded in the binary via sqlx::migrate! and run at startup;
 # no migration files are needed on disk at runtime.
 

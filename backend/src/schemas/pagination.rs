@@ -11,7 +11,7 @@ pub const DEFAULT_PAGE_SIZE: u32 = 20;
 pub const MAX_PAGE_SIZE: u32 = 100;
 
 /// Pagination query parameters.
-#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 pub struct PageParams {
     /// 1-based page number.
     #[serde(default)]
@@ -19,15 +19,6 @@ pub struct PageParams {
     /// Page size (capped at [`MAX_PAGE_SIZE`]).
     #[serde(default)]
     pub page_size: Option<u32>,
-}
-
-impl Default for PageParams {
-    fn default() -> Self {
-        Self {
-            page: None,
-            page_size: None,
-        }
-    }
 }
 
 impl PageParams {

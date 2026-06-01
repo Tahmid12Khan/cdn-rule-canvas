@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { NodeConfigDrawer } from "@/components/canvas/config/NodeConfigDrawer";
-import { DEFAULT_META_TAGS } from "@/lib/canvas/nodeTemplates";
+import { renderWithQuery } from "@/test/renderWithQuery";
+import { META_TAGS_DEFAULT } from "@/test/fixtures/nodeTypes";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { RFNode } from "@/lib/canvas/types";
 import type { RuleGraph } from "@/lib/api/ruleGraph";
@@ -18,7 +19,7 @@ const decisionNode: RFNode = {
   id: "d1",
   type: "decisionNode",
   position: { x: 0, y: 0 },
-  data: { processor: { ...DEFAULT_META_TAGS } }, // tag_name: "" -> invalid
+  data: { processor: { ...META_TAGS_DEFAULT } }, // tag_name: "" -> invalid
 };
 
 beforeEach(() => {
@@ -35,20 +36,21 @@ describe("NodeConfigDrawer (edit mode)", () => {
     useRuleBuilderStore.getState().toggleEdit();
   });
 
-  it("renders the Meta Tags form for a meta_tags node", () => {
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
-    expect(screen.getByLabelText("Tag name")).toBeInTheDocument();
-    expect(screen.getByLabelText("Operator")).toBeInTheDocument();
+  it("renders the manifest-driven Meta Tags form for a meta_tags node", async () => {
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    expect(await screen.findByLabelText(/Tag name/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Operator/)).toBeInTheDocument();
   });
 
   it("disables Save until the form is valid, then persists on Save", async () => {
     const user = userEvent.setup();
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     const saveBtn = screen.getByRole("button", { name: "Save" });
+    await screen.findByLabelText(/Tag name/);
     expect(saveBtn).toBeDisabled();
 
-    await user.type(screen.getByLabelText("Tag name"), "paywall");
-    await user.type(screen.getByLabelText("Value"), "true");
+    await user.type(screen.getByLabelText(/Tag name/), "paywall");
+    await user.type(screen.getByLabelText(/Value/), "true");
     expect(saveBtn).toBeEnabled();
 
     await user.click(saveBtn);
@@ -56,7 +58,7 @@ describe("NodeConfigDrawer (edit mode)", () => {
       .getState()
       .canvases.anonymous.nodes.find((n) => n.id === "d1");
     expect(
-      node && "processor" in node.data && node.data.processor.type === "meta_tags"
+      node && "processor" in node.data
         ? node.data.processor.tag_name
         : undefined,
     ).toBe("paywall");
@@ -66,7 +68,7 @@ describe("NodeConfigDrawer (edit mode)", () => {
 
   it("Delete node removes the node and its edges from the store", async () => {
     const user = userEvent.setup();
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     await user.click(screen.getByRole("button", { name: "Delete node" }));
     // d1 is gone; only the frontend-only start node remains.
     expect(
@@ -80,18 +82,16 @@ describe("NodeConfigDrawer (edit mode)", () => {
 describe("NodeConfigDrawer (view-only mode)", () => {
   // seedFromRuleGraph leaves isEditing=false, so the drawer is read-only.
   it("shows a Close button and no Save / Delete for a decision node", () => {
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Delete node" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete node" })).toBeNull();
   });
 
-  it("renders the decision form disabled (inspect, not edit)", () => {
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
-    expect(screen.getByLabelText("Tag name")).toBeDisabled();
-    expect(screen.getByLabelText("Operator")).toBeDisabled();
+  it("renders the decision form disabled (inspect, not edit)", async () => {
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    expect(await screen.findByLabelText(/Tag name/)).toBeDisabled();
+    expect(screen.getByLabelText(/Operator/)).toBeDisabled();
   });
 
   it("surfaces an outcome node's contents when inspected", () => {
@@ -106,14 +106,31 @@ describe("NodeConfigDrawer (view-only mode)", () => {
       },
     });
     s.openNodeConfig("o1");
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     expect(screen.getByTestId("outcome-inspect")).toBeInTheDocument();
     expect(screen.getByText("Show Paywall")).toBeInTheDocument();
   });
 
   it("surfaces the start node's contents when inspected", () => {
     useRuleBuilderStore.getState().openNodeConfig("start");
-    render(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     expect(screen.getByTestId("start-inspect")).toBeInTheDocument();
+  });
+});
+
+describe("NodeConfigDrawer required_unless", () => {
+  beforeEach(() => {
+    useRuleBuilderStore.getState().toggleEdit();
+  });
+
+  it("allows save with empty value once operator is 'exists' (required_unless)", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    await user.type(await screen.findByLabelText(/Tag name/), "paywall");
+    // value is still empty -> invalid until operator becomes "exists".
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    await waitFor(() => expect(saveBtn).toBeDisabled());
+    await user.selectOptions(screen.getByLabelText(/Operator/), "exists");
+    await waitFor(() => expect(saveBtn).toBeEnabled());
   });
 });

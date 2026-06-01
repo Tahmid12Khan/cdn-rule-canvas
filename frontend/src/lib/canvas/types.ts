@@ -2,26 +2,16 @@ import type { Edge, Node } from "reactflow";
 
 export type CanvasKey = "anonymous" | "registered" | "customer";
 
-// ---- processor config (mirrors BACKEND CONTRACT §6 ProcessorConfig, serde
-// tag="type", snake_case) ----
-export type MetaTagsOperator = "contains" | "equals" | "exists";
-export type DeviceOperator = "equals" | "contains";
-export type DeviceValue = "mobile" | "desktop" | "tablet";
-export type ArticleUrlOperator =
-  | "contains"
-  | "matches"
-  | "starts_with"
-  | "equals";
-
-export type ProcessorConfig =
-  | {
-      type: "meta_tags";
-      tag_name: string;
-      operator: MetaTagsOperator;
-      value?: string | null;
-    }
-  | { type: "device_type"; operator: DeviceOperator; value: DeviceValue }
-  | { type: "article_url"; operator: ArticleUrlOperator; value: string };
+// ---- processor config (mirrors BACKEND CONTRACT §6 ProcessorConfig) ----
+// Generic, manifest-validated shape: one snake_case `type` discriminator (the
+// canonical node-type kind) plus an open map of snake_case config fields. The
+// node-type manifest (GET /api/v1/node-types) is the runtime contract — there
+// is no per-type union, so a new node type needs ZERO frontend change. Round-
+// trips the SAME wire JSON the backend/proxy exchange.
+export interface ProcessorConfig {
+  type: string;
+  [field: string]: unknown;
+}
 
 // ---- node data payloads (what lives in RF node.data — serializable) ----
 export interface DecisionNodeData {

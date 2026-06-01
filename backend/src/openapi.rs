@@ -7,7 +7,7 @@
 use utoipa::OpenApi;
 
 use crate::{
-    api::v1::{components, features, health, outcomes, versions},
+    api::v1::{components, features, health, node_types, outcomes, versions},
     error::{ErrorBody, ErrorEnvelope, ValidationDetail},
     models::enums::{FeatureType, Placement, VersionStatus},
     schemas::{
@@ -17,11 +17,12 @@ use crate::{
         },
         feature::{FeatureCreate, FeatureRead, FeatureUpdate},
         health::HealthResponse,
-        outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem},
-        rule_graph::{
-            Branch, CanvasGraph, DeviceOperator, DeviceValue, Edge, MetaTagsOperator, Node,
-            Position, ProcessorConfig, RuleGraph,
+        node_type::{
+            BranchSpec, Category, Control, Field, NodeManifest, NodeTypeSpec, Option_, Output,
+            RequiredUnless,
         },
+        outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem},
+        rule_graph::{Branch, CanvasGraph, Edge, Node, Position, ProcessorConfig, RuleGraph},
         version::{
             PublishEnvironment, PublishRequest, VersionCreate, VersionRead, VersionSummary,
             VersionUpdate,
@@ -40,6 +41,7 @@ use crate::{
     paths(
         health::health,
         health::healthz_db,
+        node_types::list,
         features::create,
         features::list,
         features::get,
@@ -103,9 +105,16 @@ use crate::{
         Edge,
         Branch,
         Position,
-        MetaTagsOperator,
-        DeviceOperator,
-        DeviceValue,
+        // Node-type manifest
+        NodeManifest,
+        Category,
+        NodeTypeSpec,
+        Field,
+        Control,
+        RequiredUnless,
+        Option_,
+        Output,
+        BranchSpec,
         // Active version (proxy-facing)
         ActiveVersionRead,
         ActiveOutcome,
@@ -113,6 +122,7 @@ use crate::{
     )),
     tags(
         (name = "health", description = "Liveness and readiness"),
+        (name = "node-types", description = "Node-type manifest"),
         (name = "features", description = "Feature CRUD + active version"),
         (name = "versions", description = "Version lifecycle"),
         (name = "outcomes", description = "Outcomes and their components"),

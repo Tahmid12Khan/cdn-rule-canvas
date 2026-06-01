@@ -1,0 +1,12 @@
+{
+  "proxy_bind_addr": "0.0.0.0:9000",
+  "upstream_base_url": "http://demo-upstream:8081",
+  "backend_base_url": "http://backend:8000",
+  "app_env": "dev",
+  "active_version_ttl_secs": 30,
+  "compiled_cache_capacity": 256,
+  "upstream_connect_timeout_secs": 2,
+  "upstream_read_timeout_secs": 10,
+  "feature_map_path": "proxy/config/feature_map.yaml",
+  "sanitizer_config_path": "proxy/config/sanitizer.yaml"
+}

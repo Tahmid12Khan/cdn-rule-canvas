@@ -48,14 +48,16 @@ pub fn to_decision_content(canvas: &CanvasGraph) -> DecisionContent {
                 let proc_id = format!("{id}__proc");
                 let switch_id = format!("{id}__switch");
 
-                // CustomNode (processor).
+                // CustomNode (processor). The processor's `type`/kind is used
+                // DIRECTLY as the JDM CustomNode kind (== registry key); the
+                // flat config map is passed through unchanged.
                 nodes.push(Arc::new(DecisionNode {
                     id: Arc::from(proc_id.as_str()),
                     name: Arc::from(id.as_str()),
                     kind: DecisionNodeKind::CustomNode {
                         content: zen_engine::model::CustomNodeContent {
-                            kind: Arc::from(processor.kind_key()),
-                            config: Arc::new(processor.to_config_value()),
+                            kind: Arc::from(processor.kind.as_str()),
+                            config: Arc::new(processor.config.clone()),
                         },
                     },
                 }));

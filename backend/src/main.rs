@@ -32,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .with_context(|| format!("invalid BIND_ADDR: {}", settings.bind_addr))?;
 
-    let app = build_app(AppState::new(pool, settings));
+    let state = AppState::new(pool, settings).context("failed to load node-type manifest")?;
+    let app = build_app(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await

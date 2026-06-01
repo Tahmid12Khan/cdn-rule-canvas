@@ -49,14 +49,13 @@ export function mapValidationErrors(
 
 // --- descriptive validation UserError -------------------------------------
 
-// Mirrors the on-node display labels (DecisionNode.processorTitle /
-// OutcomeNode title) so the banner names a node the same way the canvas does.
+// Names a node for the descriptive error banner. The node-type manifest is not
+// available in this pure path, so a decision node is named by its processor
+// `type` (the canonical snake_case kind) — generic, with ZERO per-type code.
 function nodeLabel(node: RFNode | undefined): string {
   if (!node) return "a node";
   if (node.type === "decisionNode") {
-    const p = node.data.processor;
-    if (p.type === "meta_tags") return p.tag_name?.trim() ? p.tag_name : "Meta Tags";
-    return "Device";
+    return node.data.processor.type || "Decision";
   }
   if (node.type === "outcomeNode") {
     return node.data.title?.trim() ? node.data.title : "Outcome";
