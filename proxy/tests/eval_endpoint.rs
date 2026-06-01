@@ -2,8 +2,8 @@
 //!
 //! Spins up the full `build_app` stack (no wiremock — the eval endpoint does
 //! not fetch from upstream or backend) and sends JSON requests, asserting the
-//! correct outcome ids and traversal paths for both test branches of the
-//! dn-article anonymous canvas.
+//! correct matched expression node and traversal path for the new
+//! start->decision->expression->end shape, plus the §5 Transformation Journey.
 
 use std::sync::Arc;
 
@@ -16,32 +16,38 @@ use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
 use rre_proxy::state::AppState;
 use serde_json::{json, Value};
 
-/// The worked-example canvas shared with `evaluator.rs` integration tests.
+/// The worked-example canvas in the new start->decision->expression->end shape.
 fn canvas() -> Value {
     json!({
-        "root_node_id": "n_meta",
+        "root_node_id": "start",
         "nodes": [
+            { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 200.0 } },
             { "kind": "decision", "id": "n_meta",
               "processor": { "type": "meta_tags", "tag_name": "paywall", "operator": "contains", "value": "true" },
               "position": { "x": 80.0, "y": 200.0 } },
             { "kind": "decision", "id": "n_dev",
               "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
               "position": { "x": 360.0, "y": 120.0 } },
-            { "kind": "outcome", "id": "n_regwall",
-              "outcome_id": "11111111-1111-1111-1111-111111111111",
+            { "kind": "expression", "id": "n_regwall",
+              "action": { "type": "apply_outcome", "outcome_id": "11111111-1111-1111-1111-111111111111" },
               "position": { "x": 640.0, "y": 60.0 } },
-            { "kind": "outcome", "id": "n_paywall",
-              "outcome_id": "22222222-2222-2222-2222-222222222222",
+            { "kind": "expression", "id": "n_paywall",
+              "action": { "type": "apply_outcome", "outcome_id": "22222222-2222-2222-2222-222222222222" },
               "position": { "x": 640.0, "y": 200.0 } },
-            { "kind": "outcome", "id": "n_content",
-              "outcome_id": "33333333-3333-3333-3333-333333333333",
-              "position": { "x": 360.0, "y": 320.0 } }
+            { "kind": "expression", "id": "n_content",
+              "action": { "type": "apply_outcome", "outcome_id": "33333333-3333-3333-3333-333333333333" },
+              "position": { "x": 360.0, "y": 320.0 } },
+            { "kind": "end", "id": "end", "position": { "x": 900.0, "y": 200.0 } }
         ],
         "edges": [
-            { "id": "e1", "source_node_id": "n_meta", "target_node_id": "n_dev",     "branch": "yes" },
-            { "id": "e2", "source_node_id": "n_meta", "target_node_id": "n_content", "branch": "no"  },
-            { "id": "e3", "source_node_id": "n_dev",  "target_node_id": "n_regwall", "branch": "yes" },
-            { "id": "e4", "source_node_id": "n_dev",  "target_node_id": "n_paywall", "branch": "no"  }
+            { "id": "e0", "source_node_id": "start",     "target_node_id": "n_meta",    "branch": "yes" },
+            { "id": "e1", "source_node_id": "n_meta",    "target_node_id": "n_dev",     "branch": "yes" },
+            { "id": "e2", "source_node_id": "n_meta",    "target_node_id": "n_content", "branch": "no"  },
+            { "id": "e3", "source_node_id": "n_dev",     "target_node_id": "n_regwall", "branch": "yes" },
+            { "id": "e4", "source_node_id": "n_dev",     "target_node_id": "n_paywall", "branch": "no"  },
+            { "id": "e5", "source_node_id": "n_regwall", "target_node_id": "end",       "branch": "yes" },
+            { "id": "e6", "source_node_id": "n_paywall", "target_node_id": "end",       "branch": "yes" },
+            { "id": "e7", "source_node_id": "n_content", "target_node_id": "end",       "branch": "yes" }
         ]
     })
 }
@@ -91,9 +97,8 @@ async fn spawn_app() -> String {
 }
 
 /// Branch A: paywall=true + desktop -> n_meta:yes -> n_dev:no -> n_paywall
-/// Expected outcome: 22222222-…
 #[tokio::test]
-async fn paywall_desktop_routes_to_paywall_outcome() {
+async fn paywall_desktop_routes_to_paywall_node() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
@@ -115,11 +120,6 @@ async fn paywall_desktop_routes_to_paywall_outcome() {
     assert_eq!(resp.status(), 200);
     let v: Value = resp.json().await.unwrap();
 
-    assert_eq!(
-        v["matched_outcome_id"].as_str(),
-        Some("22222222-2222-2222-2222-222222222222"),
-        "expected paywall outcome"
-    );
     assert_eq!(v["matched_node_id"].as_str(), Some("n_paywall"));
 
     let nodes = v["traversed_node_ids"].as_array().unwrap();
@@ -129,7 +129,6 @@ async fn paywall_desktop_routes_to_paywall_outcome() {
     assert!(!nodes.contains(&json!("n_regwall")));
 
     let edges = v["traversed_edge_ids"].as_array().unwrap();
-    // e1 = n_meta:yes -> n_dev; e4 = n_dev:no -> n_paywall
     assert!(edges.contains(&json!("e1")), "expected e1 (meta yes)");
     assert!(
         edges.contains(&json!("e4")),
@@ -145,12 +144,21 @@ async fn paywall_desktop_routes_to_paywall_outcome() {
     assert_eq!(meta_step["branch"].as_str(), Some("yes"));
     let dev_step = steps.iter().find(|s| s["node_id"] == "n_dev").unwrap();
     assert_eq!(dev_step["branch"].as_str(), Some("no"));
+
+    // Transformation Journey: start, n_meta, n_dev, n_paywall, end.
+    let journey = v["journey"].as_array().unwrap();
+    let kinds: Vec<&str> = journey
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds.first(), Some(&"start"));
+    assert_eq!(kinds.last(), Some(&"end"));
+    assert!(journey.iter().any(|e| e["node_id"] == "n_paywall"));
 }
 
 /// Branch B: paywall=true + mobile -> n_meta:yes -> n_dev:yes -> n_regwall
-/// Expected outcome: 11111111-…
 #[tokio::test]
-async fn paywall_mobile_routes_to_regwall_outcome() {
+async fn paywall_mobile_routes_to_regwall_node() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
@@ -172,11 +180,6 @@ async fn paywall_mobile_routes_to_regwall_outcome() {
     assert_eq!(resp.status(), 200);
     let v: Value = resp.json().await.unwrap();
 
-    assert_eq!(
-        v["matched_outcome_id"].as_str(),
-        Some("11111111-1111-1111-1111-111111111111"),
-        "expected regwall outcome"
-    );
     assert_eq!(v["matched_node_id"].as_str(), Some("n_regwall"));
 
     let nodes = v["traversed_node_ids"].as_array().unwrap();
@@ -199,7 +202,7 @@ async fn paywall_mobile_routes_to_regwall_outcome() {
 
 /// No paywall tag -> n_meta:no -> n_content (skip the device branch entirely).
 #[tokio::test]
-async fn no_paywall_routes_to_content_outcome() {
+async fn no_paywall_routes_to_content_node() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
@@ -221,11 +224,6 @@ async fn no_paywall_routes_to_content_outcome() {
     assert_eq!(resp.status(), 200);
     let v: Value = resp.json().await.unwrap();
 
-    assert_eq!(
-        v["matched_outcome_id"].as_str(),
-        Some("33333333-3333-3333-3333-333333333333"),
-        "expected show-content outcome"
-    );
     assert_eq!(v["matched_node_id"].as_str(), Some("n_content"));
 
     let nodes = v["traversed_node_ids"].as_array().unwrap();
@@ -240,9 +238,9 @@ async fn no_paywall_routes_to_content_outcome() {
     );
 }
 
-/// Bad JSON (missing `canvas` field) -> 400 with `error` key.
+/// Bad JSON (missing `canvas` field) -> 422 (axum JSON extractor).
 #[tokio::test]
-async fn missing_canvas_returns_400() {
+async fn missing_canvas_returns_422() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
@@ -254,39 +252,50 @@ async fn missing_canvas_returns_400() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 422); // axum JSON extractor returns 422 for missing fields
+    assert_eq!(resp.status(), 422);
 }
 
-/// A canvas with a single `json_expression` decision: type==premium -> n_lock,
-/// else n_show. Proves §3.7 (JSON test input) + §3.8 (registry dispatch).
+/// A JSON canvas with a `json_expression` decision routing to a `trim_json` +
+/// `add_attribute` chain (spec §7 worked example), proving the §5 journey replays
+/// the body through the expression actions.
 fn json_canvas() -> Value {
     json!({
-        "root_node_id": "n_json",
+        "root_node_id": "start",
         "nodes": [
-            { "kind": "decision", "id": "n_json",
-              "processor": { "type": "json_expression", "json_path": "$.type", "operator": "equals", "value": "premium" },
+            { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
+            { "kind": "decision", "id": "d_api",
+              "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
               "position": { "x": 0.0, "y": 0.0 } },
-            { "kind": "outcome", "id": "n_lock",
-              "outcome_id": "22222222-2222-2222-2222-222222222222", "position": { "x": 200.0, "y": 0.0 } },
-            { "kind": "outcome", "id": "n_show",
-              "outcome_id": "33333333-3333-3333-3333-333333333333", "position": { "x": 200.0, "y": 200.0 } }
+            { "kind": "expression", "id": "t_body",
+              "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
+              "position": { "x": 200.0, "y": 0.0 } },
+            { "kind": "expression", "id": "a_pw",
+              "action": { "type": "add_attribute", "json_path": "$.paywall_show", "value": "<html>paywall_showed</html>" },
+              "position": { "x": 400.0, "y": 0.0 } },
+            { "kind": "end", "id": "end", "position": { "x": 600.0, "y": 100.0 } }
         ],
         "edges": [
-            { "id": "e1", "source_node_id": "n_json", "target_node_id": "n_lock", "branch": "yes" },
-            { "id": "e2", "source_node_id": "n_json", "target_node_id": "n_show", "branch": "no"  }
+            { "id": "e0", "source_node_id": "start",  "target_node_id": "d_api",  "branch": "yes" },
+            { "id": "e1", "source_node_id": "d_api",  "target_node_id": "t_body", "branch": "yes" },
+            { "id": "e2", "source_node_id": "d_api",  "target_node_id": "end",    "branch": "no"  },
+            { "id": "e3", "source_node_id": "t_body", "target_node_id": "a_pw",   "branch": "yes" },
+            { "id": "e4", "source_node_id": "a_pw",   "target_node_id": "end",    "branch": "yes" }
         ]
     })
 }
 
-/// §3.7: `response_json` populates the context so json_expression evaluates.
+/// §5: the journey replays the matched JSON path's body mutations step by step.
 #[tokio::test]
-async fn json_expression_via_response_json_field() {
+async fn json_journey_replays_body_mutations() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
     let body = json!({
         "canvas": json_canvas(),
-        "context": { "response_json": { "type": "premium" } }
+        "context": {
+            "content_kind": "json",
+            "response_json": { "api": "dn-article", "body": [1, 2, 3] }
+        }
     });
 
     let resp = client
@@ -297,23 +306,48 @@ async fn json_expression_via_response_json_field() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let v: Value = resp.json().await.unwrap();
+
+    assert_eq!(v["matched_node_id"].as_str(), Some("a_pw"));
+
+    let journey = v["journey"].as_array().unwrap();
+    // start, d_api, t_body, a_pw, end.
+    assert_eq!(journey.len(), 5, "journey: {journey:?}");
+    assert_eq!(journey[0]["kind"], "start");
+    assert_eq!(journey[0]["body_after"]["body"], json!([1, 2, 3]));
+
+    // After d_api (decision): body unchanged.
+    assert_eq!(journey[1]["node_id"], "d_api");
+    assert_eq!(journey[1]["body_after"]["body"], json!([1, 2, 3]));
+
+    // After t_body (trim to 0): body array emptied.
+    assert_eq!(journey[2]["node_id"], "t_body");
+    assert_eq!(journey[2]["body_after"]["body"], json!([]));
+
+    // After a_pw (add_attribute): paywall_show set.
+    assert_eq!(journey[3]["node_id"], "a_pw");
     assert_eq!(
-        v["matched_outcome_id"].as_str(),
-        Some("22222222-2222-2222-2222-222222222222"),
-        "premium -> lock outcome"
+        journey[3]["body_after"]["paywall_show"],
+        json!("<html>paywall_showed</html>")
     );
-    assert_eq!(v["matched_node_id"].as_str(), Some("n_lock"));
+
+    // End: body unchanged from the previous step.
+    assert_eq!(journey[4]["kind"], "end");
+    assert_eq!(journey[4]["body_after"]["body"], json!([]));
 }
 
-/// §3.7: `response_body` + `content_kind:"json"` parses into response_json.
+/// The `no` branch of the JSON canvas reaches `end` with no actions -> no body
+/// mutation in the journey.
 #[tokio::test]
-async fn json_expression_via_response_body_and_content_kind() {
+async fn json_journey_no_branch_passes_through() {
     let base = spawn_app().await;
     let client = reqwest::Client::new();
 
     let body = json!({
         "canvas": json_canvas(),
-        "context": { "response_body": "{\"type\":\"free\"}", "content_kind": "json" }
+        "context": {
+            "content_kind": "json",
+            "response_json": { "api": "other", "body": [1, 2, 3] }
+        }
     });
 
     let resp = client
@@ -324,34 +358,16 @@ async fn json_expression_via_response_body_and_content_kind() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let v: Value = resp.json().await.unwrap();
-    assert_eq!(
-        v["matched_outcome_id"].as_str(),
-        Some("33333333-3333-3333-3333-333333333333"),
-        "free -> show outcome"
-    );
-}
 
-/// Without any JSON body, json_expression sees no response_json -> No -> n_show.
-#[tokio::test]
-async fn json_expression_no_body_takes_no_branch() {
-    let base = spawn_app().await;
-    let client = reqwest::Client::new();
+    // No expression node matched.
+    assert_eq!(v["matched_node_id"].as_str(), None);
 
-    let body = json!({ "canvas": json_canvas(), "context": {} });
-
-    let resp = client
-        .post(format!("{base}/__rre/eval"))
-        .json(&body)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let v: Value = resp.json().await.unwrap();
-    assert_eq!(
-        v["matched_node_id"].as_str(),
-        Some("n_show"),
-        "no body -> No branch -> show outcome"
-    );
+    let journey = v["journey"].as_array().unwrap();
+    // start, d_api, end — body unchanged throughout.
+    assert!(journey
+        .iter()
+        .all(|e| e["body_after"]["body"] == json!([1, 2, 3])));
+    assert_eq!(journey.last().unwrap()["kind"], "end");
 }
 
 /// CORS preflight on `/__rre/eval` should respond 200 with the correct headers.
@@ -369,7 +385,6 @@ async fn cors_preflight_returns_allow_origin() {
         .await
         .unwrap();
 
-    // tower-http CorsLayer returns 200 for valid preflights.
     assert!(
         resp.status().is_success(),
         "preflight status: {}",

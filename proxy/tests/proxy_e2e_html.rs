@@ -20,23 +20,27 @@ const HOST: &str = "rre.test";
 const PAYWALL_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
 
 fn active_version_body() -> serde_json::Value {
+    // start -> n_meta (paywall?) ; yes -> apply_outcome(paywall) -> end ; no -> end.
     json!({
         "version_number": 1,
         "rule_graph": {
             "anonymous": {
-                "root_node_id": "n_meta",
+                "root_node_id": "start",
                 "nodes": [
+                    { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
                     { "kind": "decision", "id": "n_meta",
                       "processor": { "type": "meta_tags", "tag_name": "paywall", "operator": "contains", "value": "true" },
                       "position": { "x": 0.0, "y": 0.0 } },
-                    { "kind": "outcome", "id": "n_paywall", "outcome_id": PAYWALL_OUTCOME,
+                    { "kind": "expression", "id": "n_paywall",
+                      "action": { "type": "apply_outcome", "outcome_id": PAYWALL_OUTCOME },
                       "position": { "x": 200.0, "y": 0.0 } },
-                    { "kind": "outcome", "id": "n_content", "outcome_id": "33333333-3333-3333-3333-333333333333",
-                      "position": { "x": 200.0, "y": 200.0 } }
+                    { "kind": "end", "id": "end", "position": { "x": 400.0, "y": 100.0 } }
                 ],
                 "edges": [
-                    { "id": "e1", "source_node_id": "n_meta", "target_node_id": "n_paywall", "branch": "yes" },
-                    { "id": "e2", "source_node_id": "n_meta", "target_node_id": "n_content", "branch": "no" }
+                    { "id": "e0", "source_node_id": "start",     "target_node_id": "n_meta",    "branch": "yes" },
+                    { "id": "e1", "source_node_id": "n_meta",    "target_node_id": "n_paywall", "branch": "yes" },
+                    { "id": "e2", "source_node_id": "n_meta",    "target_node_id": "end",       "branch": "no" },
+                    { "id": "e3", "source_node_id": "n_paywall", "target_node_id": "end",       "branch": "yes" }
                 ]
             },
             "registered": { "root_node_id": null, "nodes": [], "edges": [] },

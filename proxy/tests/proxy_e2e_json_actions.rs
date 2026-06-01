@@ -1,8 +1,8 @@
-//! Full pipeline e2e for the JSON branch (§3.6): a fake upstream serves an
-//! `application/json` body, a fake backend serves an active-version whose
-//! anonymous canvas has a `json_expression` decision routing to a JSON-mutation
-//! outcome (`json_set`). Also exercises the version-level `json_selector`
-//! applicability gate (hit applies, miss serves the original).
+//! Full pipeline e2e for the new expression-node JSON action chain (spec §7
+//! worked example): a fake upstream serves an `application/json` body, a fake
+//! backend serves an active-version whose anonymous canvas is
+//! `start -> json_expression -> trim_json -> add_attribute -> end`. When
+//! `$.api == "dn-article"`, the proxy empties `$.body` and sets `$.paywall_show`.
 
 use std::sync::Arc;
 
@@ -17,15 +17,13 @@ use serde_json::{json, Value};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FEATURE: &str = "dn-article";
+const FEATURE: &str = "dn-json-article";
 const HOST: &str = "rre.test";
-const LOCK_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
-const SHOW_OUTCOME: &str = "33333333-3333-3333-3333-333333333333";
 
-/// Active-version with a json_expression decision: type==premium -> lock outcome
-/// (json_set $.locked=true), else builtin ShowContent. `applicability` overrides
-/// the default `{}` when provided.
-fn active_version_body(applicability: Value) -> Value {
+/// Active-version: start -> d_api (json_expression $.api == dn-article) ;
+/// yes -> trim_json($.body, 0) -> add_attribute($.paywall_show) -> end ;
+/// no  -> end (pass-through).
+fn active_version_body() -> Value {
     json!({
         "version_number": 1,
         "rule_graph": {
@@ -33,37 +31,30 @@ fn active_version_body(applicability: Value) -> Value {
                 "root_node_id": "start",
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
-                    { "kind": "decision", "id": "n_json",
-                      "processor": { "type": "json_expression", "json_path": "$.type", "operator": "equals", "value": "premium" },
+                    { "kind": "decision", "id": "d_api",
+                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
                       "position": { "x": 0.0, "y": 0.0 } },
-                    { "kind": "expression", "id": "n_lock",
-                      "action": { "type": "apply_outcome", "outcome_id": LOCK_OUTCOME },
+                    { "kind": "expression", "id": "t_body",
+                      "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
                       "position": { "x": 200.0, "y": 0.0 } },
-                    { "kind": "end", "id": "end", "position": { "x": 400.0, "y": 100.0 } }
+                    { "kind": "expression", "id": "a_pw",
+                      "action": { "type": "add_attribute", "json_path": "$.paywall_show", "value": "<html>paywall_showed</html>" },
+                      "position": { "x": 400.0, "y": 0.0 } },
+                    { "kind": "end", "id": "end", "position": { "x": 600.0, "y": 100.0 } }
                 ],
                 "edges": [
-                    { "id": "e0", "source_node_id": "start",  "target_node_id": "n_json", "branch": "yes" },
-                    { "id": "e1", "source_node_id": "n_json", "target_node_id": "n_lock", "branch": "yes" },
-                    { "id": "e2", "source_node_id": "n_json", "target_node_id": "end",    "branch": "no" },
-                    { "id": "e3", "source_node_id": "n_lock", "target_node_id": "end",    "branch": "yes" }
+                    { "id": "e0", "source_node_id": "start",  "target_node_id": "d_api",  "branch": "yes" },
+                    { "id": "e1", "source_node_id": "d_api",  "target_node_id": "t_body", "branch": "yes" },
+                    { "id": "e2", "source_node_id": "d_api",  "target_node_id": "end",    "branch": "no"  },
+                    { "id": "e3", "source_node_id": "t_body", "target_node_id": "a_pw",   "branch": "yes" },
+                    { "id": "e4", "source_node_id": "a_pw",   "target_node_id": "end",    "branch": "yes" }
                 ]
             },
             "registered": { "root_node_id": null, "nodes": [], "edges": [] },
             "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
         },
-        "applicability": applicability,
-        "outcomes": [
-            {
-                "id": LOCK_OUTCOME, "title": "Lock", "is_builtin": false, "order_index": 0,
-                "components": [
-                    { "id": "44444444-4444-4444-4444-444444444444", "slug": "lock",
-                      "type": "json_set",
-                      "config": { "type": "json_set", "target_path": "$.locked", "value": true },
-                      "placement": "inline", "order_index": 0 }
-                ]
-            },
-            { "id": SHOW_OUTCOME, "title": "ShowContent", "is_builtin": true, "order_index": 1, "components": [] }
-        ]
+        "applicability": {},
+        "outcomes": []
     })
 }
 
@@ -111,7 +102,7 @@ async fn spawn(upstream: &str, backend: &str) -> String {
     format!("http://{addr}")
 }
 
-async fn run(upstream_json: &str, upstream_path: &str, applicability: Value) -> (String, String) {
+async fn run(upstream_json: &str, upstream_path: &str) -> (String, String) {
     let upstream = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(upstream_path.to_string()))
@@ -125,7 +116,7 @@ async fn run(upstream_json: &str, upstream_path: &str, applicability: Value) -> 
     let backend = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body(applicability)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
         .mount(&backend)
         .await;
 
@@ -148,45 +139,25 @@ async fn run(upstream_json: &str, upstream_path: &str, applicability: Value) -> 
 }
 
 #[tokio::test]
-async fn premium_json_gets_locked() {
+async fn matching_api_trims_body_and_adds_paywall() {
     let (status, body) = run(
-        r#"{"type":"premium","locked":false}"#,
+        r#"{"api":"dn-article","body":["p1","p2","p3"]}"#,
         "/article/1",
-        json!({}),
     )
     .await;
     assert_eq!(status, "ok", "body: {body}");
     let v: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["locked"], json!(true));
-    assert_eq!(v["type"], json!("premium"));
+    assert_eq!(v["body"], json!([]), "body should be emptied");
+    assert_eq!(v["paywall_show"], json!("<html>paywall_showed</html>"));
+    assert_eq!(v["api"], json!("dn-article"));
 }
 
 #[tokio::test]
-async fn free_json_routes_to_show_content_skipped() {
-    let (status, body) = run(r#"{"type":"free"}"#, "/article/2", json!({})).await;
+async fn non_matching_api_passes_through() {
+    let (status, body) = run(r#"{"api":"other","body":["p1","p2","p3"]}"#, "/article/2").await;
     assert_eq!(status, "skipped", "body: {body}");
     let v: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["type"], json!("free"));
-    assert!(v.get("locked").is_none());
-}
-
-#[tokio::test]
-async fn json_selector_hit_applies() {
-    // json_selector requires `$.type` to exist; it does -> apply.
-    let app = json!({ "json_selector": "$.type" });
-    let (status, body) = run(r#"{"type":"premium","locked":false}"#, "/article/3", app).await;
-    assert_eq!(status, "ok", "body: {body}");
-    let v: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["locked"], json!(true));
-}
-
-#[tokio::test]
-async fn json_selector_miss_serves_original() {
-    // json_selector requires `$.nonexistent`; it does not match -> serve original.
-    let app = json!({ "json_selector": "$.nonexistent" });
-    let (status, body) = run(r#"{"type":"premium","locked":false}"#, "/article/4", app).await;
-    assert_eq!(status, "skipped", "body: {body}");
-    let v: Value = serde_json::from_str(&body).unwrap();
-    // Unmodified: locked stays false.
-    assert_eq!(v["locked"], json!(false));
+    // Unchanged: body intact, no paywall_show added.
+    assert_eq!(v["body"], json!(["p1", "p2", "p3"]));
+    assert!(v.get("paywall_show").is_none());
 }

@@ -18,7 +18,7 @@
 use serde_json::Value;
 
 use crate::domain::applier::json_path::{self, Seg};
-use crate::domain::applier::{ApplyError, JsonModificationResult};
+use crate::domain::applier::{orchestrator, ApplyError, JsonModificationResult};
 use crate::infra::backend_client::{ActiveComponent, ActiveOutcome, Placement};
 
 /// Apply an outcome's components to `body`. Always returns `Ok` (per-component
@@ -223,4 +223,173 @@ fn navigate_mut<'a>(root: &'a mut Value, segs: &[Seg]) -> Option<&'a mut Value> 
         };
     }
     Some(cur)
+}
+
+// ---------------------------------------------------------------------------
+// Expression-node actions (spec §4): trim_json / add_attribute / apply_outcome.
+// The forwarder folds the evaluator's ordered `MatchedAction`s over the body via
+// `apply_action_json` (JSON) / `apply_action_html` (HTML).
+// ---------------------------------------------------------------------------
+
+/// `trim_json`: truncate the array at `json_path` to `min(actual_len, length)`.
+/// A non-array / missing path is a fail-open no-op; `length < 0` is treated as 0.
+/// Returns true iff the body changed (the array shrank). Idempotent: a second run
+/// with the same `length` is a no-op once `len <= length`.
+pub fn trim_json(root: &mut Value, json_path: &str, length: i64) -> Result<bool, ApplyError> {
+    let target = length.max(0) as usize;
+    let segs = json_path::parse(json_path)?;
+    let Some(node) = navigate_mut(root, &segs) else {
+        return Ok(false); // missing path -> no-op.
+    };
+    let Some(arr) = node.as_array_mut() else {
+        return Ok(false); // not an array -> no-op.
+    };
+    let keep = target.min(arr.len());
+    if keep == arr.len() {
+        return Ok(false); // already short enough -> no change.
+    }
+    arr.truncate(keep);
+    Ok(true)
+}
+
+/// `add_attribute`: upsert `value` at `json_path` (= `set_path(create=true)`).
+/// Creates missing object parents; replaces an existing value. A `$.a.b` JSONPath
+/// is mapped to internal `Seg`s via `json_path::parse`. Returns true iff the body
+/// changed. Idempotent: re-setting the same value is a no-op.
+pub fn add_attribute(root: &mut Value, json_path: &str, value: Value) -> Result<bool, ApplyError> {
+    let segs = json_path::parse(json_path)?;
+    Ok(set_path(root, &segs, value, true))
+}
+
+/// Apply ONE matched expression action to a JSON body. Dispatches on
+/// `action["type"]`:
+///
+/// - `trim_json     { json_path, length }`
+/// - `add_attribute { json_path, value }`
+/// - `apply_outcome { outcome_id }` -> look up the outcome and run its components
+///   via `apply_outcome_json`.
+///
+/// Returns whether the body changed. An unknown type / missing config is a
+/// fail-open no-op (warn + `false`) — never a panic.
+pub fn apply_action_json(body: &mut Value, action: &Value, outcomes: &[ActiveOutcome]) -> bool {
+    let Some(kind) = action.get("type").and_then(Value::as_str) else {
+        tracing::warn!("expression action missing `type`, skipped");
+        return false;
+    };
+    match kind {
+        "trim_json" => {
+            let Some(path) = action.get("json_path").and_then(Value::as_str) else {
+                tracing::warn!("trim_json action missing `json_path`, skipped");
+                return false;
+            };
+            let length = action_length(action);
+            match trim_json(body, path, length) {
+                Ok(changed) => changed,
+                Err(e) => {
+                    tracing::warn!(error = %e, "trim_json failed, skipped");
+                    false
+                }
+            }
+        }
+        "add_attribute" => {
+            let Some(path) = action.get("json_path").and_then(Value::as_str) else {
+                tracing::warn!("add_attribute action missing `json_path`, skipped");
+                return false;
+            };
+            let value = action.get("value").cloned().unwrap_or(Value::Null);
+            match add_attribute(body, path, value) {
+                Ok(changed) => changed,
+                Err(e) => {
+                    tracing::warn!(error = %e, "add_attribute failed, skipped");
+                    false
+                }
+            }
+        }
+        "apply_outcome" => match lookup_outcome(action, outcomes) {
+            Some(outcome) => {
+                let taken = std::mem::replace(body, Value::Null);
+                match apply_outcome_json(taken, outcome) {
+                    Ok(m) => {
+                        *body = m.json;
+                        m.applied
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "apply_outcome (json) failed, skipped");
+                        false
+                    }
+                }
+            }
+            None => {
+                tracing::warn!("apply_outcome action: outcome not found, skipped");
+                false
+            }
+        },
+        other => {
+            tracing::warn!(action_type = %other, "unknown expression action type, skipped");
+            false
+        }
+    }
+}
+
+/// Apply ONE matched expression action to an HTML body. Only `apply_outcome` is
+/// meaningful for HTML; `trim_json` / `add_attribute` are JSON-only (warn + no-op).
+/// Returns the (possibly modified) HTML and whether it changed.
+pub fn apply_action_html(
+    body: String,
+    action: &Value,
+    outcomes: &[ActiveOutcome],
+    sanitizer: &ammonia::Builder<'static>,
+) -> (String, bool) {
+    let Some(kind) = action.get("type").and_then(Value::as_str) else {
+        tracing::warn!("expression action missing `type`, skipped");
+        return (body, false);
+    };
+    match kind {
+        "apply_outcome" => match lookup_outcome(action, outcomes) {
+            Some(outcome) => match orchestrator::apply_outcome(body.clone(), outcome, sanitizer) {
+                Ok(m) => (m.html, m.applied),
+                Err(e) => {
+                    tracing::warn!(error = %e, "apply_outcome (html) failed, serving original");
+                    (body, false)
+                }
+            },
+            None => {
+                tracing::warn!("apply_outcome action: outcome not found, skipped");
+                (body, false)
+            }
+        },
+        "trim_json" | "add_attribute" => {
+            tracing::warn!(action_type = %kind, "json-only action on HTML body, skipped");
+            (body, false)
+        }
+        other => {
+            tracing::warn!(action_type = %other, "unknown expression action type, skipped");
+            (body, false)
+        }
+    }
+}
+
+/// Read a numeric `length` from an action config (accepts JSON number or numeric
+/// string). Defaults to 0 when absent / unparseable.
+fn action_length(action: &Value) -> i64 {
+    match action.get("length") {
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(0),
+        Some(Value::String(s)) => s.trim().parse::<i64>().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Resolve an `apply_outcome` action's `outcome_id` against the active outcomes.
+fn lookup_outcome<'a>(action: &Value, outcomes: &'a [ActiveOutcome]) -> Option<&'a ActiveOutcome> {
+    let id_str = action
+        .get("outcome_id")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            action
+                .get("fields")
+                .and_then(|f| f.get("outcome_id"))
+                .and_then(Value::as_str)
+        })?;
+    let id = uuid::Uuid::parse_str(id_str).ok()?;
+    outcomes.iter().find(|o| o.id == id)
 }

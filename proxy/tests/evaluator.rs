@@ -4,35 +4,45 @@ use std::time::Instant;
 
 use http::HeaderMap;
 use rre_proxy::domain::context::EvaluationContextParts;
-use rre_proxy::domain::evaluator::GraphEvaluator;
+use rre_proxy::domain::evaluator::{GraphEvaluator, MatchedAction};
 use rre_proxy::domain::graph::{Canvas, CanvasGraph};
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use uuid::Uuid;
 
-/// The worked-example anonymous canvas (§6). Built from a raw JSON string (not
-/// the `json!` macro) so rustfmt leaves the literal untouched.
+/// The worked-example anonymous canvas in the new start->decision->expression->end
+/// shape. Built from a raw JSON string (not the `json!` macro) so rustfmt leaves
+/// the literal untouched. Each expression node applies a distinct outcome id, so
+/// the matched `MatchedAction` order encodes the routed path.
 const ANONYMOUS_CANVAS_JSON: &str = r#"{
-  "root_node_id": "n_meta",
+  "root_node_id": "start",
   "nodes": [
+    { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 200.0 } },
     { "kind": "decision", "id": "n_meta",
       "processor": { "type": "meta_tags", "tag_name": "paywall", "operator": "contains", "value": "true" },
       "position": { "x": 80.0, "y": 200.0 } },
     { "kind": "decision", "id": "n_dev",
       "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
       "position": { "x": 360.0, "y": 120.0 } },
-    { "kind": "outcome", "id": "n_regwall", "outcome_id": "11111111-1111-1111-1111-111111111111",
+    { "kind": "expression", "id": "n_regwall",
+      "action": { "type": "apply_outcome", "outcome_id": "11111111-1111-1111-1111-111111111111" },
       "position": { "x": 640.0, "y": 60.0 } },
-    { "kind": "outcome", "id": "n_paywall", "outcome_id": "22222222-2222-2222-2222-222222222222",
+    { "kind": "expression", "id": "n_paywall",
+      "action": { "type": "apply_outcome", "outcome_id": "22222222-2222-2222-2222-222222222222" },
       "position": { "x": 640.0, "y": 200.0 } },
-    { "kind": "outcome", "id": "n_content", "outcome_id": "33333333-3333-3333-3333-333333333333",
-      "position": { "x": 360.0, "y": 320.0 } }
+    { "kind": "expression", "id": "n_content",
+      "action": { "type": "apply_outcome", "outcome_id": "33333333-3333-3333-3333-333333333333" },
+      "position": { "x": 360.0, "y": 320.0 } },
+    { "kind": "end", "id": "end", "position": { "x": 900.0, "y": 200.0 } }
   ],
   "edges": [
-    { "id": "e1", "source_node_id": "n_meta", "target_node_id": "n_dev",     "branch": "yes" },
-    { "id": "e2", "source_node_id": "n_meta", "target_node_id": "n_content", "branch": "no"  },
-    { "id": "e3", "source_node_id": "n_dev",  "target_node_id": "n_regwall", "branch": "yes" },
-    { "id": "e4", "source_node_id": "n_dev",  "target_node_id": "n_paywall", "branch": "no"  }
+    { "id": "e0", "source_node_id": "start",     "target_node_id": "n_meta",    "branch": "yes" },
+    { "id": "e1", "source_node_id": "n_meta",    "target_node_id": "n_dev",     "branch": "yes" },
+    { "id": "e2", "source_node_id": "n_meta",    "target_node_id": "n_content", "branch": "no"  },
+    { "id": "e3", "source_node_id": "n_dev",     "target_node_id": "n_regwall", "branch": "yes" },
+    { "id": "e4", "source_node_id": "n_dev",     "target_node_id": "n_paywall", "branch": "no"  },
+    { "id": "e5", "source_node_id": "n_regwall", "target_node_id": "end",       "branch": "yes" },
+    { "id": "e6", "source_node_id": "n_paywall", "target_node_id": "end",       "branch": "yes" },
+    { "id": "e7", "source_node_id": "n_content", "target_node_id": "end",       "branch": "yes" }
   ]
 }"#;
 
@@ -54,6 +64,16 @@ fn parts(html: &str, ua: Option<&str>) -> EvaluationContextParts {
     )
 }
 
+/// The matched expression node ids (in trace order) extracted from the actions.
+fn node_ids(actions: &[MatchedAction]) -> Vec<&str> {
+    actions.iter().map(|a| a.node_id.as_str()).collect()
+}
+
+/// The `outcome_id` of an `apply_outcome` action (assert routing target).
+fn outcome_id(action: &MatchedAction) -> &str {
+    action.action["outcome_id"].as_str().unwrap()
+}
+
 #[tokio::test]
 async fn paywall_plus_mobile_routes_to_regwall() {
     let registry = Arc::new(default_registry());
@@ -64,13 +84,14 @@ async fn paywall_plus_mobile_routes_to_regwall() {
     let html = r#"<html><head><meta name="paywall" content="true"></head><body></body></html>"#;
     let ctx = parts(html, Some("iPhone Mobile"));
 
-    let outcome = evaluator
+    let actions = evaluator
         .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
         .await;
 
+    assert_eq!(node_ids(&actions), vec!["n_regwall"]);
     assert_eq!(
-        outcome,
-        Some(Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap())
+        outcome_id(&actions[0]),
+        "11111111-1111-1111-1111-111111111111"
     );
 }
 
@@ -84,13 +105,14 @@ async fn paywall_plus_desktop_routes_to_paywall() {
     let html = r#"<html><head><meta name="paywall" content="true"></head><body></body></html>"#;
     let ctx = parts(html, Some("Macintosh Desktop"));
 
-    let outcome = evaluator
+    let actions = evaluator
         .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
         .await;
 
+    assert_eq!(node_ids(&actions), vec!["n_paywall"]);
     assert_eq!(
-        outcome,
-        Some(Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap())
+        outcome_id(&actions[0]),
+        "22222222-2222-2222-2222-222222222222"
     );
 }
 
@@ -104,18 +126,19 @@ async fn no_paywall_routes_to_content() {
     let html = "<html><head></head><body></body></html>";
     let ctx = parts(html, Some("iPhone Mobile"));
 
-    let outcome = evaluator
+    let actions = evaluator
         .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
         .await;
 
+    assert_eq!(node_ids(&actions), vec!["n_content"]);
     assert_eq!(
-        outcome,
-        Some(Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap())
+        outcome_id(&actions[0]),
+        "33333333-3333-3333-3333-333333333333"
     );
 }
 
 #[tokio::test]
-async fn empty_canvas_yields_none() {
+async fn empty_canvas_yields_no_actions() {
     let registry = Arc::new(default_registry());
     let cache = CompiledCache::new(256);
     let evaluator = GraphEvaluator::new(registry, &cache);
@@ -123,11 +146,11 @@ async fn empty_canvas_yields_none() {
     let canvas = CanvasGraph::default();
     let ctx = parts("<html></html>", None);
 
-    let outcome = evaluator
+    let actions = evaluator
         .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
         .await;
 
-    assert_eq!(outcome, None);
+    assert!(actions.is_empty());
 }
 
 /// Latency smoke: 100 concurrent evaluations should complete with a healthy p95.

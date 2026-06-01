@@ -10,7 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 /// One `CanvasGraph` per user class.
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -28,18 +27,28 @@ pub struct CanvasGraph {
     pub root_node_id: Option<String>,
 }
 
-/// Internally-tagged by `kind`.
+/// Internally-tagged by `kind`. Mirrors the backend `rule_graph.rs` `Node` enum
+/// BYTE-IDENTICALLY (minus `ToSchema`/doc): `start` / `decision` / `expression`
+/// / `end`. The `ProcessorRef` shape is REUSED for the expression `action`.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Node {
+    Start {
+        id: String,
+        position: Position,
+    },
     Decision {
         id: String,
         processor: ProcessorRef,
         position: Position,
     },
-    Outcome {
+    Expression {
         id: String,
-        outcome_id: Uuid,
+        action: ProcessorRef,
+        position: Position,
+    },
+    End {
+        id: String,
         position: Position,
     },
 }
@@ -48,9 +57,27 @@ impl Node {
     /// The node id, regardless of variant.
     pub fn id(&self) -> &str {
         match self {
+            Node::Start { id, .. } => id,
             Node::Decision { id, .. } => id,
-            Node::Outcome { id, .. } => id,
+            Node::Expression { id, .. } => id,
+            Node::End { id, .. } => id,
         }
+    }
+
+    pub fn is_start(&self) -> bool {
+        matches!(self, Node::Start { .. })
+    }
+
+    pub fn is_end(&self) -> bool {
+        matches!(self, Node::End { .. })
+    }
+
+    pub fn is_expression(&self) -> bool {
+        matches!(self, Node::Expression { .. })
+    }
+
+    pub fn is_decision(&self) -> bool {
+        matches!(self, Node::Decision { .. })
     }
 }
 

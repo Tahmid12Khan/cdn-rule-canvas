@@ -11,13 +11,13 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
-use crate::domain::applier::{json_apply, orchestrator};
+use crate::domain::applier::json_apply;
 use crate::domain::classifier;
 use crate::domain::context::EvaluationContextParts;
-use crate::domain::evaluator::GraphEvaluator;
+use crate::domain::evaluator::{GraphEvaluator, MatchedAction};
 use crate::domain::graph::Canvas;
 use crate::error::ProxyError;
-use crate::infra::backend_client::{ActiveOutcome, ActiveVersionRead, Env};
+use crate::infra::backend_client::{ActiveVersionRead, Env};
 use crate::infra::encoding;
 use crate::state::AppState;
 
@@ -121,37 +121,34 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
             body_string.clone(),
             false,
         );
-        let (outcome_id, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
-        let outcome = outcome_id.and_then(|id| av.find_outcome(id));
+        let (actions, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
 
-        match terminal_outcome(outcome) {
-            None => {
-                log_skipped(&feature_id, canvas_label, outcome, eval_ms);
-                (body_string, "skipped")
+        if actions.is_empty() {
+            log_skipped(&feature_id, canvas_label, eval_ms);
+            (body_string, "skipped")
+        } else {
+            // Fold each matched action over the HTML body in trace order.
+            let t_start = Instant::now();
+            let mut current = body_string.clone();
+            let mut applied = false;
+            for ma in &actions {
+                let (next, changed) = json_apply::apply_action_html(
+                    current,
+                    &ma.action,
+                    &av.outcomes,
+                    &state.sanitizer,
+                );
+                current = next;
+                applied |= changed;
             }
-            Some(o) => {
-                metrics::counter!("proxy_outcomes_total", "outcome_id" => o.id.to_string())
-                    .increment(1);
-                let t_start = Instant::now();
-                let result = orchestrator::apply_outcome(body_string.clone(), o, &state.sanitizer);
-                let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-                metrics::histogram!("proxy_transform_ms").record(transform_ms);
-                match result {
-                    Ok(m) => {
-                        let status = if m.applied { "ok" } else { "skipped" };
-                        tracing::info!(
-                            feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
-                            eval_ms, transform_ms, apply_status = status, "request"
-                        );
-                        (m.html, status)
-                    }
-                    Err(e) => {
-                        metrics::counter!("proxy_apply_errors_total").increment(1);
-                        tracing::warn!(error = %e, "apply error, serving original");
-                        (body_string, "error")
-                    }
-                }
-            }
+            let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            metrics::histogram!("proxy_transform_ms").record(transform_ms);
+            let status = if applied { "ok" } else { "skipped" };
+            tracing::info!(
+                feature_id = %feature_id, canvas = canvas_label,
+                actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
+            );
+            (current, status)
         }
     } else {
         // 7a. Parse the JSON body. Parse failure -> serve original, skipped.
@@ -181,49 +178,40 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
             body_string.clone(),
             true,
         );
-        let (outcome_id, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
-        let outcome = outcome_id.and_then(|id| av.find_outcome(id));
+        let (actions, eval_ms) = evaluate(&state, &av, ctx, &feature_id, canvas_class).await;
 
-        match terminal_outcome(outcome) {
-            None => {
-                log_skipped(&feature_id, canvas_label, outcome, eval_ms);
-                (body_string, "skipped")
+        if actions.is_empty() {
+            log_skipped(&feature_id, canvas_label, eval_ms);
+            (body_string, "skipped")
+        } else {
+            // Fold each matched action over the parsed JSON body in trace order.
+            let t_start = Instant::now();
+            let mut current = parsed;
+            let mut applied = false;
+            for ma in &actions {
+                applied |= json_apply::apply_action_json(&mut current, &ma.action, &av.outcomes);
             }
-            Some(o) => {
-                metrics::counter!("proxy_outcomes_total", "outcome_id" => o.id.to_string())
-                    .increment(1);
-                let t_start = Instant::now();
-                let result = json_apply::apply_outcome_json(parsed, o);
-                let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-                metrics::histogram!("proxy_transform_ms").record(transform_ms);
-                match result {
-                    Ok(m) if m.applied => {
-                        // Re-serialize the mutated JSON to a string.
-                        match serde_json::to_string(&m.json) {
-                            Ok(s) => {
-                                tracing::info!(
-                                    feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
-                                    eval_ms, transform_ms, apply_status = "ok", "request"
-                                );
-                                (s, "ok")
-                            }
-                            Err(e) => {
-                                metrics::counter!("proxy_apply_errors_total").increment(1);
-                                tracing::warn!(error = %e, "json serialize failed, serving original");
-                                (body_string, "error")
-                            }
-                        }
-                    }
-                    Ok(_) => {
+            let transform_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            metrics::histogram!("proxy_transform_ms").record(transform_ms);
+
+            if !applied {
+                tracing::info!(
+                    feature_id = %feature_id, canvas = canvas_label,
+                    actions = actions.len(), eval_ms, transform_ms, apply_status = "skipped", "request"
+                );
+                (body_string, "skipped")
+            } else {
+                match serde_json::to_string(&current) {
+                    Ok(s) => {
                         tracing::info!(
-                            feature_id = %feature_id, canvas = canvas_label, outcome_id = %o.id,
-                            eval_ms, transform_ms, apply_status = "skipped", "request"
+                            feature_id = %feature_id, canvas = canvas_label,
+                            actions = actions.len(), eval_ms, transform_ms, apply_status = "ok", "request"
                         );
-                        (body_string, "skipped")
+                        (s, "ok")
                     }
                     Err(e) => {
                         metrics::counter!("proxy_apply_errors_total").increment(1);
-                        tracing::warn!(error = %e, "json apply error, serving original");
+                        tracing::warn!(error = %e, "json serialize failed, serving original");
                         (body_string, "error")
                     }
                 }
@@ -240,19 +228,19 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     rebuild_response(status, resp_headers, out_bytes, apply_status)
 }
 
-/// Run the classified canvas through the evaluator, returning the resolved
-/// outcome id (if any) and the eval duration in ms. Records `proxy_eval_ms`.
+/// Run the classified canvas through the evaluator, returning the ordered matched
+/// expression actions and the eval duration in ms. Records `proxy_eval_ms`.
 async fn evaluate(
     state: &AppState,
     av: &ActiveVersionRead,
     ctx: EvaluationContextParts,
     feature_id: &str,
     canvas_class: Canvas,
-) -> (Option<uuid::Uuid>, f64) {
+) -> (Vec<MatchedAction>, f64) {
     let canvas_graph = av.canvas(canvas_class);
     let eval_start = Instant::now();
     let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
-    let outcome_id = evaluator
+    let actions = evaluator
         .evaluate(
             canvas_graph,
             ctx,
@@ -263,30 +251,16 @@ async fn evaluate(
         .await;
     let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
     metrics::histogram!("proxy_eval_ms").record(eval_ms);
-    (outcome_id, eval_ms)
+    (actions, eval_ms)
 }
 
-/// Resolve a *terminal, applicable* outcome: `None` and builtin-ShowContent both
-/// short-circuit to no modification (the caller serves the original body).
-fn terminal_outcome(outcome: Option<&ActiveOutcome>) -> Option<&ActiveOutcome> {
-    match outcome {
-        Some(o) if !o.is_builtin_show_content() => Some(o),
-        _ => None,
-    }
-}
-
-/// Structured "no modification" log shared by both content kinds.
-fn log_skipped(
-    feature_id: &str,
-    canvas_label: &str,
-    outcome: Option<&ActiveOutcome>,
-    eval_ms: f64,
-) {
-    let outcome_id = outcome.map(|o| o.id.to_string());
+/// Structured "no modification" log shared by both content kinds (no matched
+/// expression actions on the routed path).
+fn log_skipped(feature_id: &str, canvas_label: &str, eval_ms: f64) {
     tracing::info!(
         feature_id = %feature_id,
         canvas = canvas_label,
-        outcome_id = outcome_id.as_deref().unwrap_or("none"),
+        actions = 0,
         eval_ms,
         apply_status = "skipped",
         "request"
