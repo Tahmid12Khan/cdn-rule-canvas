@@ -104,12 +104,14 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     .execute(&mut *tx)
     .await?;
 
-    // point the feature's live slot at v1 (idempotent — set only if unset/other)
+    // point the feature's live slot at v1 ONLY when it has none yet — never
+    // clobber a live version the user has since chosen (e.g. after editing the
+    // canvas in the UI), so re-running the seed is non-destructive.
     sqlx::query(
         r#"
         UPDATE rre.features
         SET live_version_id = $1, updated_at = now()
-        WHERE id = $2 AND (live_version_id IS DISTINCT FROM $1)
+        WHERE id = $2 AND live_version_id IS NULL
         "#,
     )
     .bind(V1_ID)
@@ -258,6 +260,22 @@ async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> an
     .bind("DN JSON Article Paywall")
     .execute(&mut **tx)
     .await?;
+
+    // Orphan-proofing: a prior partial seed (predating the stable-id scheme) may
+    // have left a version row at (dn-json-article, 1) under a NON-canonical id.
+    // That collides with JSON_V1_ID on the (feature_id, version_number) unique
+    // constraint, which the `ON CONFLICT (id)` upsert below does NOT catch — the
+    // insert would error and abort the whole seed. Clear this feature's versions
+    // first (outcomes/components cascade) so the canonical insert is always clean.
+    // Scoped to JSON_FEATURE_ID only — never touches dn-article.
+    sqlx::query("UPDATE rre.features SET live_version_id = NULL, staging_version_id = NULL WHERE id = $1")
+        .bind(JSON_FEATURE_ID)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM rre.versions WHERE feature_id = $1")
+        .bind(JSON_FEATURE_ID)
+        .execute(&mut **tx)
+        .await?;
 
     let rule_graph = json_anonymous_rule_graph();
 
