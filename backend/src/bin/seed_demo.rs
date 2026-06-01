@@ -1,14 +1,19 @@
 //! Demo seeder (Task 20). Idempotent: creates the `dn-article` demo feature with
-//! a LIVE version 1 whose anonymous canvas mirrors the BACKEND CONTRACT §6 worked
-//! example (paywall meta-tag → device-type → regwall/paywall/show-content), plus
-//! an editable DRAFT version 2 cloned from it for the rule-builder UI.
+//! a LIVE version 1 whose anonymous canvas mirrors the worked example in the
+//! expression-node flow (start → paywall meta-tag → device-type →
+//! apply_outcome(regwall/paywall/show-content) → end), plus an editable DRAFT
+//! version 2 cloned from it for the rule-builder UI. Also seeds the
+//! `dn-json-article` (type `json`) demo feature whose anonymous canvas trims the
+//! body and injects a paywall marker when `$.api == "dn-article"`.
 //!
 //! Run with:  `cargo run -p rre-backend --bin seed_demo`
 //! (reads `DATABASE_URL` from the environment / `.env`).
 //!
 //! Idempotency: keyed on the fixed feature id + UUIDs below. Re-running performs
 //! `ON CONFLICT DO NOTHING` inserts / `INSERT ... WHERE NOT EXISTS`, so the demo
-//! state converges and never errors on a populated database.
+//! state converges and never errors on a populated database. The JSON feature's
+//! version graph is UPSERTED (rule_graph re-applied) so it converges even if the
+//! row already exists.
 
 #![forbid(unsafe_code)]
 
@@ -21,6 +26,11 @@ use uuid::Uuid;
 
 // --- Stable demo identifiers (fixed so re-seeding is idempotent) ---------------
 const FEATURE_ID: &str = "dn-article";
+const JSON_FEATURE_ID: &str = "dn-json-article";
+
+// dn-json-article version 1 (LIVE) and its builtin Show Content outcome.
+const JSON_V1_ID: Uuid = Uuid::from_u128(0xB0000000_0000_0000_0000_000000000001);
+const JSON_O_BUILTIN: Uuid = Uuid::from_u128(0xB1111111_1111_1111_1111_111111111111);
 
 // version 1 (LIVE — consumed by the proxy at env=live)
 const V1_ID: Uuid = Uuid::from_u128(0xA0000000_0000_0000_0000_000000000001);
@@ -51,7 +61,10 @@ async fn main() -> anyhow::Result<()> {
 
     seed(&pool).await.context("seeding demo data")?;
 
-    println!("demo seed complete: feature `{FEATURE_ID}` (LIVE v1 + DRAFT v2)");
+    println!(
+        "demo seed complete: feature `{FEATURE_ID}` (LIVE v1 + DRAFT v2), \
+         feature `{JSON_FEATURE_ID}` (LIVE v1)"
+    );
     Ok(())
 }
 
@@ -223,35 +236,150 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     )
     .await?;
 
+    seed_json_feature(&mut tx).await?;
+
     tx.commit().await?;
     Ok(())
 }
 
-/// The anonymous canvas from BACKEND CONTRACT §6 (paywall → device → outcomes).
-/// `registered`/`customer` are empty canvases.
+/// Idempotently seed the `dn-json-article` JSON feature with one LIVE version
+/// whose anonymous canvas trims `$.body` and injects `$.paywall_show` when
+/// `$.api == "dn-article"`. The version row is UPSERTED on its rule_graph so a
+/// pre-existing row converges to this canvas rather than duplicating.
+async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO rre.features (id, name, "type")
+        VALUES ($1, $2, 'json')
+        ON CONFLICT (id) DO NOTHING
+        "#,
+    )
+    .bind(JSON_FEATURE_ID)
+    .bind("DN JSON Article Paywall")
+    .execute(&mut **tx)
+    .await?;
+
+    let rule_graph = json_anonymous_rule_graph();
+
+    // Upsert by the stable version id: insert on first run, otherwise refresh the
+    // rule_graph so the seeded canvas converges to the latest shape.
+    sqlx::query(
+        r#"
+        INSERT INTO rre.versions
+            (id, feature_id, version_number, description, status, rule_graph,
+             created_by, last_updated_by)
+        VALUES ($1, $2, 1, $3, 'live', $4, 'seed', 'seed')
+        ON CONFLICT (id) DO UPDATE
+        SET rule_graph = EXCLUDED.rule_graph,
+            last_updated_by = 'seed',
+            last_updated_at = now()
+        "#,
+    )
+    .bind(JSON_V1_ID)
+    .bind(JSON_FEATURE_ID)
+    .bind("Live demo: JSON trim + paywall marker")
+    .bind(&rule_graph)
+    .execute(&mut **tx)
+    .await?;
+
+    // Point the feature's live slot at v1 (idempotent — set only if unset/other).
+    sqlx::query(
+        r#"
+        UPDATE rre.features
+        SET live_version_id = $1, updated_at = now()
+        WHERE id = $2 AND (live_version_id IS DISTINCT FROM $1)
+        "#,
+    )
+    .bind(JSON_V1_ID)
+    .bind(JSON_FEATURE_ID)
+    .execute(&mut **tx)
+    .await?;
+
+    // A builtin Show Content outcome so the version is well-formed (the canvas
+    // itself references no outcome — the JSON actions are self-contained).
+    upsert_outcome(
+        tx,
+        JSON_O_BUILTIN,
+        JSON_V1_ID,
+        "Show Content",
+        Some("Serve the JSON untouched."),
+        true,
+        0,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// The anonymous canvas worked example in the new expression-node taxonomy:
+/// `start → paywall meta-tag → device-type → apply_outcome(regwall/paywall/
+/// show-content) → end`. `registered`/`customer` are empty canvases.
 fn anonymous_rule_graph() -> serde_json::Value {
     json!({
         "anonymous": {
-            "root_node_id": "n_meta",
+            "root_node_id": "start",
             "nodes": [
+                { "kind": "start", "id": "start", "position": { "x": 40, "y": 200 } },
                 { "kind": "decision", "id": "n_meta",
                   "processor": { "type": "meta_tags", "tag_name": "paywall", "operator": "contains", "value": "true" },
-                  "position": { "x": 80, "y": 200 } },
+                  "position": { "x": 200, "y": 200 } },
                 { "kind": "decision", "id": "n_dev",
                   "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
-                  "position": { "x": 360, "y": 120 } },
-                { "kind": "outcome", "id": "n_regwall", "outcome_id": O_REGWALL.to_string(),
-                  "position": { "x": 640, "y": 60 } },
-                { "kind": "outcome", "id": "n_paywall", "outcome_id": O_PAYWALL.to_string(),
-                  "position": { "x": 640, "y": 200 } },
-                { "kind": "outcome", "id": "n_content", "outcome_id": O_CONTENT.to_string(),
-                  "position": { "x": 360, "y": 320 } }
+                  "position": { "x": 420, "y": 120 } },
+                { "kind": "expression", "id": "a_regwall",
+                  "action": { "type": "apply_outcome", "outcome_id": O_REGWALL.to_string() },
+                  "position": { "x": 660, "y": 60 } },
+                { "kind": "expression", "id": "a_paywall",
+                  "action": { "type": "apply_outcome", "outcome_id": O_PAYWALL.to_string() },
+                  "position": { "x": 660, "y": 200 } },
+                { "kind": "expression", "id": "a_content",
+                  "action": { "type": "apply_outcome", "outcome_id": O_CONTENT.to_string() },
+                  "position": { "x": 420, "y": 320 } },
+                { "kind": "end", "id": "end", "position": { "x": 900, "y": 200 } }
             ],
             "edges": [
-                { "id": "e1", "source_node_id": "n_meta", "target_node_id": "n_dev",     "branch": "yes" },
-                { "id": "e2", "source_node_id": "n_meta", "target_node_id": "n_content", "branch": "no"  },
-                { "id": "e3", "source_node_id": "n_dev",  "target_node_id": "n_regwall", "branch": "yes" },
-                { "id": "e4", "source_node_id": "n_dev",  "target_node_id": "n_paywall", "branch": "no"  }
+                { "id": "e_start", "source_node_id": "start",     "target_node_id": "n_meta",    "branch": "yes" },
+                { "id": "e1", "source_node_id": "n_meta",    "target_node_id": "n_dev",     "branch": "yes" },
+                { "id": "e2", "source_node_id": "n_meta",    "target_node_id": "a_content", "branch": "no"  },
+                { "id": "e3", "source_node_id": "n_dev",     "target_node_id": "a_regwall", "branch": "yes" },
+                { "id": "e4", "source_node_id": "n_dev",     "target_node_id": "a_paywall", "branch": "no"  },
+                { "id": "e_end_regwall", "source_node_id": "a_regwall", "target_node_id": "end", "branch": "yes" },
+                { "id": "e_end_paywall", "source_node_id": "a_paywall", "target_node_id": "end", "branch": "yes" },
+                { "id": "e_end_content", "source_node_id": "a_content", "target_node_id": "end", "branch": "yes" }
+            ]
+        },
+        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
+        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+    })
+}
+
+/// The anonymous canvas for the `dn-json-article` JSON feature:
+/// `start → json_expression($.api == "dn-article") → [yes] trim_json($.body, 0)
+/// → add_attribute($.paywall_show, "<html>paywall_showed</html>") → end ;
+/// [no] → end`.
+fn json_anonymous_rule_graph() -> serde_json::Value {
+    json!({
+        "anonymous": {
+            "root_node_id": "start",
+            "nodes": [
+                { "kind": "start", "id": "start", "position": { "x": 40, "y": 160 } },
+                { "kind": "decision", "id": "d_api",
+                  "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+                  "position": { "x": 220, "y": 160 } },
+                { "kind": "expression", "id": "t_body",
+                  "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
+                  "position": { "x": 460, "y": 80 } },
+                { "kind": "expression", "id": "a_pw",
+                  "action": { "type": "add_attribute", "json_path": "$.paywall_show", "value": "<html>paywall_showed</html>" },
+                  "position": { "x": 700, "y": 80 } },
+                { "kind": "end", "id": "end", "position": { "x": 940, "y": 160 } }
+            ],
+            "edges": [
+                { "id": "e_start", "source_node_id": "start",  "target_node_id": "d_api",  "branch": "yes" },
+                { "id": "e_yes",   "source_node_id": "d_api",  "target_node_id": "t_body", "branch": "yes" },
+                { "id": "e_no",    "source_node_id": "d_api",  "target_node_id": "end",    "branch": "no"  },
+                { "id": "e_trim",  "source_node_id": "t_body", "target_node_id": "a_pw",   "branch": "yes" },
+                { "id": "e_attr",  "source_node_id": "a_pw",   "target_node_id": "end",    "branch": "yes" }
             ]
         },
         "registered": { "root_node_id": null, "nodes": [], "edges": [] },
@@ -326,9 +454,10 @@ mod tests {
     use rre_backend::services::rule_graph_service;
     use std::collections::HashSet;
 
-    /// The seeded anonymous canvas parses and passes ALL validation rules,
-    /// including `outcome_reachable`: `root_node_id` is set and every reachable
-    /// node reaches an outcome. Guards against a seed that the API would reject.
+    /// The seeded `dn-article` anonymous canvas parses and passes ALL validation
+    /// rules, including `all_paths_reach_end`: `root_node_id` is the start node
+    /// and every reachable node reaches an end. Guards against a seed the API
+    /// would reject.
     #[test]
     fn seed_graph_validates() {
         let graph: RuleGraph =
@@ -344,8 +473,30 @@ mod tests {
 
         assert_eq!(
             graph.anonymous.root_node_id.as_deref(),
-            Some("n_meta"),
-            "seed must anchor the canvas root"
+            Some("start"),
+            "seed must anchor the canvas root at the start node"
+        );
+    }
+
+    /// The seeded `dn-json-article` anonymous canvas parses and passes ALL
+    /// validation rules. It references no outcomes (JSON actions are
+    /// self-contained), so an empty valid-outcome set suffices.
+    #[test]
+    fn json_seed_graph_validates() {
+        let graph: RuleGraph =
+            serde_json::from_value(json_anonymous_rule_graph()).expect("json seed graph parses");
+
+        let manifest = LoadedManifest::load("config/node_types.json")
+            .expect("load manifest")
+            .typed;
+
+        rule_graph_service::validate(&graph, &HashSet::new(), &manifest)
+            .expect("json seed graph must validate");
+
+        assert_eq!(
+            graph.anonymous.root_node_id.as_deref(),
+            Some("start"),
+            "json seed must anchor the canvas root at the start node"
         );
     }
 }

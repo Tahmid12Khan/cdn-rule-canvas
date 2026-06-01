@@ -210,18 +210,28 @@ Deserialize + ToSchema` so the proxy can mirror/reuse it.
 pub struct RuleGraph { pub anonymous: CanvasGraph, pub registered: CanvasGraph, pub customer: CanvasGraph }
 pub struct CanvasGraph { pub nodes: Vec<Node>, pub edges: Vec<Edge>, #[serde(default)] pub root_node_id: Option<String> }
 
+// A non-empty canvas is an in-graph action pipeline:
+//   START -> (decisions route) -> expression/action nodes (mutate body) -> END.
+// `branch` is only meaningful when the edge SOURCE is a Decision; for Start/Expression sources there
+// is exactly one outgoing edge and the wire value is "yes" by convention (ignored by translator and
+// evaluator). Edges never originate from End. The Outcome node is REMOVED; every old Outcome becomes
+// an Expression whose `action.type == "apply_outcome"` (migration 0007).
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Node {
-    Decision { id: String, processor: ProcessorConfig, position: Position },   // kind = "decision"
-    Outcome  { id: String, outcome_id: Uuid, position: Position },             // kind = "outcome"
+    Start      { id: String, position: Position },                              // kind = "start"
+    Decision   { id: String, processor: ProcessorConfig, position: Position },  // kind = "decision"
+    Expression { id: String, action: ProcessorConfig, position: Position },     // kind = "expression"
+    End        { id: String, position: Position },                              // kind = "end"
 }
+// `Node::id()` covers all four; helpers `is_start`/`is_end`/`is_expression`/`is_decision`.
 
-// Generic, manifest-validated shape (replaces the fixed enum). Round-trips the SAME wire JSON the
-// frontend/proxy exchange: `{ "type": "<kind>", "<field>": <value>, ... }`. `type` is the canonical
-// snake_case identifier; the remaining fields are an open map validated against the node-type
-// manifest at the service boundary (NOT by serde variants).
+// Generic, manifest-validated shape (replaces the fixed enum), REUSED for both a Decision's
+// `processor` and an Expression's `action`. Round-trips the SAME wire JSON the frontend/proxy
+// exchange: `{ "type": "<kind>", "<field>": <value>, ... }`. `type` is the canonical snake_case
+// identifier; the remaining fields are an open map validated against the node-type manifest at the
+// service boundary (NOT by serde variants).
 pub struct ProcessorConfig {
-    pub r#type: String,                          // canonical snake_case kind, e.g. "article_url"
+    pub r#type: String,                          // canonical snake_case kind, e.g. "article_url", "apply_outcome"
     #[serde(flatten)] pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -268,6 +278,7 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
   "label": "URL",                 // node title + palette chip label
   "category": "content",          // category id (must exist in categories[])
   "applies_to"?: "all",           // feature-type gate: "all" (default) | "html" | "json"
+  "node_kind"?: "decision",       // node taxonomy: "decision" (default) | "expression"
   "summary": "...",               // tooltip "input info"
   "fields": [ Field, ... ],       // ordered config fields
   "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
@@ -276,8 +287,11 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
 // availability by feature type; the frontend filters palette chips by the current feature's type (`all`
 // always shown). meta_tags => "html"; device_type/article_url => "all" (omitted in source); json_expression
 // => "json". The raw-JSON endpoint serves the field verbatim (omitted keys are NOT synthesized).
+// `node_kind` (backend `NodeKind`, serde snake_case, `#[default] Decision`, `#[serde(default)]`) maps a spec
+// to the rule_graph node taxonomy: "decision" (yes/no routing) or "expression" (one body action, passes
+// through). It drives which React Flow node the frontend creates on drop and which validation path applies.
 
-// Field — one config control. `control` ∈ { "select" (with options[]), "text", "number" }.
+// Field — one config control. `control` ∈ { "select" (with options[]), "text", "number", "outcome_select" }.
 {
   "name": "operator",                        // wire key inside the processor object (snake_case)
   "label": "Operator",                       // form label / tooltip key
@@ -302,13 +316,25 @@ frontend's former `processorSchemas.ts` + `nodeTemplates.ts` (same operators, op
 messages/placeholders) so behavior is identical. The manifest file is
 `backend/config/node_types.json`; the Rust `NodeManifest` deserializer uses `serde` with snake_case
 field names (no `rename_all` camelCase) and serves it verbatim. `coming_soon`, `required`,
-`required_unless`, `default`, `placeholder`, `options`, `required_message`, and `applies_to` are all
-`#[serde(default)]` (optional). The `article_url` chip label is `"URL"` (kind unchanged); the manifest
-also ships a `json_expression` node (`category: "json"`, `applies_to: "json"`; fields `json_path`/
-`operator`/`value` with operators equals|contains|starts_with|ends_with|is_one_of|exists, `value`
-`required_unless operator=exists`) and a non-coming_soon `{ "id": "json", "label": "JSON" }` category.
-No backend Rust beyond `AppliesTo`/`applies_to` is needed for the new node — manifest-driven validation
-handles its fields; the proxy adds one `CanvasProcessor` (WF2).
+`required_unless`, `default`, `placeholder`, `options`, `required_message`, `applies_to`, and
+`node_kind` are all `#[serde(default)]` (optional). The `article_url` chip label is `"URL"` (kind
+unchanged); the manifest also ships a `json_expression` node (`category: "json"`, `applies_to: "json"`;
+fields `json_path`/`operator`/`value` with operators equals|contains|starts_with|ends_with|is_one_of|
+exists, `value` `required_unless operator=exists`) and a non-coming_soon `{ "id": "json", "label":
+"JSON" }` category.
+
+The manifest also ships three `node_kind: "expression"` action node types (each `output.branches`
+is a single `{ "id": "out", "label": "Next" }`): **`trim_json`** (`category: "json"`,
+`applies_to: "json"`; fields `json_path` text + `length` number) trims a JSON array at a path to
+`min(actual, length)`; **`add_attribute`** (`category: "json"`, `applies_to: "json"`; fields
+`json_path` text + `value` text) upserts a value at a JSON path (creating missing parents);
+**`apply_outcome`** (`category: "content"`, `applies_to: "all"`; field `outcome_id` with the
+`outcome_select` control) applies a saved outcome's components to the body, then continues — it is the
+migration target for every old Outcome node (HTML + JSON). The `outcome_select` control (backend
+`Control::OutcomeSelect`) is a dynamic dropdown of the version's outcomes; its options are NOT in the
+manifest (supplied by the client/validator) and the `apply_outcome_ref_exists` rule covers membership.
+No backend Rust beyond `AppliesTo`/`NodeKind`/`Control::OutcomeSelect` is needed — manifest-driven
+validation handles the fields; the proxy adds one `CanvasProcessor`/applier op per expression kind.
 
 Canvas rendering contract: a decision node shows the manifest `label` as its title and a one-line
 condition summary built by joining each field's display token in field order — select-with-`symbol` →
@@ -327,21 +353,29 @@ the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
 | `edge_endpoint_exists` | every `source_node_id`/`target_node_id` exists in `nodes` |
 | `branch_unique` | a Decision node has at most ONE outgoing edge per `branch` |
 | `no_cycles` | DFS detects no cycle |
-| `outcome_terminal` | Outcome nodes have ZERO outgoing edges |
-| `outcome_ref_exists` | every Outcome node's `outcome_id` exists in `rre.outcomes` for this version |
-| `outcome_reachable` | every node reachable from the canvas root can reach an Outcome (dead-ends invalid; partial branches OK). Anchored at `root_node_id`, else the unique no-incoming-edge node; SKIPPED when no single root, when the canvas is empty, or (for the no-incoming fallback) when there are zero outcome nodes |
 | `root_in_nodes` | if `root_node_id` set, it exists in `nodes` |
-| `outcome_branch_forbidden` | edges may only originate from Decision nodes |
-| `processor_kind_known` | a Decision node's processor `type` is a manifest `kind` |
+| `start_present` | a non-empty canvas has exactly ONE `start` node (0 → "missing start"; ≥2 → error) |
+| `end_present` | a non-empty canvas has ≥1 `end` node |
+| `start_no_incoming` | no edge targets a `start` node |
+| `start_single_out` | a `start` node has exactly one outgoing edge |
+| `expression_single_out` | an `expression` node has exactly one outgoing edge |
+| `end_terminal` | an `end` node has ZERO outgoing edges (replaces `outcome_terminal`) |
+| `edge_source_kind` | edges originate only from `start`/`decision`/`expression`, never `end` (replaces `outcome_branch_forbidden`) |
+| `all_paths_reach_end` | every node reachable from the Start node can reach an `end` (dead-ends invalid). Anchored at the unique `start` node; SKIPPED when the canvas is empty or has no single start (replaces `outcome_reachable`) |
+| `apply_outcome_ref_exists` | an `expression` node whose `action.type == "apply_outcome"` has an `action.outcome_id` present in the version's `rre.outcomes` (replaces `outcome_ref_exists`) |
+| `processor_kind_known` | a Decision node's `processor.type` / an Expression node's `action.type` is a manifest `kind` |
 | `processor_field_required` | each `required` field (and each `required_unless` field whose condition is unsatisfied) is present and non-empty |
 | `processor_field_option` | a `select` field's value is one of its `options[].value` |
 
-Processor checks run per Decision node against the matched manifest spec. `required_unless { field,
-value }`: the field is required unless the named sibling field's current value equals `value` (when the
-sibling equals `value`, the field is optional and absence/empty is allowed). "Non-empty" means: present
-in the processor map AND not JSON `null` AND, for strings, not empty after trim. `select` option
-membership is checked only when the field has a non-empty value. Unknown extra fields on the processor
-object are ignored (forward-compatible), not an error.
+Empty canvas (zero nodes) is valid (no start/end required). Processor checks run per Decision node's
+`processor` AND per Expression node's `action` against the matched manifest spec. `required_unless
+{ field, value }`: the field is required unless the named sibling field's current value equals `value`
+(when the sibling equals `value`, the field is optional and absence/empty is allowed). "Non-empty"
+means: present in the map AND not JSON `null` AND, for strings, not empty after trim. `select` option
+membership is checked only when the field has a non-empty value; `outcome_select` controls SKIP the
+option check (dynamic options — `apply_outcome_ref_exists` covers them) but still honor
+`processor_field_required`. Unknown extra fields on the processor/action object are ignored
+(forward-compatible), not an error.
 
 ### 7. REST Routes (router tree → handler → service → repo)
 

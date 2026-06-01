@@ -38,7 +38,8 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
     assert!(body["categories"].is_array());
     assert!(body["node_types"].is_array());
 
-    // The ported kinds plus json_expression, in palette order.
+    // The ported kinds plus json_expression and the three expression kinds, in
+    // palette order.
     let kinds: Vec<&str> = body["node_types"]
         .as_array()
         .unwrap()
@@ -47,7 +48,15 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
         .collect();
     assert_eq!(
         kinds,
-        ["meta_tags", "device_type", "article_url", "json_expression"]
+        [
+            "meta_tags",
+            "device_type",
+            "article_url",
+            "json_expression",
+            "trim_json",
+            "add_attribute",
+            "apply_outcome"
+        ]
     );
 
     // coming_soon flag is present on a disabled category.

@@ -434,10 +434,37 @@ async fn active_version_no_live_is_404() {
     assert!(matches!(err, AppError::NoLiveVersion(_)));
 }
 
-/// "Save as New Version": creating v2 with a rule_graph whose outcome nodes
-/// reference the SOURCE version's outcome ids must succeed (NOT 422) — the
-/// service remaps those references onto the carried-forward outcome ids before
-/// validating, and the returned graph carries the NEW ids.
+/// Build an `apply_outcome` expression node referencing `outcome_id`.
+fn expression_apply(id: &str, outcome_id: Uuid) -> Node {
+    Node::Expression {
+        id: id.to_string(),
+        action: rre_backend::schemas::rule_graph::ProcessorConfig {
+            r#type: "apply_outcome".to_string(),
+            fields: serde_json::Map::from_iter([(
+                "outcome_id".to_string(),
+                serde_json::Value::String(outcome_id.to_string()),
+            )]),
+        },
+        position: Position { x: 0.0, y: 0.0 },
+    }
+}
+
+/// Read the `apply_outcome` outcome id out of an expression node, if present.
+fn apply_outcome_id(node: &Node) -> Option<Uuid> {
+    match node {
+        Node::Expression { action, .. } if action.r#type == "apply_outcome" => action
+            .fields
+            .get("outcome_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok()),
+        _ => None,
+    }
+}
+
+/// "Save as New Version": creating v2 with a rule_graph whose apply_outcome
+/// expression nodes reference the SOURCE version's outcome ids must succeed (NOT
+/// 422) — the service remaps those references onto the carried-forward outcome
+/// ids before validating, and the returned graph carries the NEW ids.
 #[tokio::test]
 async fn create_version_with_rule_graph_remaps_outcome_refs() {
     let (_db, state) = setup_with_feature().await;
@@ -471,24 +498,44 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
     let v1_outcome_ids: Vec<Uuid> = v1_outcomes.iter().map(|o| o.id).collect();
     assert_eq!(v1_outcomes.len(), 2);
 
-    // A graph whose two outcome nodes reference v1's outcome ids (one per node).
+    // A graph whose two apply_outcome expression nodes reference v1's outcome ids
+    // (one per node), wired start -> a-builtin -> a-paywall -> end.
     let pos = Position { x: 0.0, y: 0.0 };
     let graph = RuleGraph {
         anonymous: CanvasGraph {
             nodes: vec![
-                Node::Outcome {
-                    id: "o-builtin".to_string(),
-                    outcome_id: v1_outcome_ids[0],
+                Node::Start {
+                    id: "start".to_string(),
                     position: pos,
                 },
-                Node::Outcome {
-                    id: "o-paywall".to_string(),
-                    outcome_id: v1_outcome_ids[1],
+                expression_apply("a-builtin", v1_outcome_ids[0]),
+                expression_apply("a-paywall", v1_outcome_ids[1]),
+                Node::End {
+                    id: "end".to_string(),
                     position: pos,
                 },
             ],
-            edges: vec![],
-            root_node_id: None,
+            edges: vec![
+                rre_backend::schemas::rule_graph::Edge {
+                    id: "e0".to_string(),
+                    source_node_id: "start".to_string(),
+                    target_node_id: "a-builtin".to_string(),
+                    branch: rre_backend::schemas::rule_graph::Branch::Yes,
+                },
+                rre_backend::schemas::rule_graph::Edge {
+                    id: "e1".to_string(),
+                    source_node_id: "a-builtin".to_string(),
+                    target_node_id: "a-paywall".to_string(),
+                    branch: rre_backend::schemas::rule_graph::Branch::Yes,
+                },
+                rre_backend::schemas::rule_graph::Edge {
+                    id: "e2".to_string(),
+                    source_node_id: "a-paywall".to_string(),
+                    target_node_id: "end".to_string(),
+                    branch: rre_backend::schemas::rule_graph::Branch::Yes,
+                },
+            ],
+            root_node_id: Some("start".to_string()),
         },
         ..Default::default()
     };
@@ -518,8 +565,8 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
         assert_ne!(dst.id, src.id, "carried-forward outcome gets a new id");
     }
 
-    // (b) The returned graph's outcome nodes reference the NEW version's outcome
-    // ids — ids that exist in v2's outcomes and are NONE of the source ids.
+    // (b) The returned graph's apply_outcome nodes reference the NEW version's
+    // outcome ids — ids that exist in v2's outcomes and are NONE of the source ids.
     let v2_outcome_ids: HashSet<Uuid> = v2_outcomes.iter().map(|o| o.id).collect();
     let v1_outcome_id_set: HashSet<Uuid> = v1_outcome_ids.iter().copied().collect();
     let referenced: Vec<Uuid> = v2
@@ -527,10 +574,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
         .anonymous
         .nodes
         .iter()
-        .filter_map(|n| match n {
-            Node::Outcome { outcome_id, .. } => Some(*outcome_id),
-            _ => None,
-        })
+        .filter_map(apply_outcome_id)
         .collect();
     assert_eq!(referenced.len(), 2);
     for oid in referenced {

@@ -6,17 +6,25 @@
 //! whose `rule_id` is one of the STABLE identifiers in the table. Any failure
 //! yields an [`AppError::Validation`] (HTTP 422).
 //!
+//! A non-empty canvas is an in-graph action pipeline:
+//! `Start → (decisions route) → expression/action nodes → End`.
+//!
 //! | `rule_id` | Rule |
 //! |---|---|
 //! | `edge_endpoint_exists` | every edge endpoint exists in `nodes` |
 //! | `branch_unique` | a Decision node has at most one outgoing edge per branch |
 //! | `no_cycles` | the graph is acyclic |
-//! | `outcome_terminal` | Outcome nodes have zero outgoing edges |
-//! | `outcome_ref_exists` | every Outcome node's `outcome_id` exists for the version |
-//! | `outcome_reachable` | every node reachable from the canvas root can reach an Outcome |
 //! | `root_in_nodes` | a set `root_node_id` exists in `nodes` |
-//! | `outcome_branch_forbidden` | edges may only originate from Decision nodes |
-//! | `processor_kind_known` | a Decision node's processor `type` is a manifest `kind` |
+//! | `start_present` | a non-empty canvas has exactly ONE `start` node |
+//! | `end_present` | a non-empty canvas has ≥1 `end` node |
+//! | `start_no_incoming` | no edge targets a `start` node |
+//! | `start_single_out` | a `start` node has exactly one outgoing edge |
+//! | `expression_single_out` | an `expression` node has exactly one outgoing edge |
+//! | `end_terminal` | an `end` node has zero outgoing edges |
+//! | `edge_source_kind` | edges originate only from start/decision/expression, never `end` |
+//! | `all_paths_reach_end` | every node reachable from the Start node can reach an `end` |
+//! | `apply_outcome_ref_exists` | an `apply_outcome` action's `outcome_id` exists for the version |
+//! | `processor_kind_known` | a Decision/Expression node's `type` is a manifest `kind` |
 //! | `processor_field_required` | each required field (incl. unsatisfied `required_unless`) is present and non-empty |
 //! | `processor_field_option` | a `select` field's value is one of its `options[].value` |
 //!
@@ -24,8 +32,8 @@
 //! version is supplied by the caller (the version service reads `rre.outcomes`).
 //! The processor rules are manifest-driven: the typed processor enum is gone, so
 //! `validate` takes a [`NodeManifest`] and checks each Decision node's processor
-//! against the matched spec. That keeps the validator a pure function, fully
-//! unit-testable without a database.
+//! and each Expression node's `action` against the matched spec. That keeps the
+//! validator a pure function, fully unit-testable without a database.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,10 +51,11 @@ use crate::{
 /// Validate a full [`RuleGraph`] across all three canvases.
 ///
 /// `valid_outcome_ids` is the set of `rre.outcomes.id` values that belong to the
-/// version being edited; it backs the `outcome_ref_exists` rule. `manifest`
-/// backs the processor rules (`processor_kind_known`, `processor_field_required`,
-/// `processor_field_option`). Callers (the version service) fetch the outcome-id
-/// set and supply the manifest from `AppState` before invoking validation.
+/// version being edited; it backs the `apply_outcome_ref_exists` rule.
+/// `manifest` backs the processor rules (`processor_kind_known`,
+/// `processor_field_required`, `processor_field_option`). Callers (the version
+/// service) fetch the outcome-id set and supply the manifest from `AppState`
+/// before invoking validation.
 ///
 /// Returns `Ok(())` when every canvas passes; otherwise an
 /// [`AppError::Validation`] carrying one [`ValidationDetail`] per violation.
@@ -107,33 +116,64 @@ fn validate_canvas(
         }
     }
 
-    // outcome_ref_exists + processor_* (manifest-driven, per Decision node).
-    for (idx, node) in graph.nodes.iter().enumerate() {
-        match node {
-            Node::Outcome { outcome_id, .. } => {
-                if !valid_outcome_ids.contains(outcome_id) {
-                    details.push(ValidationDetail::new(
-                        format!("rule_graph.{canvas}.nodes[{idx}]"),
-                        format!("outcome_id '{outcome_id}' not found in outcomes for this version"),
-                        "outcome_ref_exists",
-                    ));
-                }
-            }
-            Node::Decision { processor, .. } => {
-                validate_processor(canvas, idx, processor, spec_by_kind, details);
-            }
+    // start_present / end_present: a non-empty canvas needs exactly one start
+    // and at least one end. An empty canvas (zero nodes) stays valid.
+    let start_indices: Vec<usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.is_start())
+        .map(|(i, _)| i)
+        .collect();
+    let has_end = graph.nodes.iter().any(Node::is_end);
+
+    if !graph.nodes.is_empty() {
+        match start_indices.len() {
+            0 => details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes"),
+                "canvas is missing a start node".to_string(),
+                "start_present",
+            )),
+            1 => {}
+            n => details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes[{}]", start_indices[1]),
+                format!("canvas has {n} start nodes; expected exactly one"),
+                "start_present",
+            )),
+        }
+        if !has_end {
+            details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes"),
+                "canvas is missing an end node".to_string(),
+                "end_present",
+            ));
         }
     }
 
-    // Per-source branch tracking for branch_unique, plus edge-level rules.
-    // Key: (source_node_id, branch) -> already seen.
+    // apply_outcome_ref_exists + processor_* (manifest-driven, per Decision and
+    // Expression node).
+    for (idx, node) in graph.nodes.iter().enumerate() {
+        match node {
+            Node::Decision { processor, .. } => {
+                validate_processor(canvas, idx, processor, spec_by_kind, details);
+            }
+            Node::Expression { action, .. } => {
+                validate_processor(canvas, idx, action, spec_by_kind, details);
+                validate_apply_outcome_ref(canvas, idx, action, valid_outcome_ids, details);
+            }
+            Node::Start { .. } | Node::End { .. } => {}
+        }
+    }
+
+    // Per-source out-degree + branch tracking, plus edge-level rules.
     let mut seen_branch: HashSet<(&str, Branch)> = HashSet::new();
+    let mut out_degree: HashMap<&str, usize> = HashMap::new();
 
     for (idx, edge) in graph.edges.iter().enumerate() {
         let loc = format!("rule_graph.{canvas}.edges[{idx}]");
 
         let source = node_by_id.get(edge.source_node_id.as_str());
-        let target_exists = node_by_id.contains_key(edge.target_node_id.as_str());
+        let target = node_by_id.get(edge.target_node_id.as_str());
 
         // edge_endpoint_exists (source)
         if source.is_none() {
@@ -144,7 +184,7 @@ fn validate_canvas(
             ));
         }
         // edge_endpoint_exists (target)
-        if !target_exists {
+        if target.is_none() {
             details.push(ValidationDetail::new(
                 loc.clone(),
                 format!("edge target '{}' not found in nodes", edge.target_node_id),
@@ -152,47 +192,91 @@ fn validate_canvas(
             ));
         }
 
+        // start_no_incoming: no edge may target a start node.
+        if let Some(tgt_node) = target {
+            if tgt_node.is_start() {
+                details.push(ValidationDetail::new(
+                    loc.clone(),
+                    format!(
+                        "start node '{}' must not have incoming edges",
+                        tgt_node.id()
+                    ),
+                    "start_no_incoming",
+                ));
+            }
+        }
+
         // Source-origin rules only apply when the source node resolves.
         if let Some(src_node) = source {
-            // outcome_terminal / outcome_branch_forbidden: outcome nodes may not
-            // originate edges.
-            if src_node.is_outcome() {
-                details.push(ValidationDetail::new(
-                    loc.clone(),
-                    format!(
-                        "outcome node '{}' must be terminal (no outgoing edges)",
-                        edge.source_node_id
-                    ),
-                    "outcome_terminal",
-                ));
-                details.push(ValidationDetail::new(
-                    loc.clone(),
-                    format!(
-                        "edge may only originate from a decision node, not outcome '{}'",
-                        edge.source_node_id
-                    ),
-                    "outcome_branch_forbidden",
-                ));
-            } else {
-                // branch_unique: a decision node has at most one edge per branch.
-                if !seen_branch.insert((src_node.id(), edge.branch)) {
+            *out_degree.entry(src_node.id()).or_insert(0) += 1;
+
+            match src_node {
+                // end_terminal / edge_source_kind: end nodes may not originate edges.
+                Node::End { .. } => {
                     details.push(ValidationDetail::new(
                         loc.clone(),
                         format!(
-                            "decision node '{}' has more than one '{}' branch edge",
-                            src_node.id(),
-                            branch_str(edge.branch)
+                            "end node '{}' must be terminal (no outgoing edges)",
+                            src_node.id()
                         ),
-                        "branch_unique",
+                        "end_terminal",
+                    ));
+                    details.push(ValidationDetail::new(
+                        loc.clone(),
+                        format!(
+                            "edge may only originate from start/decision/expression, not end '{}'",
+                            src_node.id()
+                        ),
+                        "edge_source_kind",
                     ));
                 }
+                // branch_unique: a decision node has at most one edge per branch.
+                Node::Decision { .. } => {
+                    if !seen_branch.insert((src_node.id(), edge.branch)) {
+                        details.push(ValidationDetail::new(
+                            loc.clone(),
+                            format!(
+                                "decision node '{}' has more than one '{}' branch edge",
+                                src_node.id(),
+                                branch_str(edge.branch)
+                            ),
+                            "branch_unique",
+                        ));
+                    }
+                }
+                // start/expression have exactly one outgoing edge (checked below
+                // via out_degree); no per-edge rule here.
+                Node::Start { .. } | Node::Expression { .. } => {}
             }
         }
     }
 
-    // no_cycles: DFS over the (decision-sourced) adjacency. We include every
-    // edge whose endpoints both resolve; a cycle through any resolvable edges is
-    // reported once.
+    // start_single_out / expression_single_out: each start/expression node has
+    // exactly one outgoing edge.
+    for (idx, node) in graph.nodes.iter().enumerate() {
+        let degree = out_degree.get(node.id()).copied().unwrap_or(0);
+        match node {
+            Node::Start { .. } if degree != 1 => details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes[{idx}]"),
+                format!(
+                    "start node '{}' must have exactly one outgoing edge (found {degree})",
+                    node.id()
+                ),
+                "start_single_out",
+            )),
+            Node::Expression { .. } if degree != 1 => details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes[{idx}]"),
+                format!(
+                    "expression node '{}' must have exactly one outgoing edge (found {degree})",
+                    node.id()
+                ),
+                "expression_single_out",
+            )),
+            _ => {}
+        }
+    }
+
+    // no_cycles: DFS over the (resolvable) adjacency.
     if has_cycle(graph, &node_by_id) {
         details.push(ValidationDetail::new(
             format!("rule_graph.{canvas}.edges"),
@@ -201,75 +285,53 @@ fn validate_canvas(
         ));
     }
 
-    // outcome_reachable: every node reachable from the canvas root must be able
-    // to reach an outcome (dead-ends are invalid; partial branches are OK).
-    validate_outcome_reachable(canvas, graph, &node_by_id, details);
+    // all_paths_reach_end: every node reachable from the Start node must be able
+    // to reach an end node (dead-ends are invalid).
+    validate_all_paths_reach_end(canvas, graph, &node_by_id, &start_indices, details);
 }
 
-/// `outcome_reachable`: every node reachable from the canvas root must be able to
-/// reach at least one Outcome node over resolvable edges.
+/// `all_paths_reach_end`: every node reachable from the unique Start node must be
+/// able to reach at least one End node over resolvable edges.
 ///
-/// Anchoring requires a defined start. The root is `root_node_id` when set, else
-/// the UNIQUE node with no incoming (resolvable) edge. When neither yields a
-/// single root — or the canvas is empty — the rule is SKIPPED (other rules cover
-/// misconfiguration; an empty canvas stays valid).
-fn validate_outcome_reachable(
+/// Anchored at the unique `start` node (no more no-incoming heuristic). Skipped
+/// when the canvas is empty or has no single start (`start_present` covers the
+/// latter; an empty canvas stays valid).
+fn validate_all_paths_reach_end(
     canvas: &'static str,
     graph: &CanvasGraph,
     node_by_id: &HashMap<&str, &Node>,
+    start_indices: &[usize],
     details: &mut Vec<ValidationDetail>,
 ) {
     if graph.nodes.is_empty() {
         return;
     }
+    // Anchor at the single start node; without exactly one, start_present has
+    // already flagged the problem and there is no well-defined root.
+    let [start_idx] = start_indices else {
+        return;
+    };
+    let root: &str = graph.nodes[*start_idx].id();
 
     // Resolvable adjacency (forward) and its reverse, over edges whose endpoints
     // both exist (dangling edges are reported by edge_endpoint_exists).
     let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
-    let mut has_incoming: HashSet<&str> = HashSet::new();
     for edge in &graph.edges {
         let s = edge.source_node_id.as_str();
         let t = edge.target_node_id.as_str();
         if node_by_id.contains_key(s) && node_by_id.contains_key(t) {
             forward.entry(s).or_default().push(t);
             reverse.entry(t).or_default().push(s);
-            has_incoming.insert(t);
         }
     }
 
-    // Determine the root: explicit root_node_id (when it resolves), else the
-    // unique node with no incoming resolvable edge. Skip if ambiguous/missing.
-    //
-    // The no-incoming fallback only anchors when the canvas has at least one
-    // outcome node — without one, "reaching an outcome" is inapplicable and a
-    // half-built canvas (a lone decision node, an unresolved edge) stays valid;
-    // an explicit root always anchors so a deliberate dead-end is still caught.
-    let root: &str = match graph.root_node_id.as_deref() {
-        Some(r) if node_by_id.contains_key(r) => r,
-        Some(_) => return, // root_in_nodes already flagged it; can't anchor.
-        None => {
-            if !graph.nodes.iter().any(Node::is_outcome) {
-                return;
-            }
-            let mut roots = graph
-                .nodes
-                .iter()
-                .map(Node::id)
-                .filter(|id| !has_incoming.contains(id));
-            match (roots.next(), roots.next()) {
-                (Some(only), None) => only,
-                _ => return, // zero or multiple roots => skip (no single start).
-            }
-        }
-    };
-
-    // can_reach_outcome: reverse-BFS from every outcome node.
+    // can_reach_end: reverse-BFS from every end node.
     let mut can_reach: HashSet<&str> = HashSet::new();
     let mut queue: Vec<&str> = graph
         .nodes
         .iter()
-        .filter(|n| n.is_outcome())
+        .filter(|n| n.is_end())
         .map(Node::id)
         .collect();
     for &start in &queue {
@@ -299,25 +361,67 @@ fn validate_outcome_reachable(
         }
     }
 
-    // Any reachable node that cannot reach an outcome is a dead-end.
+    // Any reachable node that cannot reach an end is a dead-end.
     for (idx, node) in graph.nodes.iter().enumerate() {
         let id = node.id();
         if reachable.contains(id) && !can_reach.contains(id) {
             details.push(ValidationDetail::new(
                 format!("rule_graph.{canvas}.nodes[{idx}]"),
-                format!("node '{id}' cannot reach an outcome"),
-                "outcome_reachable",
+                format!("node '{id}' cannot reach an end"),
+                "all_paths_reach_end",
             ));
         }
     }
 }
 
-/// Validate one Decision node's processor against the matched manifest spec.
+/// `apply_outcome_ref_exists`: an expression node whose `action.type ==
+/// "apply_outcome"` must carry an `outcome_id` present in `valid_outcome_ids`.
+/// Other expression kinds are ignored here.
+fn validate_apply_outcome_ref(
+    canvas: &'static str,
+    idx: usize,
+    action: &ProcessorConfig,
+    valid_outcome_ids: &HashSet<Uuid>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if action.r#type != "apply_outcome" {
+        return;
+    }
+    let loc = format!("rule_graph.{canvas}.nodes[{idx}]");
+
+    // Accept either `action.outcome_id` directly or `action.fields["outcome_id"]`
+    // (both flatten to the same map on the wire). Parse the string as a UUID.
+    let raw = action.fields.get("outcome_id");
+    let parsed: Option<Uuid> = match raw {
+        Some(Value::String(s)) => Uuid::parse_str(s).ok(),
+        _ => None,
+    };
+    match parsed {
+        Some(id) if valid_outcome_ids.contains(&id) => {}
+        _ => {
+            let shown = match raw {
+                Some(Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => "<missing>".to_string(),
+            };
+            details.push(ValidationDetail::new(
+                loc,
+                format!("outcome_id '{shown}' not found in outcomes for this version"),
+                "apply_outcome_ref_exists",
+            ));
+        }
+    }
+}
+
+/// Validate one Decision processor / Expression action against the matched
+/// manifest spec.
 ///
 /// Emits, in order: `processor_kind_known` (when `type` is not a manifest
 /// `kind` — and then no field checks are possible); per required field
 /// `processor_field_required`; per `select` field with a non-empty value
-/// `processor_field_option`. Unknown extra fields on the processor are ignored.
+/// `processor_field_option`. `outcome_select` controls skip the option check
+/// (their options are dynamic; `apply_outcome_ref_exists` covers them) but still
+/// honor `processor_field_required`. Unknown extra fields are ignored.
 fn validate_processor(
     canvas: &'static str,
     idx: usize,
@@ -343,6 +447,7 @@ fn validate_processor(
 
         // processor_field_required: required when `required` is true OR the
         // `required_unless` sibling value is not equal to the configured value.
+        // Applies to outcome_select too (the field must be non-empty).
         if is_required(field, &processor.fields) && !is_non_empty(current) {
             let msg = field.required_message.clone().unwrap_or_else(|| {
                 format!("field '{}' is required and must not be empty", field.name)
@@ -355,7 +460,8 @@ fn validate_processor(
         }
 
         // processor_field_option: a `select` value (when non-empty) must be one
-        // of the field's options. Emptiness is covered by the required rule.
+        // of the field's options. `outcome_select` options are dynamic (covered
+        // by apply_outcome_ref_exists), so skip it here.
         if field.control == Control::Select && is_non_empty(current) {
             let value = current.expect("non-empty value present");
             let allowed = field.options.iter().any(|o| &o.value == value);
@@ -475,15 +581,16 @@ mod tests {
         Position { x: 0.0, y: 0.0 }
     }
 
-    /// The real backend manifest (ported `meta_tags`/`device_type`/`article_url`),
-    /// loaded from the committed file so processor rules are exercised end-to-end.
+    /// The real backend manifest (ported decision kinds + the three expression
+    /// kinds), loaded from the committed file so processor rules are exercised
+    /// end-to-end.
     fn manifest() -> NodeManifest {
         let loaded =
             LoadedManifest::load("config/node_types.json").expect("load node manifest for tests");
         (*loaded.typed).clone()
     }
 
-    /// A generic processor: `type` + a flat field map (the wire shape).
+    /// A generic processor/action: `type` + a flat field map (the wire shape).
     fn processor(value: serde_json::Value) -> ProcessorConfig {
         match value {
             serde_json::Value::Object(mut map) => {
@@ -500,6 +607,20 @@ mod tests {
         }
     }
 
+    fn start(id: &str) -> Node {
+        Node::Start {
+            id: id.to_string(),
+            position: pos(),
+        }
+    }
+
+    fn end(id: &str) -> Node {
+        Node::End {
+            id: id.to_string(),
+            position: pos(),
+        }
+    }
+
     /// A valid `device_type` decision node (used by structural-rule tests).
     fn decision(id: &str) -> Node {
         Node::Decision {
@@ -511,10 +632,13 @@ mod tests {
         }
     }
 
-    fn outcome(id: &str, outcome_id: Uuid) -> Node {
-        Node::Outcome {
+    /// An `apply_outcome` expression node referencing `outcome_id`.
+    fn expression_apply(id: &str, outcome_id: Uuid) -> Node {
+        Node::Expression {
             id: id.to_string(),
-            outcome_id,
+            action: processor(
+                json!({"type": "apply_outcome", "outcome_id": outcome_id.to_string()}),
+            ),
             position: pos(),
         }
     }
@@ -555,17 +679,24 @@ mod tests {
         assert!(res.is_ok());
     }
 
-    // 2. A well-formed canvas passes.
+    // 2. A well-formed start -> decision -> expression/end canvas passes.
     #[test]
     fn well_formed_canvas_is_valid() {
         let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1"), outcome("o1", oid), outcome("o2", oid)],
-            edges: vec![
-                edge("e1", "d1", "o1", Branch::Yes),
-                edge("e2", "d1", "o2", Branch::No),
+            nodes: vec![
+                start("s"),
+                decision("d1"),
+                expression_apply("a1", oid),
+                end("e"),
             ],
-            root_node_id: Some("d1".to_string()),
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "a1", Branch::Yes),
+                edge("e2", "d1", "e", Branch::No),
+                edge("e3", "a1", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
@@ -577,8 +708,11 @@ mod tests {
     #[test]
     fn edge_target_missing() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![edge("e1", "d1", "ghost", Branch::Yes)],
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "ghost", Branch::Yes),
+            ],
             root_node_id: None,
         };
         let details = details_of(validate(
@@ -592,59 +726,66 @@ mod tests {
     // 4. edge_endpoint_exists: missing source.
     #[test]
     fn edge_source_missing() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![outcome("o1", oid)],
-            edges: vec![edge("e1", "ghost", "o1", Branch::Yes)],
+            nodes: vec![start("s"), end("e")],
+            edges: vec![
+                edge("e0", "s", "e", Branch::Yes),
+                edge("e1", "ghost", "e", Branch::Yes),
+            ],
             root_node_id: None,
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(rule_ids(&details).contains(&"edge_endpoint_exists"));
     }
 
     // 5. branch_unique: two `yes` edges from one decision node.
     #[test]
     fn duplicate_yes_branch() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1"), outcome("o1", oid), outcome("o2", oid)],
+            nodes: vec![start("s"), decision("d1"), end("y"), end("n")],
             edges: vec![
-                edge("e1", "d1", "o1", Branch::Yes),
-                edge("e2", "d1", "o2", Branch::Yes),
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "y", Branch::Yes),
+                edge("e2", "d1", "n", Branch::Yes),
             ],
             root_node_id: None,
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(rule_ids(&details).contains(&"branch_unique"));
     }
 
     // 6. branch_unique allows one yes + one no from the same node.
     #[test]
     fn yes_and_no_from_same_node_ok() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1"), outcome("o1", oid), outcome("o2", oid)],
+            nodes: vec![start("s"), decision("d1"), end("y"), end("n")],
             edges: vec![
-                edge("e1", "d1", "o1", Branch::Yes),
-                edge("e2", "d1", "o2", Branch::No),
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "y", Branch::Yes),
+                edge("e2", "d1", "n", Branch::No),
             ],
             root_node_id: None,
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 7. no_cycles: a self-loop is a cycle.
     #[test]
     fn self_loop_is_cycle() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![edge("e1", "d1", "d1", Branch::Yes)],
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "d1", Branch::Yes),
+            ],
             root_node_id: None,
         };
         let details = details_of(validate(
@@ -659,8 +800,9 @@ mod tests {
     #[test]
     fn multi_node_cycle() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1"), decision("d2")],
+            nodes: vec![start("s"), decision("d1"), decision("d2"), end("e")],
             edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
                 edge("e1", "d1", "d2", Branch::Yes),
                 edge("e2", "d2", "d1", Branch::Yes),
             ],
@@ -674,54 +816,60 @@ mod tests {
         assert!(rule_ids(&details).contains(&"no_cycles"));
     }
 
-    // 9. A diamond (shared target, no back-edge) is acyclic.
+    // 9. A diamond (shared end, no back-edge) is acyclic and valid.
     #[test]
     fn diamond_is_acyclic() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
             nodes: vec![
+                start("s"),
                 decision("d1"),
                 decision("d2"),
                 decision("d3"),
-                outcome("o1", oid),
+                end("e"),
             ],
             edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
                 edge("e1", "d1", "d2", Branch::Yes),
                 edge("e2", "d1", "d3", Branch::No),
-                edge("e3", "d2", "o1", Branch::Yes),
-                edge("e4", "d3", "o1", Branch::Yes),
+                edge("e3", "d2", "e", Branch::Yes),
+                edge("e4", "d3", "e", Branch::Yes),
             ],
-            root_node_id: Some("d1".to_string()),
+            root_node_id: Some("s".to_string()),
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
-    // 10. outcome_terminal + outcome_branch_forbidden: outcome node with an outgoing edge.
+    // 10. end_terminal + edge_source_kind: an end node with an outgoing edge.
     #[test]
-    fn outcome_node_with_outgoing_edge() {
-        let oid = Uuid::new_v4();
+    fn end_node_with_outgoing_edge() {
         let canvas = CanvasGraph {
-            nodes: vec![outcome("o1", oid), decision("d1")],
-            edges: vec![edge("e1", "o1", "d1", Branch::Yes)],
+            nodes: vec![start("s"), end("e"), decision("d1")],
+            edges: vec![
+                edge("e0", "s", "e", Branch::Yes),
+                edge("e1", "e", "d1", Branch::Yes),
+            ],
             root_node_id: None,
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
         let ids_seen = rule_ids(&details);
-        assert!(ids_seen.contains(&"outcome_terminal"));
-        assert!(ids_seen.contains(&"outcome_branch_forbidden"));
+        assert!(ids_seen.contains(&"end_terminal"));
+        assert!(ids_seen.contains(&"edge_source_kind"));
     }
 
-    // 11. outcome_ref_exists: outcome_id not in the version's outcomes.
+    // 11. apply_outcome_ref_exists: outcome_id not in the version's outcomes.
     #[test]
-    fn outcome_ref_missing() {
+    fn apply_outcome_ref_missing() {
         let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![outcome("o1", oid)],
-            edges: vec![],
+            nodes: vec![start("s"), expression_apply("a", oid), end("e")],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
+            ],
             root_node_id: None,
         };
         // empty valid-id set => the reference is dangling.
@@ -730,15 +878,15 @@ mod tests {
             &HashSet::new(),
             &manifest(),
         ));
-        assert!(rule_ids(&details).contains(&"outcome_ref_exists"));
+        assert!(rule_ids(&details).contains(&"apply_outcome_ref_exists"));
     }
 
     // 12. root_in_nodes: root_node_id points at a non-existent node.
     #[test]
     fn root_not_in_nodes() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![],
+            nodes: vec![start("s"), end("e")],
+            edges: vec![edge("e0", "s", "e", Branch::Yes)],
             root_node_id: Some("ghost".to_string()),
         };
         let details = details_of(validate(
@@ -747,15 +895,20 @@ mod tests {
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"root_in_nodes"));
-        assert_eq!(details[0].loc, "rule_graph.anonymous.root_node_id");
+        assert!(details
+            .iter()
+            .any(|d| d.loc == "rule_graph.anonymous.root_node_id"));
     }
 
     // 13. Failures are reported on the correct canvas (registered, not anonymous).
     #[test]
     fn loc_reflects_canvas() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![edge("e1", "d1", "ghost", Branch::Yes)],
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "ghost", Branch::Yes),
+            ],
             root_node_id: None,
         };
         let graph = RuleGraph {
@@ -772,8 +925,11 @@ mod tests {
     #[test]
     fn violations_accumulate_across_canvases() {
         let bad = || CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![edge("e1", "d1", "ghost", Branch::Yes)],
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "ghost", Branch::Yes),
+            ],
             root_node_id: Some("missing".to_string()),
         };
         let graph = RuleGraph {
@@ -791,9 +947,9 @@ mod tests {
     // 15. A meta_tags decision node round-trips through manifest-driven validation.
     #[test]
     fn meta_tags_decision_valid() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
             nodes: vec![
+                start("s"),
                 Node::Decision {
                     id: "m1".to_string(),
                     processor: processor(
@@ -801,14 +957,15 @@ mod tests {
                     ),
                     position: pos(),
                 },
-                outcome("o1", oid),
+                end("e"),
             ],
-            edges: vec![edge("e1", "m1", "o1", Branch::Yes)],
-            root_node_id: Some("m1".to_string()),
+            edges: vec![
+                edge("e0", "s", "m1", Branch::Yes),
+                edge("e1", "m1", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 16. processor_kind_known: an unknown processor `type` fails (no field checks).
@@ -828,7 +985,7 @@ mod tests {
             &HashSet::new(),
             &manifest(),
         ));
-        assert_eq!(rule_ids(&details), vec!["processor_kind_known"]);
+        assert!(rule_ids(&details).contains(&"processor_kind_known"));
     }
 
     // 17. processor_field_required: a required field missing/empty fails, and the
@@ -861,9 +1018,9 @@ mod tests {
     // 18. required_unless: meta_tags `value` is optional when operator == "exists".
     #[test]
     fn meta_tags_exists_omits_value_ok() {
-        let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
             nodes: vec![
+                start("s"),
                 Node::Decision {
                     id: "m".to_string(),
                     processor: processor(
@@ -871,14 +1028,15 @@ mod tests {
                     ),
                     position: pos(),
                 },
-                outcome("o", oid),
+                end("e"),
             ],
-            edges: vec![edge("e", "m", "o", Branch::Yes)],
-            root_node_id: Some("m".to_string()),
+            edges: vec![
+                edge("e0", "s", "m", Branch::Yes),
+                edge("e1", "m", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
         };
-        let mut ids = HashSet::new();
-        ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 19. required_unless: meta_tags `value` is required when operator != "exists".
@@ -930,69 +1088,261 @@ mod tests {
     #[test]
     fn unknown_extra_fields_ignored() {
         let canvas = CanvasGraph {
-            nodes: vec![Node::Decision {
-                id: "d".to_string(),
-                processor: processor(
-                    json!({"type": "device_type", "operator": "equals", "value": "mobile", "future_field": 42}),
-                ),
-                position: pos(),
-            }],
-            edges: vec![],
-            root_node_id: None,
+            nodes: vec![
+                start("s"),
+                Node::Decision {
+                    id: "d".to_string(),
+                    processor: processor(
+                        json!({"type": "device_type", "operator": "equals", "value": "mobile", "future_field": 42}),
+                    ),
+                    position: pos(),
+                },
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "d", Branch::Yes),
+                edge("e1", "d", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
         };
         assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
-    // 22. outcome_reachable: a dead-end decision with a set root fails (the root
-    //     node has no path to any outcome).
+    // 22. all_paths_reach_end: a reachable dead-end decision fails (no path to end).
     #[test]
-    fn dead_end_decision_with_root_fails() {
+    fn dead_end_reachable_fails() {
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1")],
-            edges: vec![],
-            root_node_id: Some("d1".to_string()),
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![edge("e0", "s", "d1", Branch::Yes)],
+            root_node_id: Some("s".to_string()),
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
             &manifest(),
         ));
-        assert!(rule_ids(&details).contains(&"outcome_reachable"));
-        assert!(details
-            .iter()
-            .any(|d| d.rule_id == "outcome_reachable"
-                && d.msg == "node 'd1' cannot reach an outcome"));
+        assert!(rule_ids(&details).contains(&"all_paths_reach_end"));
+        assert!(details.iter().any(
+            |d| d.rule_id == "all_paths_reach_end" && d.msg == "node 'd1' cannot reach an end"
+        ));
     }
 
-    // 23. outcome_reachable: decision -> decision -> outcome chain passes.
+    // 23. all_paths_reach_end: start -> decision -> decision -> end chain passes.
     #[test]
-    fn decision_chain_to_outcome_passes() {
+    fn decision_chain_to_end_passes() {
+        let canvas = CanvasGraph {
+            nodes: vec![start("s"), decision("d1"), decision("d2"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "d2", Branch::Yes),
+                edge("e2", "d2", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
+        };
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+    }
+
+    // 24. start -> expression(apply_outcome) -> end passes (expression action
+    //     validated against the manifest + apply_outcome_ref_exists).
+    #[test]
+    fn start_expression_end_passes() {
         let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![decision("d1"), decision("d2"), outcome("o1", oid)],
+            nodes: vec![start("s"), expression_apply("a", oid), end("e")],
             edges: vec![
-                edge("e1", "d1", "d2", Branch::Yes),
-                edge("e2", "d2", "o1", Branch::Yes),
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
             ],
-            root_node_id: Some("d1".to_string()),
+            root_node_id: Some("s".to_string()),
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
         assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
     }
 
-    // 24. outcome_reachable: an outcome-only canvas (the unique root IS an
-    //     outcome) passes — the outcome trivially reaches itself.
+    // 25. start_present: a non-empty canvas without a start node fails.
     #[test]
-    fn outcome_only_root_passes() {
+    fn missing_start_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![decision("d1"), end("e")],
+            edges: vec![edge("e1", "d1", "e", Branch::Yes)],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"start_present"));
+    }
+
+    // 26. start_present: two start nodes fail.
+    #[test]
+    fn two_starts_fail() {
+        let canvas = CanvasGraph {
+            nodes: vec![start("s1"), start("s2"), end("e")],
+            edges: vec![
+                edge("e1", "s1", "e", Branch::Yes),
+                edge("e2", "s2", "e", Branch::Yes),
+            ],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"start_present"));
+    }
+
+    // 27. end_present: a non-empty canvas without an end node fails.
+    #[test]
+    fn missing_end_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![start("s"), decision("d1")],
+            edges: vec![edge("e0", "s", "d1", Branch::Yes)],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"end_present"));
+    }
+
+    // 28. start_no_incoming: an edge targeting the start node fails.
+    #[test]
+    fn start_with_incoming_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![start("s"), decision("d1"), end("e")],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "e", Branch::Yes),
+                edge("e2", "d1", "s", Branch::No),
+            ],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"start_no_incoming"));
+    }
+
+    // 29. start_single_out: a start node with zero outgoing edges fails.
+    #[test]
+    fn start_no_out_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![start("s"), end("e")],
+            edges: vec![],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"start_single_out"));
+    }
+
+    // 30. expression_single_out: an expression node with two outgoing edges fails.
+    #[test]
+    fn expression_two_out_fails() {
         let oid = Uuid::new_v4();
         let canvas = CanvasGraph {
-            nodes: vec![outcome("o1", oid)],
-            edges: vec![],
+            nodes: vec![start("s"), expression_apply("a", oid), end("e1"), end("e2")],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("ea", "a", "e1", Branch::Yes),
+                edge("eb", "a", "e2", Branch::No),
+            ],
             root_node_id: None,
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        assert!(rule_ids(&details).contains(&"expression_single_out"));
+    }
+
+    // 31. processor checks run on expression actions: an unknown action type fails
+    //     processor_kind_known.
+    #[test]
+    fn expression_unknown_action_kind_fails() {
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                Node::Expression {
+                    id: "a".to_string(),
+                    action: processor(json!({"type": "not_a_real_action"})),
+                    position: pos(),
+                },
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
+            ],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"processor_kind_known"));
+    }
+
+    // 32. processor_field_required on outcome_select: apply_outcome with an empty
+    //     outcome_id fails processor_field_required (the field is required).
+    #[test]
+    fn apply_outcome_empty_outcome_id_fails_required() {
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                Node::Expression {
+                    id: "a".to_string(),
+                    action: processor(json!({"type": "apply_outcome", "outcome_id": ""})),
+                    position: pos(),
+                },
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
+            ],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"processor_field_required"));
+    }
+
+    // 33. trim_json expression: a valid trim_json action passes (number field).
+    #[test]
+    fn trim_json_expression_valid() {
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                Node::Expression {
+                    id: "t".to_string(),
+                    action: processor(
+                        json!({"type": "trim_json", "json_path": "$.body", "length": 0}),
+                    ),
+                    position: pos(),
+                },
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "t", Branch::Yes),
+                edge("e1", "t", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
+        };
+        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 }

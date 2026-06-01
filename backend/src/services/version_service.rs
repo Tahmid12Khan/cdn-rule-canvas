@@ -264,9 +264,11 @@ async fn carry_forward_outcomes(
     Ok(id_map)
 }
 
-/// Rewrite every outcome node's `outcome_id` across all three canvases through
-/// `map` (source id -> new id). Keys absent from `map` are left untouched, as
-/// are decision nodes, edges, positions, and `root_node_id`.
+/// Rewrite every `apply_outcome` expression action's `outcome_id` across all
+/// three canvases through `map` (source id -> new id). Keys absent from `map`
+/// are left untouched, as are decision nodes, edges, positions, and
+/// `root_node_id`. The `outcome_id` lives in the action's flattened field map as
+/// a UUID string; non-`apply_outcome` actions and unparsable ids are skipped.
 fn remap_outcome_refs(graph: &mut RuleGraph, map: &HashMap<Uuid, Uuid>) {
     if map.is_empty() {
         return;
@@ -277,9 +279,21 @@ fn remap_outcome_refs(graph: &mut RuleGraph, map: &HashMap<Uuid, Uuid>) {
         &mut graph.customer,
     ] {
         for node in &mut canvas.nodes {
-            if let Node::Outcome { outcome_id, .. } = node {
-                if let Some(new_id) = map.get(outcome_id) {
-                    *outcome_id = *new_id;
+            if let Node::Expression { action, .. } = node {
+                if action.r#type != "apply_outcome" {
+                    continue;
+                }
+                let Some(serde_json::Value::String(s)) = action.fields.get("outcome_id") else {
+                    continue;
+                };
+                let Ok(old_id) = Uuid::parse_str(s) else {
+                    continue;
+                };
+                if let Some(new_id) = map.get(&old_id) {
+                    action.fields.insert(
+                        "outcome_id".to_string(),
+                        serde_json::Value::String(new_id.to_string()),
+                    );
                 }
             }
         }

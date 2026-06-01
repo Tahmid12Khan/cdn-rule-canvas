@@ -46,7 +46,9 @@ pub struct DisplayConfig {
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self { value_max_chars: 10 }
+        Self {
+            value_max_chars: 10,
+        }
     }
 }
 
@@ -121,6 +123,20 @@ pub enum AppliesTo {
     Json,
 }
 
+/// The node taxonomy a manifest entry maps to. Drives which React Flow node type
+/// the frontend creates on drop and which validation path applies: a `Decision`
+/// node routes yes/no, an `Expression` node performs one body action and passes
+/// through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeKind {
+    /// A routing node (yes/no branches). Default when omitted.
+    #[default]
+    Decision,
+    /// A body-action node that performs one action and continues.
+    Expression,
+}
+
 /// One node-type specification.
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct NodeTypeSpec {
@@ -133,6 +149,9 @@ pub struct NodeTypeSpec {
     /// Feature-type gate for palette availability (`all` when omitted).
     #[serde(default)]
     pub applies_to: AppliesTo,
+    /// Node taxonomy this entry maps to (`decision` when omitted).
+    #[serde(default)]
+    pub node_kind: NodeKind,
     /// Tooltip "input info".
     pub summary: String,
     /// Ordered config fields.
@@ -181,6 +200,10 @@ pub enum Control {
     Text,
     /// Numeric input.
     Number,
+    /// Dynamic dropdown of the version's outcomes. Options are NOT in the
+    /// manifest; they are supplied by the client/validator (the
+    /// `apply_outcome_ref_exists` rule covers membership).
+    OutcomeSelect,
 }
 
 /// Conditional-requirement clause: required unless a sibling field equals a value.
@@ -240,8 +263,28 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            ["meta_tags", "device_type", "article_url", "json_expression"]
+            [
+                "meta_tags",
+                "device_type",
+                "article_url",
+                "json_expression",
+                "trim_json",
+                "add_attribute",
+                "apply_outcome"
+            ]
         );
+
+        // The three new node types are expression-kind; the ported decision
+        // kinds default to `decision`.
+        let by_kind = loaded.typed.index();
+        assert_eq!(by_kind["meta_tags"].node_kind, NodeKind::Decision);
+        assert_eq!(by_kind["json_expression"].node_kind, NodeKind::Decision);
+        assert_eq!(by_kind["trim_json"].node_kind, NodeKind::Expression);
+        assert_eq!(by_kind["add_attribute"].node_kind, NodeKind::Expression);
+        assert_eq!(by_kind["apply_outcome"].node_kind, NodeKind::Expression);
+        // `apply_outcome`'s outcome field uses the dynamic outcome_select control.
+        let outcome_field = &by_kind["apply_outcome"].fields[0];
+        assert_eq!(outcome_field.control, Control::OutcomeSelect);
 
         // 14 palette categories, with `user` flagged coming_soon and `json` not.
         assert_eq!(loaded.typed.categories.len(), 14);
@@ -262,7 +305,6 @@ mod tests {
 
         // applies_to flows from the manifest: meta_tags=html, json_expression=json,
         // article_url defaults to all (key omitted in source).
-        let by_kind = loaded.typed.index();
         assert_eq!(by_kind["meta_tags"].applies_to, AppliesTo::Html);
         assert_eq!(by_kind["json_expression"].applies_to, AppliesTo::Json);
         assert_eq!(by_kind["article_url"].applies_to, AppliesTo::All);

@@ -108,16 +108,22 @@ async fn patch_valid_rule_graph_succeeds() {
 
     let rule_graph = json!({
         "anonymous": {
-            "root_node_id": "d1",
+            "root_node_id": "start",
             "nodes": [
+                { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
                 { "kind": "decision", "id": "d1",
                   "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
                   "position": { "x": 0.0, "y": 0.0 } },
-                { "kind": "outcome", "id": "o1", "outcome_id": outcome_id,
-                  "position": { "x": 200.0, "y": 0.0 } }
+                { "kind": "expression", "id": "a1",
+                  "action": { "type": "apply_outcome", "outcome_id": outcome_id },
+                  "position": { "x": 200.0, "y": 0.0 } },
+                { "kind": "end", "id": "end", "position": { "x": 400.0, "y": 0.0 } }
             ],
             "edges": [
-                { "id": "e1", "source_node_id": "d1", "target_node_id": "o1", "branch": "yes" }
+                { "id": "e0", "source_node_id": "start", "target_node_id": "d1", "branch": "yes" },
+                { "id": "e1", "source_node_id": "d1", "target_node_id": "a1", "branch": "yes" },
+                { "id": "e2", "source_node_id": "d1", "target_node_id": "end", "branch": "no" },
+                { "id": "e3", "source_node_id": "a1", "target_node_id": "end", "branch": "yes" }
             ]
         },
         "registered": { "root_node_id": null, "nodes": [], "edges": [] },
@@ -138,9 +144,9 @@ async fn patch_valid_rule_graph_succeeds() {
         StatusCode::OK,
         "valid graph PATCH should 200: {body}"
     );
-    // The persisted graph should echo the decision node back.
+    // The persisted graph should echo the start node back.
     assert_eq!(
-        body["rule_graph"]["anonymous"]["root_node_id"], "d1",
+        body["rule_graph"]["anonymous"]["root_node_id"], "start",
         "rule_graph should round-trip"
     );
 }
@@ -154,13 +160,17 @@ async fn patch_dangling_edge_rejected() {
         "anonymous": {
             "root_node_id": null,
             "nodes": [
+                { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
                 { "kind": "decision", "id": "d1",
                   "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
                   "position": { "x": 0.0, "y": 0.0 } },
-                { "kind": "outcome", "id": "o1", "outcome_id": outcome_id,
-                  "position": { "x": 200.0, "y": 0.0 } }
+                { "kind": "expression", "id": "a1",
+                  "action": { "type": "apply_outcome", "outcome_id": outcome_id },
+                  "position": { "x": 200.0, "y": 0.0 } },
+                { "kind": "end", "id": "end", "position": { "x": 400.0, "y": 0.0 } }
             ],
             "edges": [
+                { "id": "e0", "source_node_id": "start", "target_node_id": "d1", "branch": "yes" },
                 { "id": "e1", "source_node_id": "d1", "target_node_id": "ghost", "branch": "yes" }
             ]
         },
@@ -199,16 +209,22 @@ async fn patch_unknown_outcome_rejected() {
     let db = common::setup().await;
     let (vnum, _vid, _outcome_id) = seed_feature_version(&db.state, "patch-unknown-outcome").await;
 
-    // An outcome node referencing a UUID that is not an outcome of this version.
+    // An apply_outcome expression referencing a UUID that is not an outcome of
+    // this version.
     let rule_graph = json!({
         "anonymous": {
-            "root_node_id": null,
+            "root_node_id": "start",
             "nodes": [
-                { "kind": "outcome", "id": "o1",
-                  "outcome_id": "99999999-9999-9999-9999-999999999999",
-                  "position": { "x": 0.0, "y": 0.0 } }
+                { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
+                { "kind": "expression", "id": "a1",
+                  "action": { "type": "apply_outcome", "outcome_id": "99999999-9999-9999-9999-999999999999" },
+                  "position": { "x": 0.0, "y": 0.0 } },
+                { "kind": "end", "id": "end", "position": { "x": 200.0, "y": 0.0 } }
             ],
-            "edges": []
+            "edges": [
+                { "id": "e0", "source_node_id": "start", "target_node_id": "a1", "branch": "yes" },
+                { "id": "e1", "source_node_id": "a1", "target_node_id": "end", "branch": "yes" }
+            ]
         },
         "registered": { "root_node_id": null, "nodes": [], "edges": [] },
         "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
@@ -233,7 +249,9 @@ async fn patch_unknown_outcome_rejected() {
         .as_array()
         .expect("details array present on 422");
     assert!(
-        details.iter().any(|d| d["rule_id"] == "outcome_ref_exists"),
-        "expected outcome_ref_exists detail: {body}"
+        details
+            .iter()
+            .any(|d| d["rule_id"] == "apply_outcome_ref_exists"),
+        "expected apply_outcome_ref_exists detail: {body}"
     );
 }
