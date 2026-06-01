@@ -1,0 +1,168 @@
+name: rre-ci
+
+# Per-service CI for the Response Rule Engine (backend, proxy, frontend).
+# Each job runs the gate chain: fmt/lint -> typecheck -> test -> build.
+# Caches are keyed on lockfile hashes so they invalidate on dependency changes.
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "backend/**"
+      - "proxy/**"
+      - "frontend/**"
+      - "core/**"
+      - "infra/**"
+      - ".github/workflows/rre-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "proxy/**"
+      - "frontend/**"
+      - "core/**"
+      - "infra/**"
+      - ".github/workflows/rre-ci.yml"
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: rre-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- Rust services (backend, proxy) --------------------------------------
+  rust:
+    name: rust (${{ matrix.crate }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [backend, proxy]
+    defaults:
+      run:
+        working-directory: ${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Caches cargo registry + target keyed on Cargo.lock (per-crate workspace).
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }} -> target
+          key: ${{ matrix.crate }}
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy (lint)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        # backend tests use testcontainers (Docker is available on ubuntu-latest).
+        run: cargo test --all-targets
+
+      - name: build (release)
+        run: cargo build --release
+
+  # ---- Frontend (Next.js / TypeScript) -------------------------------------
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Caches ~/.npm keyed on the frontend lockfile.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: lint
+        run: npm run lint
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm run test
+
+      - name: build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE: http://localhost:8000
+
+  # ---- Docker image build sanity (compose builds all images) ---------------
+  docker-build:
+    name: docker images build
+    runs-on: ubuntu-latest
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          tags: rre-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build proxy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: proxy/Dockerfile
+          push: false
+          tags: rre-proxy:ci
+          cache-from: type=gha,scope=proxy
+          cache-to: type=gha,mode=max,scope=proxy
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: false
+          tags: rre-frontend:ci
+          build-args: |
+            NEXT_PUBLIC_API_BASE=http://localhost:8000
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  # Branch protection should require this aggregate job to pass before merge.
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    needs: [rust, frontend, docker-build]
+    if: always()
+    steps:
+      - name: Verify all jobs succeeded
+        run: |
+          if [ "${{ needs.rust.result }}" != "success" ] \
+            || [ "${{ needs.frontend.result }}" != "success" ] \
+            || [ "${{ needs.docker-build.result }}" != "success" ]; then
+            echo "one or more CI jobs failed"
+            exit 1
+          fi
+          echo "all CI jobs passed"
