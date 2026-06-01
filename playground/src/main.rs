@@ -21,7 +21,11 @@ struct EvalRequest {
 // (parse -> evaluate -> serialize) runs inside spawn_blocking on a
 // current-thread runtime. Only Send serde_json::Value crosses the boundary.
 async fn evaluate(Json(req): Json<EvalRequest>) -> Json<Value> {
-    let EvalRequest { jdm, context, trace } = req;
+    let EvalRequest {
+        jdm,
+        context,
+        trace,
+    } = req;
 
     let out = tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -38,7 +42,10 @@ async fn evaluate(Json(req): Json<EvalRequest>) -> Json<Value> {
             let engine = DecisionEngine::default();
             let decision = engine.create_decision(Arc::new(content));
             let ctx = Variable::from(context);
-            let opts = EvaluationOptions { trace, max_depth: 10 };
+            let opts = EvaluationOptions {
+                trace,
+                max_depth: 10,
+            };
 
             match decision.evaluate_with_opts(ctx, opts).await {
                 Ok(resp) => {
