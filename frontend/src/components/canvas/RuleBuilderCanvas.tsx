@@ -195,6 +195,10 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
         // (inspection). Selection alone mutates nothing; `editable` gates every
         // real mutation (drag/connect/drop).
         elementsSelectable
+        // Delete a selected node/edge with either key while editing. React Flow
+        // defaults to Backspace only, so the Delete key silently did nothing.
+        // `null` in read-only mode keeps inspection non-destructive.
+        deleteKeyCode={editable ? ["Backspace", "Delete"] : null}
         fitView
         proOptions={{ hideAttribution: true }}
       >
