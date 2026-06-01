@@ -114,14 +114,29 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       return postEvalTest({ canvas, context });
     },
     onSuccess: (res) => {
+      // A path is a dead-end only when it never reaches an END node — NOT merely
+      // when no apply_outcome ran. The NO branch straight to END is a complete
+      // path (its terminal body IS the output). The journey's last step is the
+      // END node when the path completed (the proxy appends it).
+      const reachedEnd =
+        res.journey.length > 0 &&
+        res.journey[res.journey.length - 1].kind === "end";
       setTestHighlight({
         nodeIds: new Set(res.traversed_node_ids),
         edgeIds: new Set(res.traversed_edge_ids),
         outcomeNodeId: res.matched_node_id,
-        deadEnd: res.matched_node_id === null,
+        deadEnd: !reachedEnd,
       });
     },
   });
+
+  // Whether the matched path reached an END node (the path completed). Drives the
+  // result banner: reaching END is success — that terminal body IS the output
+  // (expression-nodes-spec §0/§5), even when no apply_outcome ran on the path.
+  const reachedEnd = useMemo(() => {
+    const j = mutation.data?.journey;
+    return Boolean(j && j.length > 0 && j[j.length - 1].kind === "end");
+  }, [mutation.data]);
 
   // The matched node is the terminal expression node on the path. The proxy no
   // longer returns a single outcome id (the canvas now applies an ordered action
@@ -340,14 +355,20 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         {mutation.data &&
           (matchedTitle ? (
             <p className="text-sm text-status-prevFg">
-              Matched outcome:{" "}
+              Reached END · applied outcome:{" "}
               <span className="font-semibold text-brand-700">
                 {matchedTitle}
               </span>
             </p>
+          ) : reachedEnd ? (
+            <p className="text-sm text-status-prevFg">
+              Reached <span className="font-semibold text-brand-700">END</span>{" "}
+              — the final body is the last step of the journey below.
+            </p>
           ) : (
             <p className="text-sm font-medium text-status-stagingFg">
-              No outcome matched (fail-open). Only the partial path is shown.
+              Path didn&apos;t reach an END node (fail-open). Only the partial
+              path is shown.
             </p>
           ))}
       </div>

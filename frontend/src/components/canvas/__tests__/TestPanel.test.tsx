@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 
 describe("TestPanel", () => {
-  it("runs a test, highlights the path, and shows the matched outcome", async () => {
+  it("runs a test, highlights the path, and names the applied outcome", async () => {
     const user = userEvent.setup();
     server.use(
       http.post(`${PROXY_BASE}/__rre/eval`, () =>
@@ -76,8 +76,9 @@ describe("TestPanel", () => {
     await user.click(screen.getByRole("button", { name: /run test/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/matched outcome/i)).toBeInTheDocument(),
+      expect(screen.getByText(/applied outcome/i)).toBeInTheDocument(),
     );
+    expect(screen.getByText("Paywall")).toBeInTheDocument();
     const hl = useRuleBuilderStore.getState().testHighlight;
     expect(hl?.nodeIds.has("d1")).toBe(true);
     expect(hl?.edgeIds.has("e1")).toBe(true);
@@ -86,6 +87,41 @@ describe("TestPanel", () => {
     // Clear removes the highlight.
     await user.click(screen.getByRole("button", { name: /clear highlight/i }));
     expect(useRuleBuilderStore.getState().testHighlight).toBeNull();
+  });
+
+  it("treats reaching END with no apply_outcome as success (not a dead end)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${PROXY_BASE}/__rre/eval`, () =>
+        HttpResponse.json({
+          matched_node_id: null,
+          traversed_node_ids: ["d1"],
+          traversed_edge_ids: [],
+          steps: [{ node_id: "d1", kind: "decision", branch: "no", result: false }],
+          // NO branch goes straight from the decision to END — a complete path,
+          // even though no apply_outcome ran. The proxy appends the END step.
+          journey: [
+            { index: 0, node_id: "start", kind: "start", label: "Start", branch: null, body_after: "<html></html>" },
+            { index: 1, node_id: "d1", kind: "decision", label: "device_type", branch: false, body_after: "<html></html>" },
+            { index: 2, node_id: "end", kind: "end", label: "End", branch: null, body_after: "<html></html>" },
+          ],
+        }),
+      ),
+    );
+
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
+
+    await user.click(screen.getByRole("button", { name: /run test/i }));
+
+    // Reaching END is success — NOT the old misleading "no outcome / dead end".
+    await waitFor(() =>
+      expect(screen.getByText(/reached/i)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/didn.t reach an end node/i),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a friendly message when the proxy is unreachable", async () => {
