@@ -10,7 +10,7 @@ import type {
   NodeManifest,
   NodeTypeSpec,
 } from "@/lib/api/nodeTypes";
-import { defaultProcessor } from "@/lib/canvas/manifest";
+import { defaultProcessor, rfNodeTypeForSpec } from "@/lib/canvas/manifest";
 import type { ProcessorConfig } from "@/lib/canvas/types";
 
 // The feature's content kind. A node spec's `applies_to` gates palette
@@ -26,12 +26,14 @@ function specAppliesTo(
   return appliesTo === undefined || appliesTo === "all" || appliesTo === featureType;
 }
 
-// What a chip drops onto the canvas. Decision chips carry a default processor
-// config (intentionally requiring user edit before save); outcome chips carry
-// the outcome id + cached title.
+// What a chip drops onto the canvas. Driven by the spec's manifest `node_kind`
+// (expression-nodes-spec §2): a decision chip carries a default processor
+// config; an expression chip (Trim JSON / Add Attribute / Apply Outcome)
+// carries a default action config. Both are intentionally incomplete (the user
+// must edit before the graph validates).
 export type ChipPayload =
   | { kind: "decision"; processor: ProcessorConfig }
-  | { kind: "outcome"; outcomeId: string; title: string };
+  | { kind: "expression"; action: ProcessorConfig };
 
 export interface NodeChipDef {
   id: string; // stable chip id (used as DnD payload key + React key)
@@ -53,16 +55,22 @@ export interface OutcomeOption {
 
 // Build one chip per node-type spec in a category. A `coming_soon` category
 // renders all its chips disabled (even though they map to real specs); the
-// dropped-config default is built from the spec's field defaults.
+// dropped-config default is built from the spec's field defaults. The chip
+// payload kind follows the spec's manifest `node_kind` (decision vs expression).
 function chipForSpec(spec: NodeTypeSpec, comingSoon: boolean): NodeChipDef {
   if (comingSoon) {
     return { id: `node:${spec.kind}`, label: spec.label, enabled: false };
   }
+  const config = defaultProcessor(spec);
+  const payload: ChipPayload =
+    rfNodeTypeForSpec(spec) === "expressionNode"
+      ? { kind: "expression", action: config }
+      : { kind: "decision", processor: config };
   return {
     id: `node:${spec.kind}`,
     label: spec.label,
     enabled: true,
-    payload: { kind: "decision", processor: defaultProcessor(spec) },
+    payload,
   };
 }
 
@@ -76,13 +84,15 @@ function placeholderChip(category: NodeCategory): NodeChipDef {
   };
 }
 
-// Build the full palette from the manifest + the version's outcomes. Categories
-// render in manifest order; the dynamic "Outcomes" category is injected before
-// the first category that has no node types after Integrations (mirroring the
-// prior §4.5 ordering: between Integrations and Advanced).
+// Build the full palette from the manifest. Categories render in manifest
+// order. Saved outcomes are no longer their own palette category — "Apply
+// Outcome" is a manifest expression node (content category) and the specific
+// outcome is chosen via the outcome_select dropdown in its config drawer
+// (expression-nodes-spec §2). The `outcomes` arg is retained for API parity
+// (the caller still threads it) but no longer affects the palette.
 export function buildPalette(
   manifest: NodeManifest | undefined,
-  outcomes: OutcomeOption[],
+  _outcomes: OutcomeOption[],
   featureType: FeatureType = "html",
 ): PaletteCategory[] {
   if (!manifest) return [];
@@ -117,31 +127,7 @@ export function buildPalette(
       return { id: cat.id, label: cat.label, chips };
     });
 
-  const outcomesCategory: PaletteCategory = {
-    id: "outcomes",
-    label: "Outcomes",
-    chips:
-      outcomes.length === 0
-        ? [{ id: "outcomes:none", label: "No outcomes yet", enabled: false }]
-        : outcomes.map((o) => ({
-            id: `outcomes:${o.id}`,
-            label: o.title,
-            enabled: true,
-            payload: { kind: "outcome", outcomeId: o.id, title: o.title },
-          })),
-  };
-
-  // Inject "Outcomes" before the "advanced" category (matching prior ordering);
-  // fall back to appending if that category isn't present.
-  const advancedIdx = categories.findIndex((c) => c.id === "advanced");
-  if (advancedIdx === -1) {
-    return [...categories, outcomesCategory];
-  }
-  return [
-    ...categories.slice(0, advancedIdx),
-    outcomesCategory,
-    ...categories.slice(advancedIdx),
-  ];
+  return categories;
 }
 
 // DataTransfer MIME type for palette drag payloads.

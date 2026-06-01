@@ -11,12 +11,13 @@ function decision(id: string): RFNode {
     data: { processor: { type: "device_type" } },
   };
 }
-function outcome(id: string): RFNode {
+function end(id: string): RFNode {
   return {
     id,
-    type: "outcomeNode",
+    type: "endNode",
     position: { x: 0, y: 0 },
-    data: { outcomeId: "00000000-0000-0000-0000-000000000000", title: "Out" },
+    data: { label: "END" },
+    deletable: false,
   };
 }
 function start(): RFNode {
@@ -40,7 +41,7 @@ function edge(source: string, target: string): RFEdge {
 }
 
 describe("autoLayout", () => {
-  const nodes = [start(), decision("a"), outcome("b"), outcome("c")];
+  const nodes = [start(), decision("a"), end("b"), end("c")];
   const edges = [
     edge(START_NODE_ID, "a"),
     edge("a", "b"),

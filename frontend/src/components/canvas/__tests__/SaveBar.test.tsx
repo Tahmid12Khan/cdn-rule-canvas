@@ -183,20 +183,29 @@ describe("SaveBar — Save as New Version", () => {
 
   it("names the offending node + canvas on a 422 validation failure", async () => {
     const user = userEvent.setup();
-    // Seed a single-outcome graph on the Anonymous canvas so the 422 loc
-    // (nodes[0]) resolves to a node we can name in the banner.
+    // Seed a valid start -> apply_outcome -> end graph on the Anonymous canvas
+    // (passes the client pre-flight) so the 422 loc resolves to the expression
+    // node we can name in the banner.
     const seeded: RuleGraph = {
       anonymous: {
-        root_node_id: "n_out",
+        root_node_id: "start",
         nodes: [
+          { kind: "start", id: "start", position: { x: 0, y: 0 } },
           {
-            kind: "outcome",
-            id: "n_out",
-            outcome_id: "33333333-3333-3333-3333-333333333333",
-            position: { x: 0, y: 0 },
+            kind: "expression",
+            id: "n_act",
+            action: {
+              type: "apply_outcome",
+              outcome_id: "33333333-3333-3333-3333-333333333333",
+            },
+            position: { x: 0, y: 100 },
           },
+          { kind: "end", id: "end", position: { x: 0, y: 200 } },
         ],
-        edges: [],
+        edges: [
+          { id: "e0", source_node_id: "start", target_node_id: "n_act", branch: "yes" },
+          { id: "e1", source_node_id: "n_act", target_node_id: "end", branch: "yes" },
+        ],
       },
       registered: { nodes: [], edges: [], root_node_id: null },
       customer: { nodes: [], edges: [], root_node_id: null },
@@ -214,9 +223,9 @@ describe("SaveBar — Save as New Version", () => {
               message: "invalid graph",
               details: [
                 {
-                  loc: "rule_graph.anonymous.nodes[0]",
+                  loc: "rule_graph.anonymous.nodes[1]",
                   msg: "outcome ref missing",
-                  rule_id: "outcome_ref_exists",
+                  rule_id: "apply_outcome_ref_exists",
                 },
               ],
             },
@@ -236,7 +245,7 @@ describe("SaveBar — Save as New Version", () => {
     expect(alert).toHaveTextContent(/Show Content/);
     // The offending node is highlighted via the store's nodeErrors.
     expect(useRuleBuilderStore.getState().nodeErrors).toEqual({
-      n_out: "outcome ref missing",
+      n_act: "outcome ref missing",
     });
   });
 });

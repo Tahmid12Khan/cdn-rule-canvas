@@ -19,7 +19,15 @@ export const ProcessorConfig = z
   .passthrough();
 export type ProcessorConfig = z.infer<typeof ProcessorConfig>;
 
+// Node taxonomy (expression-nodes-spec §1): real persisted Start / Decision /
+// Expression / End. Outcome is REMOVED — apply_outcome now lives on an
+// Expression node's `action` (kept alive for `rre.outcomes`).
 export const GraphNode = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("start"),
+    id: z.string(),
+    position: Position,
+  }),
   z.object({
     kind: z.literal("decision"),
     id: z.string(),
@@ -27,9 +35,14 @@ export const GraphNode = z.discriminatedUnion("kind", [
     position: Position,
   }),
   z.object({
-    kind: z.literal("outcome"),
+    kind: z.literal("expression"),
     id: z.string(),
-    outcome_id: z.string().uuid(),
+    action: ProcessorConfig,
+    position: Position,
+  }),
+  z.object({
+    kind: z.literal("end"),
+    id: z.string(),
     position: Position,
   }),
 ]);

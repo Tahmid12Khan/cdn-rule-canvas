@@ -27,8 +27,18 @@ function nodeLabel(canvas: CanvasWorkingState["nodes"][number]): string {
   if (canvas.type === "decisionNode") {
     return `Decision · ${processorSummary(canvas.data.processor)}`;
   }
-  if (canvas.type === "outcomeNode") {
-    return `Outcome · ${canvas.data.title || "untitled"}`;
+  if (canvas.type === "expressionNode") {
+    const action = canvas.data.action;
+    if (action.type === "apply_outcome") {
+      return `Action · apply outcome (${canvas.data.outcomeTitle || "unpicked"})`;
+    }
+    return `Action · ${processorSummary(action)}`;
+  }
+  if (canvas.type === "startNode") {
+    return "Start";
+  }
+  if (canvas.type === "endNode") {
+    return "End";
   }
   return "Node";
 }

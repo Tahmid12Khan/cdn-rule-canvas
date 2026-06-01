@@ -243,7 +243,7 @@ export function RuleBuilderClient({
 
         <RuleBuilderCanvas canvasKey={selected} editable={isEditing} />
 
-        <NodeConfigDrawer canvasKey={selected} />
+        <NodeConfigDrawer canvasKey={selected} outcomes={paletteOutcomes} />
 
         <TestPanel
           outcomeTitleById={outcomeTitleById}

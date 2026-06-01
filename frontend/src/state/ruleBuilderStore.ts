@@ -22,6 +22,7 @@ import {
   type CanvasWorkingState,
 } from "@/lib/canvas/serialize";
 import {
+  END_NODE_ID,
   START_NODE_ID,
   type CanvasKey,
   type ProcessorConfig,
@@ -31,9 +32,9 @@ import {
 
 const CANVAS_KEYS: CanvasKey[] = ["anonymous", "registered", "customer"];
 
-// The single frontend-only start node (Task C). Injected on empty/seed only
-// (never via addNode, so it doesn't flip `dirty`), non-deletable, stripped on
-// serialize. Positioned top-center as the visual entry marker.
+// The auto-injected start + end nodes (expression-nodes-spec §1/§8). One each
+// per non-empty canvas, both non-deletable, both PERSISTED. Injected on
+// seed/empty (never via addNode, so they don't flip `dirty` on their own).
 function startNode(): RFNode {
   return {
     id: START_NODE_ID,
@@ -44,34 +45,38 @@ function startNode(): RFNode {
   };
 }
 
-function startEdge(rootNodeId: string): RFEdge {
+function endNode(): RFNode {
   return {
-    id: "edge_start",
-    source: START_NODE_ID,
-    target: rootNodeId,
-    sourceHandle: "yes",
-    type: "labeledEdge",
-    data: { branch: "yes" },
+    id: END_NODE_ID,
+    type: "endNode",
+    position: { x: 260, y: 480 },
+    data: { label: "END" },
     deletable: false,
-  } as RFEdge;
-}
-
-function emptyCanvas(): CanvasWorkingState {
-  return { nodes: [startNode()], edges: [], rootNodeId: null };
-}
-
-// Ensure a canvas (just deserialized from a RuleGraph) has exactly one start
-// node. If a computed root exists, also wire start -> root so Start is the
-// visual entry. Pure: returns a NEW working-state; never flips dirty.
-function withStartNode(canvas: CanvasWorkingState): CanvasWorkingState {
-  if (canvas.nodes.some((n) => n.type === "startNode")) return canvas;
-  const root = computeRootNodeId(canvas.nodes, canvas.edges);
-  const edges = root ? [...canvas.edges, startEdge(root)] : canvas.edges;
-  return {
-    ...canvas,
-    nodes: [startNode(), ...canvas.nodes],
-    edges,
   };
+}
+
+// A non-empty canvas always carries exactly one start + one end. An EMPTY
+// canvas (zero real nodes) stays empty — the start/end pair appears only once
+// the user adds a real node (mirrors the backend: empty canvas is valid).
+function emptyCanvas(): CanvasWorkingState {
+  return { nodes: [], edges: [], rootNodeId: null };
+}
+
+// Ensure a deserialized canvas with ≥1 node carries a start + an end node.
+// Migrated/legacy graphs are expected to already include them; this is a
+// defensive guard so a graph saved before the migration still renders an entry
+// + terminal. Pure: returns a NEW working-state; never flips dirty.
+function withStartEnd(canvas: CanvasWorkingState): CanvasWorkingState {
+  if (canvas.nodes.length === 0) return canvas;
+  const hasStart = canvas.nodes.some((n) => n.type === "startNode");
+  const hasEnd = canvas.nodes.some((n) => n.type === "endNode");
+  if (hasStart && hasEnd) return canvas;
+  const nodes = [
+    ...(hasStart ? [] : [startNode()]),
+    ...canvas.nodes,
+    ...(hasEnd ? [] : [endNode()]),
+  ];
+  return { ...canvas, nodes };
 }
 
 function emptyCanvases(): Record<CanvasKey, CanvasWorkingState> {
@@ -82,19 +87,20 @@ function emptyCanvases(): Record<CanvasKey, CanvasWorkingState> {
   };
 }
 
-// root = the (decision/outcome) node with no incoming edges. The frontend-only
-// start node and its outgoing edge are excluded so root detection among the
-// real nodes is UNCHANGED. If ambiguous/empty -> null.
+// root = the start node (expression-nodes-spec §3). For a non-empty canvas the
+// root is the unique `start` node. An empty canvas (no real nodes) has no root.
 export function computeRootNodeId(
   nodes: RFNode[],
-  edges: RFEdge[],
+  _edges: RFEdge[],
 ): string | null {
-  const realNodes = nodes.filter((n) => n.type !== "startNode");
-  if (realNodes.length === 0) return null;
-  const hasIncoming = new Set(
-    edges.filter((e) => e.source !== START_NODE_ID).map((e) => e.target),
-  );
-  const roots = realNodes.filter((n) => !hasIncoming.has(n.id));
+  const start = nodes.find((n) => n.type === "startNode");
+  if (start) return start.id;
+  // Defensive fallback (pre-injection / legacy): the unique node with no
+  // incoming edge. Returns null when ambiguous or empty.
+  const real = nodes;
+  if (real.length === 0) return null;
+  const hasIncoming = new Set(_edges.map((e) => e.target));
+  const roots = real.filter((n) => !hasIncoming.has(n.id));
   return roots.length === 1 ? roots[0].id : null;
 }
 
@@ -178,12 +184,20 @@ export interface RuleBuilderState {
   onNodesChange: (k: CanvasKey, changes: NodeChange[]) => void;
   onEdgesChange: (k: CanvasKey, changes: EdgeChange[]) => void;
 
-  // --- processor config ---
+  // --- processor / action config ---
   openNodeConfig: (nodeId: string | null) => void;
   updateNodeProcessor: (
     k: CanvasKey,
     nodeId: string,
     processor: ProcessorConfig,
+  ) => void;
+  // Update an expression node's action config (+ optional resolved outcome
+  // title for apply_outcome display).
+  updateNodeAction: (
+    k: CanvasKey,
+    nodeId: string,
+    action: ProcessorConfig,
+    outcomeTitle?: string,
   ) => void;
 
   // --- save support ---
@@ -211,11 +225,11 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
 
   seedFromRuleGraph: (rg, status, outcomeTitleById) => {
     const deserialized = deserializeRuleGraph(rg, outcomeTitleById);
-    // Inject the frontend-only start node (+ start->root edge) into each canvas.
+    // Guard each non-empty canvas to carry a start + end node (legacy graphs).
     const canvases = {
-      anonymous: withStartNode(deserialized.anonymous),
-      registered: withStartNode(deserialized.registered),
-      customer: withStartNode(deserialized.customer),
+      anonymous: withStartEnd(deserialized.anonymous),
+      registered: withStartEnd(deserialized.registered),
+      customer: withStartEnd(deserialized.customer),
     };
     set({
       canvases,
@@ -251,7 +265,12 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
   addNode: (k, node) =>
     set((state) => {
       const canvas = state.canvases[k];
-      const nodes = [...canvas.nodes, node];
+      // First real node on an empty canvas auto-injects the start + end pair
+      // (one per non-empty canvas — expression-nodes-spec §1/§3).
+      const needsBookends = canvas.nodes.length === 0;
+      const nodes = needsBookends
+        ? [startNode(), node, endNode()]
+        : [...canvas.nodes, node];
       const canvases = {
         ...state.canvases,
         [k]: {
@@ -271,13 +290,22 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
   removeNode: (k, nodeId) =>
     set((state) => {
       const canvas = state.canvases[k];
-      // The start node is non-deletable.
+      // The start + end nodes are non-deletable.
       const target = canvas.nodes.find((n) => n.id === nodeId);
-      if (target?.type === "startNode") return {};
-      const nodes = canvas.nodes.filter((n) => n.id !== nodeId);
-      const edges = canvas.edges.filter(
+      if (target?.type === "startNode" || target?.type === "endNode") return {};
+      let nodes = canvas.nodes.filter((n) => n.id !== nodeId);
+      let edges = canvas.edges.filter(
         (e) => e.source !== nodeId && e.target !== nodeId,
       );
+      // If that was the last REAL node, drop the bookends too so the canvas
+      // returns to the (valid) empty state.
+      const realLeft = nodes.filter(
+        (n) => n.type !== "startNode" && n.type !== "endNode",
+      );
+      if (realLeft.length === 0) {
+        nodes = [];
+        edges = [];
+      }
       const nextErrors = { ...state.nodeErrors };
       delete nextErrors[nodeId];
       const canvases = {
@@ -358,9 +386,9 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
   addEdge: (k, edge) => {
     const canvas = get().canvases[k];
     const sourceNode = canvas.nodes.find((n) => n.id === edge.source);
-    // Outcome nodes are terminals — reject outgoing edges (BACKEND
-    // outcome_branch_forbidden / outcome_terminal).
-    if (!sourceNode || sourceNode.type === "outcomeNode") return false;
+    // End nodes are terminals — reject outgoing edges (end_terminal /
+    // edge_source_kind, expression-nodes-spec §3).
+    if (!sourceNode || sourceNode.type === "endNode") return false;
     // Soft branch_unique guard: drop any existing edge from the same source on
     // the same branch (the backend enforces hard validation).
     const branch = edge.sourceHandle ?? edge.data?.branch ?? "yes";
@@ -491,6 +519,26 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       };
     }),
 
+  updateNodeAction: (k, nodeId, action, outcomeTitle) =>
+    set((state) => {
+      const canvas = state.canvases[k];
+      return {
+        dirty: true,
+        testHighlight: null,
+        canvases: {
+          ...state.canvases,
+          [k]: {
+            ...canvas,
+            nodes: canvas.nodes.map((n) =>
+              n.id === nodeId && n.type === "expressionNode"
+                ? { ...n, data: { ...n.data, action, outcomeTitle } }
+                : n,
+            ),
+          },
+        },
+      };
+    }),
+
   setNodeErrors: (errs) => set({ nodeErrors: errs }),
   clearNodeErrors: () => set({ nodeErrors: {} }),
 
@@ -518,10 +566,10 @@ export function selectCurrentRuleGraph(state: RuleBuilderState): RuleGraph {
   return serializeRuleGraph(state.canvases);
 }
 
-// --- always-on journey path (spec §4a / req 1) ---
+// --- always-on journey path (expression-nodes-spec §3 / req 1) ---
 //
-// The set of node + edge ids on ANY START -> outcome path: nodes that are
-// forward-reachable from the start node AND can reach an outcome, plus the
+// The set of node + edge ids on ANY START -> END path: nodes that are
+// forward-reachable from the start node AND can reach an `end` node, plus the
 // edges whose endpoints are both on that path. Distinct from `testHighlight`
 // (which is the per-test trace and renders brighter). The UI styles this as the
 // always-on baseline so the user can always see where "Start" leads.
@@ -534,12 +582,7 @@ export function computeJourneyPath(canvas: CanvasWorkingState): JourneyPath {
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
 
-  const start = canvas.nodes.find((n) => n.type === "startNode");
-
-  // Anchor forward-reachability at the computed ROOT (not strictly the start
-  // node) since the frontend-only `edge_start` is only wired at seed time and
-  // may not point at the current root after free-form editing. The start node
-  // is still included as the entry marker, and the start->root edge if present.
+  // Anchor forward-reachability at the start node (the graph root).
   const root = computeRootNodeId(canvas.nodes, canvas.edges);
 
   const fwd = new Map<string, string[]>();
@@ -563,18 +606,18 @@ export function computeJourneyPath(canvas: CanvasWorkingState): JourneyPath {
     }
   }
 
-  // can-reach-outcome: reverse-BFS from outcome nodes (over ALL edges).
+  // can-reach-end: reverse-BFS from end nodes (over ALL edges).
   const rev = new Map<string, string[]>();
   for (const e of canvas.edges) {
     const list = rev.get(e.target);
     if (list) list.push(e.source);
     else rev.set(e.target, [e.source]);
   }
-  const outcomeIds = canvas.nodes
-    .filter((n) => n.type === "outcomeNode")
+  const endIds = canvas.nodes
+    .filter((n) => n.type === "endNode")
     .map((n) => n.id);
-  const canReach = new Set<string>(outcomeIds);
-  const stackR = [...outcomeIds];
+  const canReach = new Set<string>(endIds);
+  const stackR = [...endIds];
   while (stackR.length > 0) {
     const cur = stackR.pop() as string;
     for (const prev of rev.get(cur) ?? []) {
@@ -585,15 +628,12 @@ export function computeJourneyPath(canvas: CanvasWorkingState): JourneyPath {
     }
   }
 
-  // Journey nodes: reachable-from-root AND can-reach-outcome.
+  // Journey nodes: reachable-from-start AND can-reach-end.
   for (const id of reachable) {
     if (canReach.has(id)) nodeIds.add(id);
   }
-  // Always include the start node as the entry marker.
-  if (start) nodeIds.add(start.id);
 
-  // Journey edges: both endpoints on the journey. This naturally picks up the
-  // start->root edge when the root is on the journey.
+  // Journey edges: both endpoints on the journey.
   for (const e of canvas.edges) {
     if (nodeIds.has(e.source) && nodeIds.has(e.target)) edgeIds.add(e.id);
   }

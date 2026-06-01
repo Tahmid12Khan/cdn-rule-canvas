@@ -2,12 +2,33 @@
 // form (spec Part E). They implement the LOCKED validation + display rules so
 // the frontend mirrors the backend (rule_graph_service::validate) exactly, with
 // ZERO per-node-type code. No React here.
-import type { NodeDisplayConfig, NodeFieldSpec, NodeTypeSpec } from "@/lib/api/nodeTypes";
+import type {
+  NodeDisplayConfig,
+  NodeFieldSpec,
+  NodeKind,
+  NodeTypeSpec,
+} from "@/lib/api/nodeTypes";
 import type { ProcessorConfig } from "@/lib/canvas/types";
+
+// The RF node type a spec creates on drop, derived from its manifest
+// `node_kind` (expression-nodes-spec §2). decision -> decisionNode;
+// expression -> expressionNode. Omitted node_kind defaults to decision.
+export type DroppableNodeType = "decisionNode" | "expressionNode";
+
+export function rfNodeTypeForKind(
+  nodeKind: NodeKind | undefined,
+): DroppableNodeType {
+  return nodeKind === "expression" ? "expressionNode" : "decisionNode";
+}
+
+export function rfNodeTypeForSpec(spec: NodeTypeSpec): DroppableNodeType {
+  return rfNodeTypeForKind(spec.node_kind);
+}
 
 // Build a dropped-node default config from a spec: `type` = kind, then each
 // field's `default` (missing => omitted, so the node is intentionally
-// incomplete and fails `required` until edited).
+// incomplete and fails `required` until edited). Used for BOTH a decision's
+// `processor` and an expression's `action` (same `{ type, …fields }` shape).
 export function defaultProcessor(spec: NodeTypeSpec): ProcessorConfig {
   const cfg: ProcessorConfig = { type: spec.kind };
   for (const field of spec.fields) {

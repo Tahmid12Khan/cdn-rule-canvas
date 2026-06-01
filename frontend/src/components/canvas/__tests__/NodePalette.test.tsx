@@ -43,13 +43,14 @@ describe("NodePalette (manifest-driven)", () => {
     expect(screen.queryByText("Meta Tags")).not.toBeInTheDocument();
   });
 
-  it("injects one draggable chip per outcome", async () => {
+  it("surfaces the Apply Outcome action chip in the Content category", async () => {
     const user = userEvent.setup();
     renderWithQuery(<NodePalette outcomes={OUTCOMES} draggable />);
-    await screen.findByRole("tab", { name: "Outcomes" });
-    await user.click(screen.getByRole("tab", { name: "Outcomes" }));
-    const chip = screen.getByText("Show Content").closest("[data-chip-id]");
+    await screen.findByRole("tab", { name: "Content" });
+    await user.click(screen.getByRole("tab", { name: "Content" }));
+    const chip = screen.getByText("Apply Outcome").closest("[data-chip-id]");
     expect(chip).toHaveAttribute("data-enabled", "true");
+    expect(chip).toHaveAttribute("draggable", "true");
   });
 
   it("makes enabled chips non-draggable in view mode", async () => {

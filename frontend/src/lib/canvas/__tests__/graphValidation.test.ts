@@ -2,16 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   CYCLE_MESSAGE,
-  UNREACHABLE_OUTCOME_MESSAGE,
+  UNREACHABLE_END_MESSAGE,
   buildClientValidationUserError,
   computeRoot,
   findCycle,
-  findUnreachableOutcomeNodes,
+  findUnreachableEndNodes,
   validateAllCanvases,
   validateCanvasGraph,
 } from "@/lib/canvas/graphValidation";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
-import { START_NODE_ID, type RFEdge, type RFNode } from "@/lib/canvas/types";
+import {
+  END_NODE_ID,
+  START_NODE_ID,
+  type RFEdge,
+  type RFNode,
+} from "@/lib/canvas/types";
 
 // --- builders --------------------------------------------------------------
 
@@ -24,21 +29,22 @@ function decision(id: string): RFNode {
   };
 }
 
-function outcome(id: string): RFNode {
-  return {
-    id,
-    type: "outcomeNode",
-    position: { x: 0, y: 0 },
-    data: { outcomeId: "00000000-0000-0000-0000-000000000000", title: "Out" },
-  };
-}
-
 function start(): RFNode {
   return {
     id: START_NODE_ID,
     type: "startNode",
     position: { x: 0, y: 0 },
     data: { label: "Start" },
+    deletable: false,
+  };
+}
+
+function end(id: string = END_NODE_ID): RFNode {
+  return {
+    id,
+    type: "endNode",
+    position: { x: 0, y: 0 },
+    data: { label: "END" },
     deletable: false,
   };
 }
@@ -62,19 +68,19 @@ function canvas(nodes: RFNode[], edges: RFEdge[]): CanvasWorkingState {
 // --- computeRoot -----------------------------------------------------------
 
 describe("computeRoot", () => {
-  it("ignores the start node and its edge", () => {
-    const nodes = [start(), decision("a"), outcome("b")];
-    const edges = [edge(START_NODE_ID, "a"), edge("a", "b")];
-    expect(computeRoot(nodes, edges)).toBe("a");
+  it("returns the start node", () => {
+    const nodes = [start(), decision("a"), end()];
+    const edges = [edge(START_NODE_ID, "a"), edge("a", END_NODE_ID)];
+    expect(computeRoot(nodes, edges)).toBe(START_NODE_ID);
   });
 
-  it("returns null when there is no single root", () => {
+  it("falls back to a single no-incoming node when there is no start", () => {
     const nodes = [decision("a"), decision("b")];
-    expect(computeRoot(nodes, [])).toBeNull();
+    expect(computeRoot(nodes, [edge("a", "b")])).toBe("a");
   });
 
-  it("returns null for an empty (real-node) canvas", () => {
-    expect(computeRoot([start()], [])).toBeNull();
+  it("returns null for an empty canvas", () => {
+    expect(computeRoot([], [])).toBeNull();
   });
 });
 
@@ -82,12 +88,12 @@ describe("computeRoot", () => {
 
 describe("findCycle", () => {
   it("returns null for an acyclic diamond", () => {
-    const nodes = [decision("a"), decision("b"), decision("c"), outcome("d")];
+    const nodes = [decision("a"), decision("b"), decision("c"), end()];
     const edges = [
       edge("a", "b", "yes"),
       edge("a", "c", "no"),
-      edge("b", "d"),
-      edge("c", "d"),
+      edge("b", END_NODE_ID),
+      edge("c", END_NODE_ID),
     ];
     expect(findCycle(nodes, edges)).toBeNull();
   });
@@ -100,41 +106,35 @@ describe("findCycle", () => {
     expect([...(cycle ?? [])].sort()).toEqual(["a", "b", "c"]);
   });
 
-  it("excludes the start node + start edge from cycle detection", () => {
-    const nodes = [start(), decision("a"), outcome("b")];
-    const edges = [edge(START_NODE_ID, "a"), edge("a", "b")];
+  it("a start -> decision -> end chain is acyclic", () => {
+    const nodes = [start(), decision("a"), end()];
+    const edges = [edge(START_NODE_ID, "a"), edge("a", END_NODE_ID)];
     expect(findCycle(nodes, edges)).toBeNull();
   });
 });
 
-// --- findUnreachableOutcomeNodes (mirrors backend §2.1) --------------------
+// --- findUnreachableEndNodes (mirrors backend all_paths_reach_end) ---------
 
-describe("findUnreachableOutcomeNodes", () => {
+describe("findUnreachableEndNodes", () => {
   it("skips an empty canvas", () => {
-    expect(findUnreachableOutcomeNodes([start()], [])).toEqual([]);
+    expect(findUnreachableEndNodes([], [])).toEqual([]);
   });
 
-  it("skips when there is no single root", () => {
-    const nodes = [decision("a"), decision("b")];
-    expect(findUnreachableOutcomeNodes(nodes, [])).toEqual([]);
+  it("passes a start -> decision -> end chain", () => {
+    const nodes = [start(), decision("a"), end()];
+    const edges = [edge(START_NODE_ID, "a"), edge("a", END_NODE_ID)];
+    expect(findUnreachableEndNodes(nodes, edges, START_NODE_ID)).toEqual([]);
   });
 
-  it("passes an outcome-only root", () => {
-    const nodes = [outcome("a")];
-    expect(findUnreachableOutcomeNodes(nodes, [], "a")).toEqual([]);
-  });
-
-  it("passes a decision -> decision -> outcome chain", () => {
-    const nodes = [decision("a"), decision("b"), outcome("c")];
-    const edges = [edge("a", "b"), edge("b", "c")];
-    expect(findUnreachableOutcomeNodes(nodes, edges, "a")).toEqual([]);
-  });
-
-  it("fails a dead-end decision reachable from the root", () => {
-    // a -> b (outcome) on yes; a -> c (dead-end decision) on no.
-    const nodes = [decision("a"), outcome("b"), decision("c")];
-    const edges = [edge("a", "b", "yes"), edge("a", "c", "no")];
-    const dead = findUnreachableOutcomeNodes(nodes, edges, "a");
+  it("fails a dead-end decision reachable from the start", () => {
+    // start -> a; a -> end on yes; a -> c (dead-end decision) on no.
+    const nodes = [start(), decision("a"), end(), decision("c")];
+    const edges = [
+      edge(START_NODE_ID, "a"),
+      edge("a", END_NODE_ID, "yes"),
+      edge("a", "c", "no"),
+    ];
+    const dead = findUnreachableEndNodes(nodes, edges, START_NODE_ID);
     expect(dead).toEqual(["c"]);
   });
 });
@@ -142,50 +142,74 @@ describe("findUnreachableOutcomeNodes", () => {
 // --- validateCanvasGraph / validateAllCanvases -----------------------------
 
 describe("validateCanvasGraph", () => {
-  it("returns no errors for a valid rooted graph", () => {
+  it("returns no errors for a valid start -> decision -> end graph", () => {
     const c = canvas(
-      [start(), decision("a"), outcome("b")],
-      [edge(START_NODE_ID, "a"), edge("a", "b")],
+      [start(), decision("a"), end()],
+      [edge(START_NODE_ID, "a"), edge("a", END_NODE_ID)],
     );
     const result = validateCanvasGraph(c);
     expect(result.nodeErrors).toEqual({});
     expect(result.problems).toEqual([]);
   });
 
-  it("flags cycle members and dead-ends with server-aligned copy", () => {
+  it("an empty canvas is valid", () => {
+    const result = validateCanvasGraph(canvas([], []));
+    expect(result.problems).toEqual([]);
+    expect(result.nodeErrors).toEqual({});
+  });
+
+  it("flags cycle members with server-aligned copy", () => {
     const c = canvas(
-      [start(), decision("a"), decision("c")],
-      [edge(START_NODE_ID, "a"), edge("a", "c"), edge("c", "a")],
+      [start(), decision("a"), decision("c"), end()],
+      [
+        edge(START_NODE_ID, "a"),
+        edge("a", "c"),
+        edge("c", "a"),
+        edge("a", END_NODE_ID),
+      ],
     );
     const result = validateCanvasGraph(c);
     expect(result.nodeErrors["a"]).toBe(CYCLE_MESSAGE);
     expect(result.problems).toContain("some rules form a cycle");
   });
 
-  it("flags an unreachable-outcome dead-end", () => {
+  it("flags an unreachable-end dead-end", () => {
     const c = canvas(
-      [start(), decision("a"), outcome("b"), decision("c")],
+      [start(), decision("a"), end(), decision("c")],
       [
         edge(START_NODE_ID, "a"),
-        edge("a", "b", "yes"),
+        edge("a", END_NODE_ID, "yes"),
         edge("a", "c", "no"),
       ],
     );
     const result = validateCanvasGraph(c);
-    expect(result.nodeErrors["c"]).toBe(UNREACHABLE_OUTCOME_MESSAGE);
-    expect(result.problems).toContain("some rules can't reach an outcome");
+    expect(result.nodeErrors["c"]).toBe(UNREACHABLE_END_MESSAGE);
+    expect(result.problems).toContain("some rules can't reach an end");
+  });
+
+  it("flags a missing end node", () => {
+    const c = canvas([start(), decision("a")], [edge(START_NODE_ID, "a")]);
+    const result = validateCanvasGraph(c);
+    expect(
+      result.problems.some((p) => p.includes("at least one end node")),
+    ).toBe(true);
   });
 });
 
 describe("validateAllCanvases", () => {
   it("aggregates and labels per-canvas problems", () => {
     const bad = canvas(
-      [start(), decision("a"), decision("c")],
-      [edge(START_NODE_ID, "a"), edge("a", "c"), edge("c", "a")],
+      [start(), decision("a"), decision("c"), end()],
+      [
+        edge(START_NODE_ID, "a"),
+        edge("a", "c"),
+        edge("c", "a"),
+        edge("a", END_NODE_ID),
+      ],
     );
     const good = canvas(
-      [start(), decision("x"), outcome("y")],
-      [edge(START_NODE_ID, "x"), edge("x", "y")],
+      [start(), decision("x"), end()],
+      [edge(START_NODE_ID, "x"), edge("x", END_NODE_ID)],
     );
     const result = validateAllCanvases({
       anonymous: bad,

@@ -28,9 +28,11 @@ function sizeFor(node: RFNode): { width: number; height: number } {
   switch (node.type) {
     case "decisionNode":
       return { width: 140, height: 150 };
-    case "outcomeNode":
-      return { width: 180, height: 56 };
+    case "expressionNode":
+      return { width: 180, height: 64 };
     case "startNode":
+      return { width: 96, height: 40 };
+    case "endNode":
       return { width: 96, height: 40 };
     default:
       return { width: 140, height: 60 };
@@ -89,7 +91,9 @@ export function autoLayout(
 // real node sits at the origin. A well-positioned saved graph returns false so
 // its layout is respected (no surprise relayout, no spurious dirty). Pure.
 export function needsLayout(nodes: RFNode[]): boolean {
-  const real = nodes.filter((n) => n.type !== "startNode");
+  const real = nodes.filter(
+    (n) => n.type !== "startNode" && n.type !== "endNode",
+  );
   if (real.length < 2) return false;
   const seen = new Set<string>();
   for (const n of real) {

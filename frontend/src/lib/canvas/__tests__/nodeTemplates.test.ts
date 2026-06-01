@@ -13,14 +13,15 @@ describe("buildPalette (manifest-driven)", () => {
     expect(buildPalette(undefined, OUTCOMES)).toEqual([]);
   });
 
-  it("builds a category per manifest category, in order, plus injected Outcomes", () => {
-    const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES);
+  it("builds a category per manifest category, in order (no injected Outcomes category)", () => {
+    const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES, "json");
     const ids = palette.map((c) => c.id);
-    // Outcomes injected before "advanced".
-    expect(ids).toEqual(["session", "user", "content", "outcomes", "advanced"]);
+    // Apply Outcome is now a manifest expression node — no dynamic Outcomes
+    // category. With a JSON feature, html-only categories are dropped.
+    expect(ids).toEqual(["session", "user", "content", "json", "advanced"]);
   });
 
-  it("places enabled chips with a default processor in non-coming_soon categories", () => {
+  it("places enabled decision chips with a default processor", () => {
     const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES);
     const content = palette.find((c) => c.id === "content")!;
     const metaChip = content.chips.find((c) => c.label === "Meta Tags")!;
@@ -28,6 +29,28 @@ describe("buildPalette (manifest-driven)", () => {
     expect(metaChip.payload).toEqual({
       kind: "decision",
       processor: { type: "meta_tags", tag_name: "", operator: "contains", value: "" },
+    });
+  });
+
+  it("builds an expression chip for an expression node_kind (Trim JSON)", () => {
+    const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES, "json");
+    const json = palette.find((c) => c.id === "json")!;
+    const trim = json.chips.find((c) => c.label === "Trim JSON")!;
+    expect(trim.enabled).toBe(true);
+    expect(trim.payload).toEqual({
+      kind: "expression",
+      action: { type: "trim_json", json_path: "", length: 0 },
+    });
+  });
+
+  it("builds an Apply Outcome expression chip in the content category", () => {
+    const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES);
+    const content = palette.find((c) => c.id === "content")!;
+    const apply = content.chips.find((c) => c.label === "Apply Outcome")!;
+    expect(apply.enabled).toBe(true);
+    expect(apply.payload).toEqual({
+      kind: "expression",
+      action: { type: "apply_outcome", outcome_id: "" },
     });
   });
 
@@ -39,7 +62,7 @@ describe("buildPalette (manifest-driven)", () => {
   });
 
   // Headline acceptance: a brand-new node type appears with ZERO code change.
-  it("surfaces a JSON-only new node type as an enabled chip", () => {
+  it("surfaces a new decision node type as an enabled chip", () => {
     const manifest: NodeManifest = {
       categories: [{ id: "content", label: "Content" }],
       node_types: [

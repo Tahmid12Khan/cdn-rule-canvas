@@ -15,6 +15,12 @@ import {
 } from "@/lib/canvas/manifest";
 import type { ProcessorConfig } from "@/lib/canvas/types";
 
+// One option for a dynamic `outcome_select` control (expression-nodes-spec §2).
+export interface OutcomeSelectOption {
+  id: string;
+  title: string;
+}
+
 interface GenericNodeFormProps {
   spec: NodeTypeSpec;
   initial: ProcessorConfig;
@@ -22,6 +28,9 @@ interface GenericNodeFormProps {
   // View-only mode: controls render disabled/readOnly so the node's contents are
   // inspectable without being editable.
   disabled?: boolean;
+  // Options for any `outcome_select` field (the version's outcomes). Not in the
+  // manifest — supplied by the caller.
+  outcomes?: OutcomeSelectOption[];
 }
 
 // Render a single field's value as a controlled string for the input/select.
@@ -35,6 +44,7 @@ export function GenericNodeForm({
   initial,
   onChange,
   disabled = false,
+  outcomes = [],
 }: GenericNodeFormProps) {
   // The draft keeps the open processor map (type + fields). Seeded from initial.
   const [draft, setDraft] = useState<ProcessorConfig>(initial);
@@ -76,7 +86,24 @@ export function GenericNodeForm({
               {required && <span className="ml-0.5 text-danger">*</span>}
             </label>
 
-            {field.control === "select" ? (
+            {field.control === "outcome_select" ? (
+              <select
+                id={inputId}
+                value={asInputValue(draft[field.name])}
+                onChange={(e) => setField(field, e.target.value)}
+                disabled={disabled}
+                className="w-full rounded-md border border-status-prevBg px-3 py-2 text-sm focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">
+                  {outcomes.length === 0 ? "No outcomes yet" : "Select an outcome…"}
+                </option>
+                {outcomes.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.title}
+                  </option>
+                ))}
+              </select>
+            ) : field.control === "select" ? (
               <select
                 id={inputId}
                 value={asInputValue(draft[field.name])}

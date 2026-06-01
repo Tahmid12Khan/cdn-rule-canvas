@@ -1,13 +1,13 @@
-// Client-side pre-flight graph validation (spec §4a). Mirrors the SERVER rules
-// (backend §2.1) so cycles / dead-ends are caught before the save round-trip;
-// the server stays authoritative on 422. Pure: no React, no store import.
+// Client-side pre-flight graph validation (expression-nodes-spec §3). Mirrors
+// the SERVER rules so cycles / dead-ends / missing start+end are caught before
+// the save round-trip; the server stays authoritative on 422. Pure: no React,
+// no store import.
 //
 // Operates on a canvas WORKING STATE (the same RFNode/RFEdge shape the store
-// holds). The frontend-only start node and its edge are excluded from every
-// rule (root detection, cycle detection, reachability) so they never affect the
-// real-graph semantics — exactly as serialize.ts strips them on the wire.
+// holds). Start / End are now REAL persisted nodes (not stripped), so they are
+// part of every rule: root = the start node; reachability = "can reach an end".
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
-import { START_NODE_ID, type CanvasKey, type RFEdge, type RFNode } from "@/lib/canvas/types";
+import type { CanvasKey, RFEdge, RFNode } from "@/lib/canvas/types";
 import type { UserError } from "@/lib/errors/userError";
 
 const CANVAS_LABEL: Record<CanvasKey, string> = {
@@ -17,40 +17,30 @@ const CANVAS_LABEL: Record<CanvasKey, string> = {
 };
 
 // Message copy kept byte-aligned with the SERVER (validationMapping.reasonFor):
-// the substrings "form a cycle" / "cannot reach an outcome" must match so the
-// client and the 422 path read consistently.
+// the substrings "form a cycle" / "reach an end" must match so the client and
+// the 422 path read consistently.
 export const CYCLE_MESSAGE = "is part of a cycle (rules can't form a cycle)";
-export const UNREACHABLE_OUTCOME_MESSAGE =
-  "cannot reach an outcome (every branch must end at an outcome)";
+export const UNREACHABLE_END_MESSAGE =
+  "cannot reach an end (every branch must end at an END node)";
+export const MISSING_START_MESSAGE = "missing start node";
+export const MISSING_END_MESSAGE = "missing end node";
 
 // --- helpers ---------------------------------------------------------------
 
-// Real (non-start) nodes only.
-function realNodes(nodes: RFNode[]): RFNode[] {
-  return nodes.filter((n) => n.type !== "startNode");
-}
-
-// Real edges only: drop any edge touching the start node (mirrors serialize).
-function realEdges(edges: RFEdge[]): RFEdge[] {
-  return edges.filter(
-    (e) => e.source !== START_NODE_ID && e.target !== START_NODE_ID,
-  );
-}
-
-// root = the unique real node with no incoming real edge. Mirrors the store's
-// computeRootNodeId (and backend §2.1 step 1). Null when ambiguous/empty.
-export function computeRoot(nodes: RFNode[], edges: RFEdge[]): string | null {
-  const real = realNodes(nodes);
-  if (real.length === 0) return null;
-  const hasIncoming = new Set(realEdges(edges).map((e) => e.target));
-  const roots = real.filter((n) => !hasIncoming.has(n.id));
+// root = the start node (expression-nodes-spec §3). Null when there is no start.
+export function computeRoot(nodes: RFNode[], _edges: RFEdge[]): string | null {
+  const start = nodes.find((n) => n.type === "startNode");
+  if (start) return start.id;
+  if (nodes.length === 0) return null;
+  const hasIncoming = new Set(_edges.map((e) => e.target));
+  const roots = nodes.filter((n) => !hasIncoming.has(n.id));
   return roots.length === 1 ? roots[0].id : null;
 }
 
-// Adjacency (forward) over real edges.
+// Adjacency (forward).
 function buildAdjacency(edges: RFEdge[]): Map<string, string[]> {
   const adj = new Map<string, string[]>();
-  for (const e of realEdges(edges)) {
+  for (const e of edges) {
     const list = adj.get(e.source);
     if (list) list.push(e.target);
     else adj.set(e.source, [e.target]);
@@ -60,15 +50,14 @@ function buildAdjacency(edges: RFEdge[]): Map<string, string[]> {
 
 // --- no_cycles -------------------------------------------------------------
 
-// Three-colour DFS over real edges. Returns the set of node ids that lie on a
-// back-edge cycle, or null when the graph is acyclic. (Mirrors backend
-// no_cycles.)
+// Three-colour DFS. Returns the set of node ids that lie on a back-edge cycle,
+// or null when the graph is acyclic. (Mirrors backend no_cycles.)
 export function findCycle(
   nodes: RFNode[],
   edges: RFEdge[],
 ): Set<string> | null {
   const adj = buildAdjacency(edges);
-  const ids = realNodes(nodes).map((n) => n.id);
+  const ids = nodes.map((n) => n.id);
 
   const WHITE = 0;
   const GREY = 1;
@@ -118,45 +107,42 @@ export function findCycle(
   return cyclic && onCycle.size > 0 ? onCycle : null;
 }
 
-// --- outcome_reachable -----------------------------------------------------
+// --- all_paths_reach_end ---------------------------------------------------
 
-// Replicates backend §2.1: every node reachable from the root must be able to
-// reach at least one outcome node. Returns the offending node ids. Skips
-// (returns []) when there is no single root or no real nodes.
-export function findUnreachableOutcomeNodes(
+// Replicates backend all_paths_reach_end: every node reachable from the start
+// must be able to reach at least one `end` node. Returns the offending node
+// ids. Skips (returns []) when there is no root or no nodes.
+export function findUnreachableEndNodes(
   nodes: RFNode[],
   edges: RFEdge[],
   rootNodeId?: string | null,
 ): string[] {
-  const real = realNodes(nodes);
-  if (real.length === 0) return [];
+  if (nodes.length === 0) return [];
 
   const root = rootNodeId ?? computeRoot(nodes, edges);
   if (!root) return [];
 
   const fwd = buildAdjacency(edges);
 
-  // Reverse adjacency for the reverse-BFS from outcomes.
+  // Reverse adjacency for the reverse-BFS from end nodes.
   const rev = new Map<string, string[]>();
-  for (const e of realEdges(edges)) {
+  for (const e of edges) {
     const list = rev.get(e.target);
     if (list) list.push(e.source);
     else rev.set(e.target, [e.source]);
   }
 
-  const outcomeIds = real
-    .filter((n) => n.type === "outcomeNode")
-    .map((n) => n.id);
+  const endIds = nodes.filter((n) => n.type === "endNode").map((n) => n.id);
 
-  // can_reach_outcome = reverse-BFS from all outcome nodes.
-  const canReachOutcome = new Set<string>();
-  const stackR = [...outcomeIds];
-  for (const id of outcomeIds) canReachOutcome.add(id);
+  // can_reach_end = reverse-BFS from all end nodes.
+  const canReachEnd = new Set<string>();
+  const stackR = [...endIds];
+  for (const id of endIds) canReachEnd.add(id);
   while (stackR.length > 0) {
     const cur = stackR.pop() as string;
     for (const prev of rev.get(cur) ?? []) {
-      if (!canReachOutcome.has(prev)) {
-        canReachOutcome.add(prev);
+      if (!canReachEnd.has(prev)) {
+        canReachEnd.add(prev);
         stackR.push(prev);
       }
     }
@@ -176,7 +162,7 @@ export function findUnreachableOutcomeNodes(
     }
   }
 
-  return [...reachable].filter((id) => !canReachOutcome.has(id));
+  return [...reachable].filter((id) => !canReachEnd.has(id));
 }
 
 // --- combine ---------------------------------------------------------------
@@ -186,13 +172,27 @@ export interface CanvasValidation {
   problems: string[];
 }
 
-// Validate ONE canvas. Combines no_cycles + outcome_reachable into per-node
-// errors (keyed by node id) plus human-readable problem sentences.
+// Validate ONE canvas. Combines start_present / end_present + no_cycles +
+// all_paths_reach_end into per-node errors plus human-readable problems. An
+// empty canvas (zero nodes) is valid (no start/end required).
 export function validateCanvasGraph(
   canvas: CanvasWorkingState,
 ): CanvasValidation {
   const nodeErrors: Record<string, string> = {};
   const problems: string[] = [];
+
+  if (canvas.nodes.length === 0) {
+    return { nodeErrors, problems };
+  }
+
+  const starts = canvas.nodes.filter((n) => n.type === "startNode");
+  const ends = canvas.nodes.filter((n) => n.type === "endNode");
+  if (starts.length !== 1) {
+    problems.push("the canvas needs exactly one start node");
+  }
+  if (ends.length === 0) {
+    problems.push("the canvas needs at least one end node");
+  }
 
   const cycle = findCycle(canvas.nodes, canvas.edges);
   if (cycle) {
@@ -200,17 +200,17 @@ export function validateCanvasGraph(
     problems.push("some rules form a cycle");
   }
 
-  const deadEnds = findUnreachableOutcomeNodes(
+  const deadEnds = findUnreachableEndNodes(
     canvas.nodes,
     canvas.edges,
     canvas.rootNodeId,
   );
   for (const id of deadEnds) {
     // Don't overwrite a cycle marker (a node may be both).
-    if (!nodeErrors[id]) nodeErrors[id] = UNREACHABLE_OUTCOME_MESSAGE;
+    if (!nodeErrors[id]) nodeErrors[id] = UNREACHABLE_END_MESSAGE;
   }
   if (deadEnds.length > 0) {
-    problems.push("some rules can't reach an outcome");
+    problems.push("some rules can't reach an end");
   }
 
   return { nodeErrors, problems };
@@ -246,7 +246,7 @@ export function buildClientValidationUserError(problems: string[]): UserError {
         ? problems.join(" ")
         : "The rule graph has unresolved problems.",
     howToFix:
-      "Resolve the highlighted nodes (remove cycles, connect every branch to an outcome), then save again.",
+      "Resolve the highlighted nodes (remove cycles, connect every branch to an END node), then save again.",
     retryable: false,
   };
 }

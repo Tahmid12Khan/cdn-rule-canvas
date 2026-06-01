@@ -1,9 +1,10 @@
-// Backend RuleGraph -> React Flow graph (BACKEND CONTRACT §6 ⇄ §3). Inverse of
-// serialize.ts. (Task 14)
+// Backend RuleGraph -> React Flow graph (BACKEND CONTRACT §6 ⇄
+// expression-nodes-spec §1). Inverse of serialize.ts.
 //
 // Invariant (unit test): deserialize(serialize(g)) === g for all three
-// canvases. `outcome.title` is NOT serialized (server state) — it is
-// re-resolved here from the outcomes query via outcomeTitleById.
+// canvases. The apply_outcome action's outcome title is NOT serialized (server
+// state) — it is re-resolved here from the outcomes query via outcomeTitleById
+// and cached on the expression node's data.
 import type { CanvasGraph, RuleGraph } from "@/lib/api/ruleGraph";
 import type { CanvasKey, RFEdge, RFNode } from "@/lib/canvas/types";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
@@ -13,19 +14,42 @@ export function deserializeCanvas(
   outcomeTitleById: (id: string) => string,
 ): CanvasWorkingState {
   const nodes = g.nodes.map<RFNode>((n) => {
+    const position = { x: n.position.x, y: n.position.y };
+    if (n.kind === "start") {
+      return {
+        id: n.id,
+        type: "startNode",
+        position,
+        data: { label: "Start" },
+        deletable: false,
+      };
+    }
     if (n.kind === "decision") {
       return {
         id: n.id,
         type: "decisionNode",
-        position: { x: n.position.x, y: n.position.y },
+        position,
         data: { processor: n.processor },
+      };
+    }
+    if (n.kind === "expression") {
+      // apply_outcome carries outcome_id — re-resolve a display title for it.
+      const outcomeId = n.action.outcome_id;
+      const outcomeTitle =
+        typeof outcomeId === "string" ? outcomeTitleById(outcomeId) : undefined;
+      return {
+        id: n.id,
+        type: "expressionNode",
+        position,
+        data: { action: n.action, outcomeTitle },
       };
     }
     return {
       id: n.id,
-      type: "outcomeNode",
-      position: { x: n.position.x, y: n.position.y },
-      data: { outcomeId: n.outcome_id, title: outcomeTitleById(n.outcome_id) },
+      type: "endNode",
+      position,
+      data: { label: "END" },
+      deletable: false,
     };
   });
 

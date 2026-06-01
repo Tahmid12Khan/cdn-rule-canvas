@@ -14,6 +14,8 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
     { id: "json", label: "JSON" },
     { id: "advanced", label: "Advanced", coming_soon: true },
   ],
+  // node_kind defaults to "decision" when omitted; the three expression action
+  // types are declared at the end (expression-nodes-spec §2).
   node_types: [
     {
       kind: "meta_tags",
@@ -182,6 +184,85 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           { id: "no", label: "No" },
         ],
       },
+    },
+    {
+      kind: "trim_json",
+      label: "Trim JSON",
+      category: "json",
+      applies_to: "json",
+      node_kind: "expression",
+      summary:
+        "Trims a JSON array at a path to at most N items (min(actual, length)).",
+      fields: [
+        {
+          name: "json_path",
+          label: "JSON path",
+          control: "text",
+          required: true,
+          default: "",
+          placeholder: "$.body",
+          required_message: "Enter the JSONPath to the array",
+        },
+        {
+          name: "length",
+          label: "Max length",
+          control: "number",
+          required: true,
+          default: 0,
+          placeholder: "0",
+          required_message: "Enter the maximum array length",
+        },
+      ],
+      output: { branches: [{ id: "yes", label: "Next" }] },
+    },
+    {
+      kind: "add_attribute",
+      label: "Add Attribute",
+      category: "json",
+      applies_to: "json",
+      node_kind: "expression",
+      summary:
+        "Sets (upserts) a value at a JSON path, creating missing parents; replaces if present.",
+      fields: [
+        {
+          name: "json_path",
+          label: "JSON path",
+          control: "text",
+          required: true,
+          default: "",
+          placeholder: "$.paywall_show",
+          required_message: "Enter the JSONPath to set",
+        },
+        {
+          name: "value",
+          label: "Value",
+          control: "text",
+          required: true,
+          default: "",
+          placeholder: "<html>…</html>",
+          required_message: "Enter the value to set",
+        },
+      ],
+      output: { branches: [{ id: "yes", label: "Next" }] },
+    },
+    {
+      kind: "apply_outcome",
+      label: "Apply Outcome",
+      category: "content",
+      applies_to: "all",
+      node_kind: "expression",
+      summary: "Applies a saved outcome's components to the body, then continues.",
+      fields: [
+        {
+          name: "outcome_id",
+          label: "Outcome",
+          control: "outcome_select",
+          required: true,
+          default: "",
+          required_message: "Pick an outcome to apply",
+        },
+      ],
+      output: { branches: [{ id: "yes", label: "Next" }] },
     },
   ],
 };

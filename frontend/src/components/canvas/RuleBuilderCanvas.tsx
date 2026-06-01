@@ -24,15 +24,15 @@ import { CanvasFallbackList } from "@/components/canvas/CanvasFallbackList";
 import { FullScreenToggle } from "@/components/canvas/FullScreenToggle";
 import { TemplateLibraryButton } from "@/components/canvas/TemplateLibraryButton";
 import { DecisionNode } from "@/components/canvas/nodes/DecisionNode";
-import { OutcomeNode } from "@/components/canvas/nodes/OutcomeNode";
+import { EndNode } from "@/components/canvas/nodes/EndNode";
+import { ExpressionNode } from "@/components/canvas/nodes/ExpressionNode";
 import { StartNode } from "@/components/canvas/nodes/StartNode";
-import { SubRuleNode } from "@/components/canvas/nodes/SubRuleNode";
-import { ActionNode } from "@/components/canvas/nodes/ActionNode";
 import { LabeledEdge } from "@/components/canvas/edges/LabeledEdge";
 import { autoLayout, needsLayout } from "@/lib/canvas/layout";
 import { CHIP_MIME, type ChipPayload } from "@/lib/canvas/nodeTemplates";
 import { CANVAS_KEYS, useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import {
+  END_NODE_ID,
   START_NODE_ID,
   type Branch,
   type CanvasKey,
@@ -45,9 +45,8 @@ import {
 const NODE_TYPES: NodeTypes = {
   startNode: StartNode,
   decisionNode: DecisionNode,
-  outcomeNode: OutcomeNode,
-  subRuleNode: SubRuleNode,
-  actionNode: ActionNode,
+  expressionNode: ExpressionNode,
+  endNode: EndNode,
 };
 const EDGE_TYPES: EdgeTypes = {
   labeledEdge: LabeledEdge,
@@ -115,11 +114,15 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // The start node is non-deletable: drop any remove change targeting it
-      // (belt-and-suspenders alongside node-level deletable:false + the store
-      // removeNode guard).
+      // The start + end nodes are non-deletable: drop any remove change
+      // targeting them (belt-and-suspenders alongside node-level
+      // deletable:false + the store removeNode guard).
       const filtered = changes.filter(
-        (c) => !(c.type === "remove" && c.id === START_NODE_ID),
+        (c) =>
+          !(
+            c.type === "remove" &&
+            (c.id === START_NODE_ID || c.id === END_NODE_ID)
+          ),
       );
       onNodesChange(canvasKey, filtered);
     },
@@ -176,33 +179,37 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
             }
           : {
               id: nextId("n"),
-              type: "outcomeNode",
+              type: "expressionNode",
               position,
-              data: { outcomeId: payload.outcomeId, title: payload.title },
+              data: { action: payload.action },
             };
       addNode(canvasKey, node);
     },
     [editable, screenToFlowPosition, addNode, canvasKey],
   );
 
-  // Double-click opens a decision node's editable config (edit mode).
+  // Double-click opens an editable config (edit mode) for nodes that carry a
+  // config form (decision / expression).
   const onNodeDoubleClick = useCallback(
     (_e: React.MouseEvent, node: RFLibNode) => {
-      if (node.type === "decisionNode") openNodeConfig(node.id);
+      if (node.type === "decisionNode" || node.type === "expressionNode") {
+        openNodeConfig(node.id);
+      }
     },
     [openNodeConfig],
   );
 
   // Single click opens the config/inspection drawer for any inspectable node
-  // (decision / outcome / start). In read-only mode this is the way to inspect
-  // a node's contents; the drawer renders view-only when not editing. Mutation
-  // is still gated by `editable` elsewhere, so a click here never edits.
+  // (start / decision / expression / end). In read-only mode this is the way to
+  // inspect a node's contents; the drawer renders view-only when not editing.
+  // Mutation is still gated by `editable` elsewhere, so a click here never edits.
   const onNodeClick = useCallback(
     (_e: React.MouseEvent, node: RFLibNode) => {
       if (
+        node.type === "startNode" ||
         node.type === "decisionNode" ||
-        node.type === "outcomeNode" ||
-        node.type === "startNode"
+        node.type === "expressionNode" ||
+        node.type === "endNode"
       ) {
         openNodeConfig(node.id);
       }

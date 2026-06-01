@@ -94,27 +94,43 @@ describe("NodeConfigDrawer (view-only mode)", () => {
     expect(screen.getByLabelText(/Operator/)).toBeDisabled();
   });
 
-  it("surfaces an outcome node's contents when inspected", () => {
+  it("renders the apply_outcome form (outcome dropdown) for an expression node", async () => {
     const s = useRuleBuilderStore.getState();
     s.addNode("anonymous", {
-      id: "o1",
-      type: "outcomeNode",
+      id: "a1",
+      type: "expressionNode",
       position: { x: 0, y: 0 },
       data: {
-        outcomeId: "11111111-1111-1111-1111-111111111111",
-        title: "Show Paywall",
+        action: { type: "apply_outcome", outcome_id: "" },
       },
     });
-    s.openNodeConfig("o1");
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
-    expect(screen.getByTestId("outcome-inspect")).toBeInTheDocument();
-    expect(screen.getByText("Show Paywall")).toBeInTheDocument();
+    s.openNodeConfig("a1");
+    renderWithQuery(
+      <NodeConfigDrawer
+        canvasKey="anonymous"
+        outcomes={[
+          { id: "11111111-1111-1111-1111-111111111111", title: "Show Paywall" },
+        ]}
+      />,
+    );
+    // The outcome_select control renders the supplied outcome as an option.
+    const select = (await screen.findByLabelText(/Outcome/)) as HTMLSelectElement;
+    expect(
+      Array.from(select.options).map((o) => o.textContent),
+    ).toContain("Show Paywall");
   });
 
   it("surfaces the start node's contents when inspected", () => {
+    // start node only exists once a real node is added.
     useRuleBuilderStore.getState().openNodeConfig("start");
     renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     expect(screen.getByTestId("start-inspect")).toBeInTheDocument();
+  });
+
+  it("surfaces the end node's contents when inspected", () => {
+    useRuleBuilderStore.getState().openNodeConfig("end");
+    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    expect(screen.getByTestId("end-inspect")).toBeInTheDocument();
   });
 });
 

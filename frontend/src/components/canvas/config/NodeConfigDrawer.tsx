@@ -14,20 +14,29 @@
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 
-import { GenericNodeForm } from "@/components/canvas/config/GenericNodeForm";
+import {
+  GenericNodeForm,
+  type OutcomeSelectOption,
+} from "@/components/canvas/config/GenericNodeForm";
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { CanvasKey, ProcessorConfig, RFNode } from "@/lib/canvas/types";
 
 interface NodeConfigDrawerProps {
   canvasKey: CanvasKey;
+  // The version's outcomes — options for an apply_outcome expression node's
+  // outcome_select dropdown (expression-nodes-spec §2).
+  outcomes?: OutcomeSelectOption[];
 }
 
 function sameProcessor(a: ProcessorConfig, b: ProcessorConfig): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
+export function NodeConfigDrawer({
+  canvasKey,
+  outcomes = [],
+}: NodeConfigDrawerProps) {
   const configNodeId = useRuleBuilderStore((s) => s.configNodeId);
   const nodes = useRuleBuilderStore((s) => s.canvases[canvasKey].nodes);
   const isEditing = useRuleBuilderStore((s) => s.isEditing);
@@ -35,6 +44,7 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
   const updateNodeProcessor = useRuleBuilderStore(
     (s) => s.updateNodeProcessor,
   );
+  const updateNodeAction = useRuleBuilderStore((s) => s.updateNodeAction);
   const removeNode = useRuleBuilderStore((s) => s.removeNode);
   const { specByKind } = useNodeTypes();
 
@@ -44,9 +54,17 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
   );
 
   const isDecision = node?.type === "decisionNode";
-  const isOutcome = node?.type === "outcomeNode";
+  const isExpression = node?.type === "expressionNode";
   const isStart = node?.type === "startNode";
-  const initial = isDecision ? node.data.processor : null;
+  const isEnd = node?.type === "endNode";
+  // Both decision (processor) and expression (action) use the generic
+  // manifest-driven form, keyed off the same `{ type, …fields }` config.
+  const hasForm = isDecision || isExpression;
+  const initial: ProcessorConfig | null = isDecision
+    ? node.data.processor
+    : isExpression
+      ? node.data.action
+      : null;
   const spec = initial ? specByKind(initial.type) : undefined;
 
   // View-only when the version is not in edit mode. Decision forms still load
@@ -67,9 +85,10 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
 
   const dirty =
     !readOnly &&
-    isDecision &&
+    hasForm &&
+    initial != null &&
     draft != null &&
-    !sameProcessor(draft, node.data.processor);
+    !sameProcessor(draft, initial);
 
   function close() {
     setConfirmDiscard(false);
@@ -85,8 +104,20 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
   }
 
   function onSave() {
-    if (readOnly || !isDecision || !draft || !valid) return;
-    updateNodeProcessor(canvasKey, node.id, draft);
+    if (readOnly || !node || !draft || !valid) return;
+    if (isDecision) {
+      updateNodeProcessor(canvasKey, node.id, draft);
+    } else if (isExpression) {
+      // For apply_outcome, cache the chosen outcome's title for display.
+      const outcomeId = draft.outcome_id;
+      const outcomeTitle =
+        typeof outcomeId === "string"
+          ? outcomes.find((o) => o.id === outcomeId)?.title
+          : undefined;
+      updateNodeAction(canvasKey, node.id, draft, outcomeTitle);
+    } else {
+      return;
+    }
     close();
   }
 
@@ -96,17 +127,24 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
     close();
   }
 
-  // Open for any inspectable node (decision / outcome / start).
-  const open = Boolean(configNodeId) && (isDecision || isOutcome || isStart);
+  // Open for any inspectable node (start / decision / expression / end).
+  const open =
+    Boolean(configNodeId) && (hasForm || isStart || isEnd);
 
   const title = readOnly ? "View node" : "Edit node";
   const description = isDecision
     ? readOnly
       ? "Read-only view of how this decision evaluates incoming requests."
       : "Configure how this decision evaluates incoming requests."
-    : isStart
-      ? "The entry point of this rule. Evaluation begins here."
-      : "Read-only details for this node.";
+    : isExpression
+      ? readOnly
+        ? "Read-only view of the action this node applies to the body."
+        : "Configure the action this node applies to the response body."
+      : isStart
+        ? "The entry point of this rule. Evaluation begins here."
+        : isEnd
+          ? "The terminal of this rule. The flow stops here."
+          : "Read-only details for this node.";
 
   return (
     <Dialog.Root
@@ -137,7 +175,7 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
             <Dialog.Title className="text-base font-semibold text-nav">
               {title}
             </Dialog.Title>
-            {!readOnly && isDecision && (
+            {!readOnly && hasForm && (
               <button
                 type="button"
                 onClick={onDelete}
@@ -154,49 +192,30 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
           </Dialog.Description>
 
           <div className="flex-1 overflow-y-auto px-5 py-4">
-            {/* Decision: render the generic manifest-driven form (disabled in
-                view mode). key on the node id so the form remounts (fresh state)
-                when a different node is opened. */}
-            {isDecision && initial && spec && (
+            {/* Decision (processor) / Expression (action): the SAME generic
+                manifest-driven form (disabled in view mode). key on the node id
+                so the form remounts (fresh state) when a different node opens. */}
+            {hasForm && initial && spec && (
               <GenericNodeForm
                 key={configNodeId ?? "node"}
                 spec={spec}
                 initial={initial}
                 disabled={readOnly}
+                outcomes={outcomes}
                 onChange={(d, v) => {
                   setDraft(d);
                   setValid(v);
                 }}
               />
             )}
-            {isDecision && initial && !spec && (
+            {hasForm && initial && !spec && (
               <p className="text-sm text-danger" data-testid="unknown-kind">
                 Unknown node type “{initial.type}”. This node type is not
                 available in the current node-type manifest.
               </p>
             )}
 
-            {/* Outcome: no processor form — show its label / linked outcome. */}
-            {isOutcome && node.type === "outcomeNode" && (
-              <dl className="space-y-3" data-testid="outcome-inspect">
-                <div>
-                  <dt className="mb-1 text-sm font-medium text-nav">Outcome</dt>
-                  <dd className="text-sm text-status-prevFg">
-                    {node.data.title || "Untitled outcome"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="mb-1 text-sm font-medium text-nav">
-                    Outcome ID
-                  </dt>
-                  <dd className="break-all font-mono text-xs text-status-prevFg">
-                    {node.data.outcomeId}
-                  </dd>
-                </div>
-              </dl>
-            )}
-
-            {/* Start: frontend-only entry marker. */}
+            {/* Start: persisted entry marker. */}
             {isStart && (
               <dl className="space-y-3" data-testid="start-inspect">
                 <div>
@@ -205,8 +224,23 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
                 </div>
                 <div>
                   <dd className="text-sm text-status-prevFg">
-                    The rule begins evaluating from the first decision connected
-                    to this entry point.
+                    The rule begins evaluating from the first node connected to
+                    this entry point.
+                  </dd>
+                </div>
+              </dl>
+            )}
+
+            {/* End: terminal node. */}
+            {isEnd && (
+              <dl className="space-y-3" data-testid="end-inspect">
+                <div>
+                  <dt className="mb-1 text-sm font-medium text-nav">Node</dt>
+                  <dd className="text-sm text-status-prevFg">END</dd>
+                </div>
+                <div>
+                  <dd className="text-sm text-status-prevFg">
+                    The flow stops here. Every branch should lead to an END node.
                   </dd>
                 </div>
               </dl>
@@ -231,7 +265,7 @@ export function NodeConfigDrawer({ canvasKey }: NodeConfigDrawerProps) {
                 >
                   Cancel
                 </button>
-                {isDecision && (
+                {hasForm && (
                   <button
                     type="button"
                     onClick={onSave}

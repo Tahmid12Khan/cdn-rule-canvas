@@ -50,16 +50,22 @@ export function mapValidationErrors(
 // --- descriptive validation UserError -------------------------------------
 
 // Names a node for the descriptive error banner. The node-type manifest is not
-// available in this pure path, so a decision node is named by its processor
-// `type` (the canonical snake_case kind) — generic, with ZERO per-type code.
+// available in this pure path, so a decision/expression node is named by its
+// config `type` (the canonical snake_case kind) — generic, with ZERO per-type
+// code.
 function nodeLabel(node: RFNode | undefined): string {
   if (!node) return "a node";
   if (node.type === "decisionNode") {
     return node.data.processor.type || "Decision";
   }
-  if (node.type === "outcomeNode") {
-    return node.data.title?.trim() ? node.data.title : "Outcome";
+  if (node.type === "expressionNode") {
+    if (node.data.action.type === "apply_outcome" && node.data.outcomeTitle) {
+      return node.data.outcomeTitle;
+    }
+    return node.data.action.type || "Action";
   }
+  if (node.type === "startNode") return "Start";
+  if (node.type === "endNode") return "END";
   return "a node";
 }
 
@@ -76,20 +82,30 @@ function findNode(
   return null;
 }
 
-// Derive a short human reason from the backend rule_id / msg.
+// Derive a short human reason from the backend rule_id / msg
+// (expression-nodes-spec §3 rule ids).
 function reasonFor(detail: ApiErrorDetail): string {
   switch (detail.rule_id) {
-    case "outcome_ref_exists":
+    case "apply_outcome_ref_exists":
       return "reference outcomes that don't exist in this version";
     case "no_cycles":
       return "form a cycle (a rule can't loop back on itself)";
-    case "outcome_reachable":
-      return "have no path to an outcome (every branch must end at an outcome)";
+    case "all_paths_reach_end":
+      return "have no path to an END (every branch must end at an END node)";
     case "branch_unique":
       return "have duplicate branches from the same node";
-    case "outcome_terminal":
-    case "outcome_branch_forbidden":
-      return "have outgoing connections from a terminal outcome";
+    case "end_terminal":
+    case "edge_source_kind":
+      return "have outgoing connections from a terminal END node";
+    case "start_present":
+      return "need exactly one start node";
+    case "end_present":
+      return "need at least one END node";
+    case "start_no_incoming":
+      return "have a connection into the start node";
+    case "start_single_out":
+    case "expression_single_out":
+      return "must have exactly one outgoing connection";
     default:
       // Fall back to the backend message, lower-cased to read as a clause.
       return detail.msg ? detail.msg.replace(/\.$/, "") : "are invalid";

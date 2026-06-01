@@ -91,19 +91,23 @@ function DecisionNodeImpl({ id, data, selected }: NodeProps<DecisionNodeData>) {
           position={Position.Bottom}
           className="!h-2.5 !w-2.5 !border-2 !border-white !bg-node-no"
         />
-      </div>
 
-      {/* one-line condition summary BELOW the diamond, rendered LINEARLY: the
-          operator as its server-defined symbol + the (truncated) value. */}
-      {summary && (
-        <span
-          className="mt-1 max-w-[150px] truncate font-mono text-[10px] font-medium leading-tight text-fg-muted"
-          title={summary}
-          data-testid="decision-summary"
-        >
-          {summary}
-        </span>
-      )}
+        {/* one-line condition summary CENTERED IN FRONT of the diamond: the
+            operator as its server-defined symbol + the (truncated) value.
+            z-30 keeps it above the diamond body; pointer-events-none so it
+            never blocks dragging or the handles underneath. */}
+        {summary && (
+          <span className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center px-3 text-center">
+            <span
+              className="max-w-[64px] truncate font-mono text-[10px] font-semibold leading-tight text-white drop-shadow"
+              title={summary}
+              data-testid="decision-summary"
+            >
+              {summary}
+            </span>
+          </span>
+        )}
+      </div>
 
       {hasError && (
         <span className="mt-1 max-w-[140px] truncate text-[10px] font-medium text-danger">

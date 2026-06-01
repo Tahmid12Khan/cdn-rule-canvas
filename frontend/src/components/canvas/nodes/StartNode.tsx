@@ -1,10 +1,10 @@
 "use client";
 
-// Start node (Phase 1, Task C): a frontend-only visual entry marker. Black
-// rectangle with white text in BOTH themes (fixed node-start hex, mirrors
-// OutcomeNode). It has ONLY a SOURCE handle (bottom) — no target handle — so
-// nothing can connect INTO it. Never persisted (stripped on serialize) and
-// non-deletable (guarded in store + canvas). It never affects root detection.
+// Start node (expression-nodes-spec §1): the PERSISTED entry marker. Black
+// rectangle with white text in BOTH themes (fixed node-start hex). It has ONLY
+// a SOURCE handle (bottom) — no target handle — so nothing can connect INTO it
+// (start_no_incoming). Auto-injected (one per non-empty canvas), non-deletable,
+// and the graph root. Persisted on the wire as a `start` node.
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 
@@ -33,7 +33,7 @@ function StartNodeImpl({ id, data, selected }: NodeProps<StartNodeData>) {
     >
       <span className="flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-white">
         {/* Teal entry marker differentiates the start node from the otherwise
-            identically-black Outcome node (LOW-6). Bg/text stay black/white. */}
+            identically-black terminal node (LOW-6). Bg/text stay black/white. */}
         <span aria-hidden className="text-[10px] leading-none text-brand-400">
           ▶
         </span>

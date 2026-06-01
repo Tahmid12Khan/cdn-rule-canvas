@@ -8,7 +8,15 @@ import { apiGet } from "@/lib/api/client";
 // zero frontend changes — so this schema is intentionally permissive about the
 // set of kinds/categories/fields (it validates SHAPE, not specific values).
 
-export const NodeFieldControl = z.enum(["select", "text", "number"]);
+// `outcome_select` (expression-nodes-spec §2) is a dynamic dropdown of the
+// version's outcomes; its options are supplied by the client/validator, NOT the
+// manifest.
+export const NodeFieldControl = z.enum([
+  "select",
+  "text",
+  "number",
+  "outcome_select",
+]);
 export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 
 export const NodeFieldOption = z.object({
@@ -45,12 +53,19 @@ export type NodeBranch = z.infer<typeof NodeBranch>;
 export const NodeAppliesTo = z.enum(["all", "html", "json"]);
 export type NodeAppliesTo = z.infer<typeof NodeAppliesTo>;
 
+// `node_kind` (expression-nodes-spec §2) drives which RF node type the frontend
+// creates on drop and which validation path applies. Defaults to "decision"
+// when omitted (backend `#[serde(default)]`).
+export const NodeKind = z.enum(["decision", "expression"]);
+export type NodeKind = z.infer<typeof NodeKind>;
+
 export const NodeTypeSpec = z.object({
   kind: z.string(),
   label: z.string(),
   category: z.string(),
   summary: z.string(),
   applies_to: NodeAppliesTo.optional(),
+  node_kind: NodeKind.optional(),
   fields: z.array(NodeFieldSpec),
   output: z.object({ branches: z.array(NodeBranch) }),
 });

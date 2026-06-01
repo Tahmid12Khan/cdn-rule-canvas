@@ -7,45 +7,46 @@ export type CanvasKey = "anonymous" | "registered" | "customer";
 // canonical node-type kind) plus an open map of snake_case config fields. The
 // node-type manifest (GET /api/v1/node-types) is the runtime contract — there
 // is no per-type union, so a new node type needs ZERO frontend change. Round-
-// trips the SAME wire JSON the backend/proxy exchange.
+// trips the SAME wire JSON the backend/proxy exchange. REUSED for the expression
+// node `action` (same `{ type, …fields }` shape — expression-nodes-spec §1).
 export interface ProcessorConfig {
   type: string;
   [field: string]: unknown;
 }
 
 // ---- node data payloads (what lives in RF node.data — serializable) ----
-export interface DecisionNodeData {
-  processor: ProcessorConfig;
-}
-// title cached for label; outcomeId is canonical
-export interface OutcomeNodeData {
-  outcomeId: string;
-  title: string;
-}
-// Post-MVP categories (rendered, but only decision/outcome are creatable in MVP):
-export interface SubRuleNodeData {
-  label: string;
-}
-export interface ActionNodeData {
-  label: string;
-}
-// Frontend-only visual entry marker (Phase 1, Task C). Never persisted: the
-// backend RuleGraph allows only decision/outcome nodes, and the graph entry is
-// DERIVED via computeRootNodeId. The start node is injected on empty/seed and
-// stripped on serialize, so it never affects root detection or the wire format.
+
+// Entry marker. Exactly one per non-empty canvas; PERSISTED on the wire as a
+// `start` node (expression-nodes-spec §1). No incoming edges; one outgoing edge.
 export interface StartNodeData {
   label: string;
 }
+// Branches yes/no via a processor. UNCHANGED.
+export interface DecisionNodeData {
+  processor: ProcessorConfig;
+}
+// Performs one body action and passes through. `action` is the generic
+// ProcessorConfig (`{ type, …fields }`). For `apply_outcome` the action carries
+// `outcome_id`; `outcomeTitle` is a denormalized display cache (NOT persisted),
+// re-resolved from the outcomes query on deserialize.
+export interface ExpressionNodeData {
+  action: ProcessorConfig;
+  outcomeTitle?: string;
+}
+// Terminal. Stops the flow. Zero outgoing edges. ≥1 per non-empty canvas.
+export interface EndNodeData {
+  label: string;
+}
 
-// Fixed id of the single injected start node (one per canvas).
+// Fixed ids of the auto-injected start + end nodes (one each per canvas).
 export const START_NODE_ID = "start";
+export const END_NODE_ID = "end";
 
 export type RFNode =
+  | Node<StartNodeData, "startNode">
   | Node<DecisionNodeData, "decisionNode">
-  | Node<OutcomeNodeData, "outcomeNode">
-  | Node<SubRuleNodeData, "subRuleNode">
-  | Node<ActionNodeData, "actionNode">
-  | Node<StartNodeData, "startNode">;
+  | Node<ExpressionNodeData, "expressionNode">
+  | Node<EndNodeData, "endNode">;
 
 // edge.data carries the YES/NO branch for the LabeledEdge renderer
 export type Branch = "yes" | "no";

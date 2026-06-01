@@ -24,9 +24,12 @@ const graph: RuleGraph = {
         position: { x: 0, y: 0 },
       },
       {
-        kind: "outcome",
-        id: "n_out",
-        outcome_id: "33333333-3333-3333-3333-333333333333",
+        kind: "expression",
+        id: "n_act",
+        action: {
+          type: "apply_outcome",
+          outcome_id: "33333333-3333-3333-3333-333333333333",
+        },
         position: { x: 100, y: 0 },
       },
     ],
@@ -34,7 +37,7 @@ const graph: RuleGraph = {
       {
         id: "e1",
         source_node_id: "n_meta",
-        target_node_id: "n_out",
+        target_node_id: "n_act",
         branch: "yes",
       },
     ],
@@ -50,7 +53,7 @@ describe("mapValidationErrors", () => {
         {
           loc: "rule_graph.anonymous.nodes[0]",
           msg: "outcome ref missing",
-          rule_id: "outcome_ref_exists",
+          rule_id: "apply_outcome_ref_exists",
         },
       ],
       graph,
@@ -105,10 +108,16 @@ const storeCanvases: Record<CanvasKey, CanvasWorkingState> = {
         },
       },
       {
-        id: "n_out",
-        type: "outcomeNode",
+        id: "n_act",
+        type: "expressionNode",
         position: { x: 100, y: 0 },
-        data: { outcomeId: "33333333-3333-3333-3333-333333333333", title: "Show Content" },
+        data: {
+          action: {
+            type: "apply_outcome",
+            outcome_id: "33333333-3333-3333-3333-333333333333",
+          },
+          outcomeTitle: "Show Content",
+        },
       },
     ],
     "n_meta",
@@ -124,12 +133,12 @@ describe("buildValidationUserError", () => {
         {
           loc: "rule_graph.anonymous.nodes[0]",
           msg: "outcome ref missing",
-          rule_id: "outcome_ref_exists",
+          rule_id: "apply_outcome_ref_exists",
         },
         {
           loc: "rule_graph.anonymous.nodes[1]",
           msg: "outcome ref missing",
-          rule_id: "outcome_ref_exists",
+          rule_id: "apply_outcome_ref_exists",
         },
       ],
       graph,
@@ -138,7 +147,7 @@ describe("buildValidationUserError", () => {
     expect(err.title).toBe("2 rule nodes need attention");
     expect(err.why).toContain("Anonymous canvas");
     // Decision nodes are named by their processor kind (manifest unavailable
-    // in the pure error-mapping path).
+    // in the pure error-mapping path); apply_outcome by its resolved title.
     expect(err.why).toContain("'meta_tags'");
     expect(err.why).toContain("'Show Content'");
     expect(err.why).toContain("don't exist in this version");
@@ -152,7 +161,7 @@ describe("buildValidationUserError", () => {
         {
           loc: "rule_graph.anonymous.nodes[0]",
           msg: "outcome ref missing",
-          rule_id: "outcome_ref_exists",
+          rule_id: "apply_outcome_ref_exists",
         },
       ],
       graph,
