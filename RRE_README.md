@@ -10,6 +10,19 @@ build rule graphs in a web admin; a high-throughput proxy evaluates them against
 live traffic (using the zen JDM engine) and rewrites the upstream response —
 paywalls, registration walls, content truncation, and more.
 
+## Rules engine (zen)
+
+RRE does not implement its own rules engine. All rule evaluation is delegated to
+**zen**, the open-source GoRules Business Rules Engine, whose source lives in this
+same repository under `core/*` (and is documented by the main
+[`README.md`](./README.md)).
+
+- Upstream project: **https://github.com/gorules/zen**
+- The `proxy/` crate translates each canvas `rule_graph` into a zen JDM
+  `DecisionContent`, then runs it through `zen_engine::DecisionEngine` —
+  see [`docs/architecture.md`](docs/architecture.md) and
+  [`CONTRACTS.md`](./CONTRACTS.md).
+
 ## Quick start (one command)
 
 ```bash

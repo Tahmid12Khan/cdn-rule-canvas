@@ -9,6 +9,11 @@ ZEN Engine is a cross-platform, Open-Source Business Rules Engine (BRE). It is w
 bindings for **NodeJS**, **Python** and **Go**. ZEN Engine allows to load and
 execute [JSON Decision Model (JDM)](https://docs.gorules.io/reference/json-decision-model-jdm) from JSON files.
 
+> **Source:** the engine in this repository (`core/*`) comes from the upstream
+> GoRules project — **https://github.com/gorules/zen**. The `backend/ proxy/
+> frontend/ infra/` directories add the **RRE** application built on top of it
+> (see [`RRE_README.md`](./RRE_README.md)).
+
 <img width="800" alt="Open-Source Rules Engine" src="https://gorules.io/images/jdm-editor.gif">
 
 An open-source React editor is available on our [JDM Editor](https://github.com/gorules/jdm-editor) repo.
