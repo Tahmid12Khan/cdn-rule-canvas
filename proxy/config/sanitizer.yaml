@@ -1,0 +1,59 @@
+# ammonia allow-list applied to component-authored html_body before injection.
+# tags: permitted element names. attributes: per-tag permitted attribute names
+# ("*" applies to all tags). url_schemes: permitted href/src schemes.
+tags:
+  - a
+  - b
+  - blockquote
+  - br
+  - button
+  - div
+  - em
+  - h1
+  - h2
+  - h3
+  - h4
+  - h5
+  - h6
+  - hr
+  - i
+  - img
+  - li
+  - ol
+  - p
+  - section
+  - span
+  - strong
+  - sub
+  - sup
+  - table
+  - tbody
+  - td
+  - th
+  - thead
+  - tr
+  - ul
+
+attributes:
+  "*":
+    - class
+    - id
+    - role
+    - aria-label
+    - aria-hidden
+    - data-rre
+  a:
+    - href
+    - target
+    # `rel` is managed by ammonia's link_rel (forces rel="noopener noreferrer");
+    # allowlisting it here would trip an internal ammonia assertion.
+  img:
+    - src
+    - alt
+    - width
+    - height
+
+url_schemes:
+  - http
+  - https
+  - mailto

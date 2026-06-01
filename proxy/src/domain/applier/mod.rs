@@ -1,0 +1,60 @@
+//! The applier: turns an outcome's components into HTML modifications. Every
+//! renderer is PURE and IDEMPOTENT — `render(render(html)) == render(html)`.
+//!
+//! `mod.rs` owns the shared `ComponentRenderer` trait + result/error types; the
+//! orchestrator dispatches components to renderers and runs them in order.
+
+pub mod content_truncation;
+pub mod html_injection;
+pub mod html_sanitizer;
+pub mod orchestrator;
+pub mod placement_popup;
+pub mod placement_sticky_footer;
+
+use crate::infra::backend_client::ActiveComponent;
+
+/// Result of applying an outcome to a body.
+pub struct ModificationResult {
+    pub html: String,
+    pub applied: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error("malformed html")]
+    Html,
+    #[error("selector rejected")]
+    Selector,
+}
+
+/// One component renderer. Pure + idempotent.
+pub trait ComponentRenderer {
+    fn render(
+        &self,
+        html: &str,
+        component: &ActiveComponent,
+        sanitizer: &ammonia::Builder<'static>,
+    ) -> Result<String, ApplyError>;
+}
+
+/// Max length of a user-authored CSS selector (selector-injection guard).
+pub const MAX_SELECTOR_LEN: usize = 200;
+
+/// Validate an untrusted CSS selector: length cap + character whitelist.
+/// Returns `Err(ApplyError::Selector)` on violation (component is then skipped).
+pub fn validate_selector(selector: &str) -> Result<(), ApplyError> {
+    if selector.is_empty() || selector.len() > MAX_SELECTOR_LEN {
+        return Err(ApplyError::Selector);
+    }
+    let allowed = |c: char| {
+        c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                '_' | '-' | '[' | ']' | '=' | '"' | '\'' | '.' | '#' | ':' | ' ' | ',' | '>'
+            )
+    };
+    if !selector.chars().all(allowed) {
+        return Err(ApplyError::Selector);
+    }
+    Ok(())
+}

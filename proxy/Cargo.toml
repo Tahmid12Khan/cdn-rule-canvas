@@ -1,0 +1,68 @@
+# Standalone crate: the empty [workspace] table detaches this crate from the
+# zen root workspace so it can declare its own dependency tree and edition.
+[workspace]
+
+[package]
+name = "rre-proxy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# zen via PATH (mirrors playground/Cargo.toml). zen-types is re-exported through
+# zen_engine::model::* — do NOT add a direct zen-types path dep.
+zen-engine = { path = "../core/engine" }
+zen-expression = { path = "../core/expression" }
+
+# async runtime / web
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "signal"] }
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+hyper = { version = "1", features = ["full"] }
+http = "1"
+bytes = "1"
+
+# http client (one shared instance in AppState). NO `gzip` feature — the proxy
+# controls encoding via infra::encoding so it can modify gzipped bodies; reqwest
+# auto-decompression would strip the content-encoding header and bypass that.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# serde / config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+dotenvy = "0.15"
+envy = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# errors
+thiserror = "1"
+anyhow = "1"
+
+# logging / observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.15", default-features = false }
+
+# caches
+moka = { version = "0.12", features = ["sync", "future"] }
+
+# HTML parse / sanitize / transform
+scraper = "0.20"
+lol_html = "1"
+ammonia = "4"
+
+# encoding
+flate2 = "1"
+
+# glob matching for feature_map
+globset = "0.4"
+
+# regex matching for the article-url processor (linear-time engine, no ReDoS)
+regex = "1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "time"] }

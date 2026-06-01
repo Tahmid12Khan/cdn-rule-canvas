@@ -1,0 +1,6 @@
+# Feature map: (host, path glob) -> feature_id. Matched in order; first hit wins.
+# MVP: route EVERY localhost path to the dn-article feature so any URL exercises
+# the demo rules (default-serve the article page).
+- host: "localhost:9000"
+  path_glob: "/**"
+  feature_id: "dn-article"
