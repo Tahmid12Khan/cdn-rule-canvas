@@ -253,6 +253,121 @@ byte-identical (minus `ToSchema`).
 
 ---
 
+## v2 — revisions (FROZEN; supersede v1 where they conflict)
+
+Second batch of changes. `expression` is the new name for what v1 called
+`outcome`. Mirror rule still applies (backend `rule_graph.rs` ↔ proxy `graph.rs`
+byte-identical minus `ToSchema`).
+
+### v2.1 — "matched" now requires the body to ACTUALLY CHANGE
+
+Root cause of the `x-rre-feature-dn-article: true` bug on JSON: dn-article's
+`apply_outcome` references an HTML outcome whose components are no-ops on a JSON
+body (`json_apply` skips non-JSON component types → `changed = false`), yet v1
+marked the feature on "≥1 expression node traversed" regardless. dn-article also
+has an EMPTY `json_selector` (= "always apply"), so the selector gate can't stop
+it. Fix:
+
+- A feature is marked — `x-rre-feature-<feature_id>: true` header **and** a
+  `feature_expressions` entry — ONLY when its canvas actually CHANGED the body
+  (`applied == true`), in BOTH `apply_features_json` and `apply_features_html`.
+  Gate `matched.push(...)` on `applied`.
+- The applicability selector gate (`html_selector` for HTML responses /
+  `json_selector` for JSON responses; empty/absent = apply, malformed = fail
+  open) is UNCHANGED and still runs first. There is **no** "global" selector in
+  the schema — do NOT invent one.
+- `build_entry` semantics are unchanged (≥1 traversed → `Some`); the forwarder
+  wraps it in `if applied`. The `/__rre/eval` `summary` is NOT applied-gated
+  (it's an authoring preview of what the canvas does).
+
+Result: dn-article → marked only on HTML; dn-json-article → marked only on JSON.
+
+### v2.2 — rename + restructure to `feature_expressions`
+
+- Top-level key renamed: `rre.features_matched` → `rre.feature_expressions`
+  (JSON body) and `window.rre.features_matched` → `window.rre.feature_expressions`
+  (HTML `<script>`). The header stays `x-rre-feature-<feature_id>`.
+- Per-feature entry: replace the parallel `outcome_ids` + `outcome_labels`
+  arrays with a SINGLE `expressions` array of objects. Rename every "outcome"
+  identifier to "expression" (`expensive_nodes` items too).
+
+New shape — identical for JSON body, HTML window, and the eval `summary`:
+
+```jsonc
+{
+  "feature_expressions": {
+    "<feature_id>": {
+      "expressions": [                                  // last-10 traversed, in order
+        { "expression_id": "t_body", "expression_label": "trim_json",
+          "custom_expression_label": "", "expression_time_in_ms": "0.02" }
+      ],
+      "time_took": "1.29",                              // d.dd string (unchanged)
+      "expensive_nodes": [                              // top-3 by time DESC, SAME object shape
+        { "expression_id": "t_body", "expression_label": "trim_json",
+          "custom_expression_label": "", "expression_time_in_ms": "0.02" }
+      ]
+    }
+  }
+}
+```
+
+- `expression_id` = canvas node id. `expression_label` = the action kind string
+  (proxy has no manifest at runtime → fieldless fallback = raw kind, e.g.
+  `trim_json`, `apply_outcome`). `expression_time_in_ms` / `time_took` are still
+  `d.dd` STRINGS (§3). `custom_expression_label` is the node's `custom_label`
+  (v2.3), `""` when unset.
+- `NodeTiming` gains `custom_label` so the forwarder can carry it through.
+- `FeatureEntry` becomes `{ expressions: Vec<Expression>, time_took,
+  expensive_nodes: Vec<Expression> }`; the old `ExpensiveNode` collapses into the
+  one `Expression` struct (it now carries time too).
+
+### v2.3 — custom expression name (new schema field + dual validation)
+
+- `rule_graph` `Node::Expression` gains
+  `custom_label: Option<String>` (`#[serde(default, skip_serializing_if = "Option::is_none")]`).
+  Backend `rule_graph.rs` and proxy `graph.rs` stay byte-identical (minus
+  `ToSchema`). Update `CONTRACTS.md` §6.
+- Validation — IDENTICAL rule in BOTH frontend (zod) and backend
+  (`rule_graph_service`): an empty/absent value is VALID (default = no custom
+  name); a non-empty value MUST be snake_case matching
+  `^[a-z0-9]+(_[a-z0-9]+)*$` (lowercase alphanumerics in single-underscore
+  segments; no leading/trailing/double underscore, no uppercase, no spaces).
+  - Backend: validate each Expression node; on failure push
+    `ValidationDetail { rule_id: "expression_custom_label_invalid",
+    loc: "<canvas>.nodes[<node_id>].custom_label", message }`. No new crate —
+    manual segment check (split on `_`; every segment non-empty and all bytes in
+    `a-z`/`0-9`).
+  - Frontend: zod refine on the expression node config form; on failure show the
+    message inline: **"Custom name must be snake_case (lowercase letters,
+    digits, single underscores) or left empty."**
+- Proxy reads `custom_label` off the canvas Expression node and emits it as
+  `custom_expression_label` ("" when `None`/empty).
+
+### v2.4 — rename UI label "Apply Outcome" → "Apply"
+
+- `backend/config/node_types.json`: the `apply_outcome` node-type `label`
+  changes from "Apply Outcome" to **"Apply"**.
+- Update any frontend fixture / hard-coded "Apply Outcome" display string.
+- DO NOT change the kind `apply_outcome` (serde discriminator) anywhere — label
+  only.
+
+### v2 verification (live E2E, after the stack picks up new binaries)
+
+- JSON `curl -s -D - http://localhost:9000/proxy/v2/content/2-1-1997318`:
+  - header `x-rre-feature-dn-json-article: true` present; `x-rre-feature-dn-article`
+    **ABSENT** (no-op on JSON).
+  - body `rre.feature_expressions["dn-json-article"].expressions` =
+    `[{expression_id:"t_body",…}, {expression_id:"a_pw",…}]` with
+    `custom_expression_label` + `expression_time_in_ms` (`d.dd`); `expensive_nodes`
+    top-3 DESC; no `dn-article` key.
+- HTML `curl -s http://localhost:9000/article.html`: `x-rre-feature-dn-article: true`;
+  `x-rre-feature-dn-json-article` ABSENT; `<script>window.rre.feature_expressions=…</script>`.
+- A custom name with uppercase/space → backend 422 with
+  `expression_custom_label_invalid` and the frontend form shows the inline error;
+  empty custom name saves fine.
+
+---
+
 ## Source request (verbatim, for disambiguation)
 
 > in the headers, add x-rre-feature-{feature_name}: true for all features that it
