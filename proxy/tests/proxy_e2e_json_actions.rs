@@ -161,3 +161,117 @@ async fn non_matching_api_passes_through() {
     assert_eq!(v["body"], json!(["p1", "p2", "p3"]));
     assert!(v.get("paywall_show").is_none());
 }
+
+/// Like `run`, but returns the full `reqwest::Response` so headers can be
+/// inspected (spec §1 match-marker header) alongside the body.
+async fn run_full(upstream_json: &str, upstream_path: &str) -> reqwest::Response {
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(upstream_path.to_string()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(upstream_json.as_bytes(), "application/json; charset=utf-8"),
+        )
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
+
+    let base = spawn(&upstream.uri(), &backend.uri()).await;
+    reqwest::Client::new()
+        .get(format!("{base}{upstream_path}"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// Spec §1/§2: a matched feature stamps `x-rre-feature-<id>: true` and injects
+/// `body.rre.features_matched[<id>]` with the spec §2 shape (parallel
+/// outcome_ids/labels, `time_took` as a `d.dd` string, expensive_nodes top-3).
+#[tokio::test]
+async fn matched_feature_injects_header_and_features_matched() {
+    let res = run_full(
+        r#"{"api":"dn-article","body":["p1","p2","p3"]}"#,
+        "/article/3",
+    )
+    .await;
+
+    // §1: match-marker header.
+    assert_eq!(
+        res.headers()
+            .get(format!("x-rre-feature-{FEATURE}"))
+            .and_then(|v| v.to_str().ok()),
+        Some("true"),
+    );
+
+    let body = res.text().await.unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
+    let entry = &v["rre"]["features_matched"][FEATURE];
+
+    // The matched path traversed t_body then a_pw (parallel arrays, in order).
+    assert_eq!(entry["outcome_ids"], json!(["t_body", "a_pw"]));
+    assert_eq!(
+        entry["outcome_labels"],
+        json!(["trim_json", "add_attribute"])
+    );
+
+    // §3: time_took is a STRING formatted `d.dd` (two decimals).
+    let time_took = entry["time_took"].as_str().expect("time_took is a string");
+    assert!(
+        is_d_dd(time_took),
+        "time_took should be d.dd, got {time_took:?}"
+    );
+
+    // §2: expensive_nodes is the top-3 (here 2) expression nodes, DESC by time,
+    // each a `d.dd` string.
+    let expensive = entry["expensive_nodes"].as_array().unwrap();
+    assert_eq!(expensive.len(), 2, "two expression nodes -> two expensive");
+    let mut prev = f64::INFINITY;
+    for n in expensive {
+        assert!(n["outcome_id"].is_string());
+        assert!(n["outcome_label"].is_string());
+        let t = n["outcome_time_in_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "outcome_time_in_ms should be d.dd, got {t:?}");
+        let parsed: f64 = t.parse().unwrap();
+        assert!(parsed <= prev, "expensive_nodes must be DESC by time");
+        prev = parsed;
+    }
+
+    // The actual body transform is unchanged.
+    assert_eq!(v["body"], json!([]));
+    assert_eq!(v["paywall_show"], json!("<html>paywall_showed</html>"));
+}
+
+/// Spec §1/§2: a non-matching feature gets NO header and NO `rre` key.
+#[tokio::test]
+async fn non_matching_feature_omits_header_and_rre() {
+    let res = run_full(r#"{"api":"other","body":["p1","p2","p3"]}"#, "/article/4").await;
+    assert!(
+        res.headers()
+            .get(format!("x-rre-feature-{FEATURE}"))
+            .is_none(),
+        "non-matching feature must not stamp a marker header"
+    );
+    let body = res.text().await.unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert!(v.get("rre").is_none(), "no rre key when nothing matched");
+}
+
+/// A value is `d.dd`: digits, a dot, exactly two trailing digits.
+fn is_d_dd(s: &str) -> bool {
+    match s.split_once('.') {
+        Some((int_part, frac)) => {
+            !int_part.is_empty()
+                && int_part.chars().all(|c| c.is_ascii_digit())
+                && frac.len() == 2
+                && frac.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
+}

@@ -335,6 +335,112 @@ async fn json_journey_replays_body_mutations() {
     assert_eq!(journey[4]["body_after"]["body"], json!([]));
 }
 
+/// Spec §5/§8: every journey step carries a `time_ms` `d.dd` string (start /
+/// decision / end == "0.00") and the response carries a `summary` built exactly
+/// like one feature's `features_matched` entry for the canvas under test.
+#[tokio::test]
+async fn json_eval_has_summary_and_per_step_time() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": json_canvas(),
+        "context": {
+            "content_kind": "json",
+            "response_json": { "api": "dn-article", "body": [1, 2, 3] }
+        }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+
+    // Every journey step has a `time_ms` formatted `d.dd`.
+    let journey = v["journey"].as_array().unwrap();
+    for step in journey {
+        let t = step["time_ms"].as_str().expect("time_ms is a string");
+        assert!(is_d_dd(t), "journey time_ms should be d.dd, got {t:?}");
+    }
+    // Non-expression steps (start / decision / end) are exactly "0.00".
+    for step in journey {
+        if step["kind"] != "expression" {
+            assert_eq!(
+                step["time_ms"],
+                json!("0.00"),
+                "non-expression step: {step}"
+            );
+        }
+    }
+
+    // Summary: built like a feature entry.
+    let summary = &v["summary"];
+    assert_eq!(summary["outcome_ids"], json!(["t_body", "a_pw"]));
+    assert_eq!(
+        summary["outcome_labels"],
+        json!(["trim_json", "add_attribute"])
+    );
+    let time_took = summary["time_took"].as_str().expect("time_took string");
+    assert!(is_d_dd(time_took), "time_took d.dd, got {time_took:?}");
+
+    let expensive = summary["expensive_nodes"].as_array().unwrap();
+    assert_eq!(expensive.len(), 2, "two expression nodes");
+    let mut prev = f64::INFINITY;
+    for n in expensive {
+        let t = n["outcome_time_in_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "outcome_time_in_ms d.dd, got {t:?}");
+        let parsed: f64 = t.parse().unwrap();
+        assert!(parsed <= prev, "expensive_nodes DESC by time");
+        prev = parsed;
+    }
+}
+
+/// Spec §5/§8: a path with no expression node (the `no` branch) yields NO
+/// `summary` (omitted) — mirroring an unmatched feature.
+#[tokio::test]
+async fn json_eval_no_match_omits_summary() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": json_canvas(),
+        "context": {
+            "content_kind": "json",
+            "response_json": { "api": "other", "body": [1, 2, 3] }
+        }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+    assert!(
+        v.get("summary").is_none(),
+        "no summary when no expression matched"
+    );
+}
+
+/// A value is `d.dd`: digits, a dot, exactly two trailing digits.
+fn is_d_dd(s: &str) -> bool {
+    match s.split_once('.') {
+        Some((int_part, frac)) => {
+            !int_part.is_empty()
+                && int_part.chars().all(|c| c.is_ascii_digit())
+                && frac.len() == 2
+                && frac.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
 /// The `no` branch of the JSON canvas reaches `end` with no actions -> no body
 /// mutation in the journey.
 #[tokio::test]

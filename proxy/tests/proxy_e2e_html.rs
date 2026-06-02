@@ -152,6 +152,79 @@ async fn injects_paywall_for_paywalled_article() {
     assert!(body.contains("Subscribe to continue"), "body: {body}");
 }
 
+/// Spec §1/§2: a matched HTML feature stamps `x-rre-feature-<id>: true` and
+/// appends a trusted `<script>window.rre.features_matched=…</script>` immediately
+/// before `</body>`. The serialized JSON must contain NO raw `<` (every `<` is
+/// `<`) so an embedded `</script>` cannot break out.
+#[tokio::test]
+async fn matched_html_feature_injects_script_before_body_close() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/article/3"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(
+                r#"<html><head><meta name="paywall" content="true"></head><body><div id="article-body"><p>Body</p></div></body></html>"#
+                    .as_bytes(),
+                "text/html; charset=utf-8",
+            ),
+        )
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
+
+    let base = spawn(&upstream.uri(), &backend.uri()).await;
+
+    let res = reqwest::Client::new()
+        .get(format!("{base}/article/3"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap();
+
+    // §1: match-marker header.
+    assert_eq!(
+        res.headers()
+            .get(format!("x-rre-feature-{FEATURE}"))
+            .and_then(|v| v.to_str().ok()),
+        Some("true"),
+    );
+
+    let body = res.text().await.unwrap();
+
+    // The script appears immediately before </body> (final step, after the
+    // sanitized component transform that injected the paywall).
+    assert!(body.contains("Subscribe to continue"), "body: {body}");
+    let marker = "<script>window.rre=window.rre||{};window.rre.features_matched=";
+    let script_start = body.find(marker).expect("features_matched script present");
+    let body_close = body.rfind("</body>").expect("</body> present");
+    assert!(
+        script_start < body_close,
+        "script must precede </body>; body: {body}"
+    );
+
+    // Extract the JSON between `=` and the closing `;</script>`.
+    let after = &body[script_start + marker.len()..];
+    let json_end = after.find(";</script>").expect("script terminator");
+    let json_part = &after[..json_end];
+    // §2 escape: the serialized JSON carries NO raw `<` (so no `</script>` breakout).
+    assert!(
+        !json_part.contains('<'),
+        "features_matched JSON must escape every `<`; got {json_part}"
+    );
+    // It still parses as JSON once `<` escapes are decoded by serde_json.
+    let parsed: serde_json::Value = serde_json::from_str(json_part).unwrap();
+    assert!(
+        parsed.get(FEATURE).is_some(),
+        "features_matched keyed by feature_id: {parsed}"
+    );
+}
+
 #[tokio::test]
 async fn passes_through_unmapped_path() {
     let upstream = MockServer::start().await;

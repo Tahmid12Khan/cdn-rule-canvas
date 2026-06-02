@@ -22,6 +22,7 @@ use serde_json::Value;
 use crate::domain::applier::json_apply;
 use crate::domain::context::{DeviceType, EvaluationContext};
 use crate::domain::evaluator::{EvalTrace, GraphEvaluator};
+use crate::domain::features_matched::{self, FeatureEntry, NodeTiming};
 use crate::domain::graph::{CanvasGraph, Node};
 use crate::domain::translator::to_decision_content;
 use crate::state::AppState;
@@ -85,6 +86,11 @@ pub struct EvalResponse {
     /// Transformation Journey (spec §5): the body after each node on the matched
     /// path, in trace order.
     pub journey: Vec<JourneyEntry>,
+    /// Timing summary for the single canvas under test (spec §5/§8) — built
+    /// exactly like one feature's `features_matched` entry. `None` when no
+    /// expression node matched (the path went straight to END).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<FeatureEntry>,
 }
 
 #[derive(Serialize)]
@@ -106,6 +112,9 @@ pub struct JourneyEntry {
     /// The body AFTER this node's action is applied. JSON value for JSON
     /// features, a string for HTML.
     pub body_after: Value,
+    /// Per-node apply time, `d.dd` (spec §5). Expression steps carry their own
+    /// apply duration; start/decision/end are `"0.00"`.
+    pub time_ms: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +153,11 @@ pub async fn eval_handler(
     };
 
     let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
+    let eval_start = std::time::Instant::now();
     let trace_result = evaluator
         .evaluate_with_trace(&req.canvas, content, Arc::new(ctx))
         .await;
+    let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
 
     let trace_result = match trace_result {
         Ok(t) => t,
@@ -160,7 +171,7 @@ pub async fn eval_handler(
     };
 
     // Build response from trace.
-    let response = build_response(&state, &req, trace_result);
+    let response = build_response(&state, &req, trace_result, eval_ms);
     (
         StatusCode::OK,
         Json(serde_json::to_value(response).unwrap_or_default()),
@@ -208,7 +219,12 @@ fn determine_response_json(ctx: &EvalContext) -> Option<serde_json::Value> {
 // Response builder
 // ---------------------------------------------------------------------------
 
-fn build_response(state: &AppState, req: &EvalRequest, trace: EvalTrace) -> EvalResponse {
+fn build_response(
+    state: &AppState,
+    req: &EvalRequest,
+    trace: EvalTrace,
+    eval_ms: f64,
+) -> EvalResponse {
     let canvas = &req.canvas;
     // trace.steps is ordered by zen's `order` field: each entry has the canvas
     // node id and the branch output.
@@ -225,7 +241,11 @@ fn build_response(state: &AppState, req: &EvalRequest, trace: EvalTrace) -> Eval
         .find(|s| s.kind == "expression")
         .map(|s| s.node_id.clone());
 
-    let journey = build_journey(state, req, &trace);
+    let (journey, timings) = build_journey(state, req, &trace);
+
+    // Summary (spec §5/§8): built exactly like one feature's entry, for the
+    // single canvas under test. `None` when no expression node matched.
+    let summary = features_matched::build_entry(&timings, eval_ms);
 
     let steps = trace
         .steps
@@ -253,6 +273,7 @@ fn build_response(state: &AppState, req: &EvalRequest, trace: EvalTrace) -> Eval
         traversed_edge_ids,
         steps,
         journey,
+        summary,
     }
 }
 
@@ -261,7 +282,11 @@ fn build_response(state: &AppState, req: &EvalRequest, trace: EvalTrace) -> Eval
 /// resulting body. Decisions snapshot the unchanged running body. The start node
 /// (synthetic) and the trailing end node bookend the journey. `body_after` is a
 /// JSON value for JSON features, a string for HTML.
-fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<JourneyEntry> {
+fn build_journey(
+    state: &AppState,
+    req: &EvalRequest,
+    trace: &EvalTrace,
+) -> (Vec<JourneyEntry>, Vec<NodeTiming>) {
     let canvas = &req.canvas;
     let is_json = req
         .context
@@ -295,6 +320,8 @@ fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<
     let label_for = |node_id: &str, kind: &str| -> String { label(canvas, state, node_id, kind) };
 
     let mut journey: Vec<JourneyEntry> = Vec::new();
+    // Per-node expression apply timings, in trace order (spec §5 summary).
+    let mut timings: Vec<NodeTiming> = Vec::new();
     let mut index = 0usize;
 
     // 1. Synthetic START entry (if the canvas has one), body unchanged.
@@ -306,15 +333,18 @@ fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<
             label: "Start".to_string(),
             branch: None,
             body_after: snapshot(is_json, &json_body, &html_body),
+            time_ms: features_matched::fmt_ms(0.0),
         });
         index += 1;
     }
 
-    // 2. Each traversed node, in order. Expression nodes mutate the body.
+    // 2. Each traversed node, in order. Expression nodes mutate the body (timed).
     for step in &trace.steps {
-        let mut applied_action = false;
+        // Expression steps carry their apply time; everything else is "0.00".
+        let mut step_time_ms = 0.0;
         if step.kind == "expression" {
             if let Some(action) = action_for.get(step.node_id.as_str()) {
+                let t_node = std::time::Instant::now();
                 if is_json {
                     json_apply::apply_action_json(&mut json_body, action, &[]);
                 } else {
@@ -322,10 +352,14 @@ fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<
                         json_apply::apply_action_html(html_body, action, &[], &state.sanitizer);
                     html_body = next;
                 }
-                applied_action = true;
+                step_time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
+                timings.push(NodeTiming {
+                    node_id: step.node_id.clone(),
+                    label: label_for(&step.node_id, &step.kind),
+                    time_ms: step_time_ms,
+                });
             }
         }
-        let _ = applied_action;
         journey.push(JourneyEntry {
             index,
             node_id: step.node_id.clone(),
@@ -333,6 +367,7 @@ fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<
             label: label_for(&step.node_id, &step.kind),
             branch: step.branch,
             body_after: snapshot(is_json, &json_body, &html_body),
+            time_ms: features_matched::fmt_ms(step_time_ms),
         });
         index += 1;
     }
@@ -347,10 +382,11 @@ fn build_journey(state: &AppState, req: &EvalRequest, trace: &EvalTrace) -> Vec<
             label: "End".to_string(),
             branch: None,
             body_after: snapshot(is_json, &json_body, &html_body),
+            time_ms: features_matched::fmt_ms(0.0),
         });
     }
 
-    journey
+    (journey, timings)
 }
 
 /// Snapshot the running body as a journey `body_after` value (JSON or string).

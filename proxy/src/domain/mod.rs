@@ -7,6 +7,7 @@ pub mod applier;
 pub mod classifier;
 pub mod context;
 pub mod evaluator;
+pub mod features_matched;
 pub mod graph;
 pub mod processors;
 pub mod translator;
