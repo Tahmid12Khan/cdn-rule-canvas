@@ -395,8 +395,13 @@ async fn json_eval_has_summary_and_per_step_time() {
         let t = e["expression_time_ms"].as_str().unwrap();
         assert!(is_d_dd(t), "expression_time_ms d.dd, got {t:?}");
     }
-    let time_took_ms = summary["time_took_ms"].as_str().expect("time_took_ms string");
-    assert!(is_d_dd(time_took_ms), "time_took_ms d.dd, got {time_took_ms:?}");
+    let time_took_ms = summary["time_took_ms"]
+        .as_str()
+        .expect("time_took_ms string");
+    assert!(
+        is_d_dd(time_took_ms),
+        "time_took_ms d.dd, got {time_took_ms:?}"
+    );
 
     let expensive = summary["expensive_nodes"].as_array().unwrap();
     assert_eq!(expensive.len(), 2, "two expression nodes");

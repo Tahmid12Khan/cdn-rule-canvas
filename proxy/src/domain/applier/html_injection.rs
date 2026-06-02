@@ -37,8 +37,12 @@ impl ComponentRenderer for HtmlInjectionRenderer {
         let sanitized = sanitize(sanitizer, html_body);
         let wrapped = format!(r#"<div {MARKER_ATTR}="{marker}">{sanitized}</div>"#);
 
-        let element_handler = element!(target_selector, |el| {
-            match placement_mode {
+        // lol_html 2 requires element handlers to be `'static`, so the closure
+        // must OWN everything it touches (it can't borrow these locals). Move the
+        // owned `wrapped` String in and own the placement mode.
+        let placement_mode = placement_mode.to_string();
+        let element_handler = element!(target_selector, move |el| {
+            match placement_mode.as_str() {
                 "replace" => {
                     el.set_inner_content(&wrapped, lol_html::html_content::ContentType::Html);
                 }

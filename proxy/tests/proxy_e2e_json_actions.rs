@@ -232,14 +232,13 @@ async fn matched_feature_injects_header_and_feature_expressions() {
         // custom_expression_label is always present (here "" — none set).
         assert_eq!(e["custom_expression_label"].as_str(), Some(""));
         let t = e["expression_time_ms"].as_str().unwrap();
-        assert!(
-            is_d_dd(t),
-            "expression_time_ms should be d.dd, got {t:?}"
-        );
+        assert!(is_d_dd(t), "expression_time_ms should be d.dd, got {t:?}");
     }
 
     // §3: time_took_ms is a STRING formatted `d.dd` (two decimals).
-    let time_took_ms = entry["time_took_ms"].as_str().expect("time_took_ms is a string");
+    let time_took_ms = entry["time_took_ms"]
+        .as_str()
+        .expect("time_took_ms is a string");
     assert!(
         is_d_dd(time_took_ms),
         "time_took_ms should be d.dd, got {time_took_ms:?}"
@@ -255,10 +254,7 @@ async fn matched_feature_injects_header_and_feature_expressions() {
         assert!(n["expression_label"].is_string());
         assert!(n["custom_expression_label"].is_string());
         let t = n["expression_time_ms"].as_str().unwrap();
-        assert!(
-            is_d_dd(t),
-            "expression_time_ms should be d.dd, got {t:?}"
-        );
+        assert!(is_d_dd(t), "expression_time_ms should be d.dd, got {t:?}");
         let parsed: f64 = t.parse().unwrap();
         assert!(parsed <= prev, "expensive_nodes must be DESC by time");
         prev = parsed;
