@@ -152,10 +152,10 @@ async fn injects_paywall_for_paywalled_article() {
     assert!(body.contains("Subscribe to continue"), "body: {body}");
 }
 
-/// Spec §1/§2: a matched HTML feature stamps `x-rre-feature-<id>: true` and
-/// appends a trusted `<script>window.rre.features_matched=…</script>` immediately
-/// before `</body>`. The serialized JSON must contain NO raw `<` (every `<` is
-/// `<`) so an embedded `</script>` cannot break out.
+/// Spec §1/§2 + v2.2: a matched HTML feature stamps `x-rre-feature-<id>: true`
+/// and appends a trusted `<script>window.rre.feature_expressions=…</script>`
+/// immediately before `</body>`. The serialized JSON must contain NO raw `<`
+/// (every `<` is `<`) so an embedded `</script>` cannot break out.
 #[tokio::test]
 async fn matched_html_feature_injects_script_before_body_close() {
     let upstream = MockServer::start().await;
@@ -200,8 +200,10 @@ async fn matched_html_feature_injects_script_before_body_close() {
     // The script appears immediately before </body> (final step, after the
     // sanitized component transform that injected the paywall).
     assert!(body.contains("Subscribe to continue"), "body: {body}");
-    let marker = "<script>window.rre=window.rre||{};window.rre.features_matched=";
-    let script_start = body.find(marker).expect("features_matched script present");
+    let marker = "<script>window.rre=window.rre||{};window.rre.feature_expressions=";
+    let script_start = body
+        .find(marker)
+        .expect("feature_expressions script present");
     let body_close = body.rfind("</body>").expect("</body> present");
     assert!(
         script_start < body_close,
@@ -215,13 +217,18 @@ async fn matched_html_feature_injects_script_before_body_close() {
     // §2 escape: the serialized JSON carries NO raw `<` (so no `</script>` breakout).
     assert!(
         !json_part.contains('<'),
-        "features_matched JSON must escape every `<`; got {json_part}"
+        "feature_expressions JSON must escape every `<`; got {json_part}"
     );
     // It still parses as JSON once `<` escapes are decoded by serde_json.
     let parsed: serde_json::Value = serde_json::from_str(json_part).unwrap();
     assert!(
         parsed.get(FEATURE).is_some(),
-        "features_matched keyed by feature_id: {parsed}"
+        "feature_expressions keyed by feature_id: {parsed}"
+    );
+    // v2.2: the entry carries an `expressions` array (the apply_outcome node).
+    assert!(
+        parsed[FEATURE]["expressions"].is_array(),
+        "entry has an expressions array: {parsed}"
     );
 }
 

@@ -377,13 +377,24 @@ async fn json_eval_has_summary_and_per_step_time() {
         }
     }
 
-    // Summary: built like a feature entry.
+    // Summary: built like a feature entry (v2.2 shape).
     let summary = &v["summary"];
-    assert_eq!(summary["outcome_ids"], json!(["t_body", "a_pw"]));
-    assert_eq!(
-        summary["outcome_labels"],
-        json!(["trim_json", "add_attribute"])
-    );
+    let expressions = summary["expressions"].as_array().unwrap();
+    let ids: Vec<&str> = expressions
+        .iter()
+        .map(|e| e["expression_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["t_body", "a_pw"]);
+    let labels: Vec<&str> = expressions
+        .iter()
+        .map(|e| e["expression_label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, vec!["trim_json", "add_attribute"]);
+    for e in expressions {
+        assert_eq!(e["custom_expression_label"].as_str(), Some(""));
+        let t = e["expression_time_in_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "expression_time_in_ms d.dd, got {t:?}");
+    }
     let time_took = summary["time_took"].as_str().expect("time_took string");
     assert!(is_d_dd(time_took), "time_took d.dd, got {time_took:?}");
 
@@ -391,8 +402,8 @@ async fn json_eval_has_summary_and_per_step_time() {
     assert_eq!(expensive.len(), 2, "two expression nodes");
     let mut prev = f64::INFINITY;
     for n in expensive {
-        let t = n["outcome_time_in_ms"].as_str().unwrap();
-        assert!(is_d_dd(t), "outcome_time_in_ms d.dd, got {t:?}");
+        let t = n["expression_time_in_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "expression_time_in_ms d.dd, got {t:?}");
         let parsed: f64 = t.parse().unwrap();
         assert!(parsed <= prev, "expensive_nodes DESC by time");
         prev = parsed;

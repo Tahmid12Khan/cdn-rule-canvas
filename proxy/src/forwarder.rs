@@ -104,7 +104,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     // 5. Apply each matching feature in order, chaining the running body. The
     //    overall apply_status is "ok" if ANY feature changed the body, else
     //    "skipped" (every feature self-gates: a non-matching feature is a no-op).
-    //    `matched` carries each MATCHED feature's (feature_id, features_matched
+    //    `matched` carries each MATCHED feature's (feature_id, feature_expressions
     //    entry) for header + body injection (spec §1/§2).
     let ApplyResult {
         body: final_body,
@@ -163,7 +163,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
 
 /// The result of folding every matching feature over a response body: the final
 /// (chained) body, whether ANY feature changed it, and each MATCHED feature's
-/// `features_matched` entry (spec §2) keyed by feature_id, in resolution order.
+/// `feature_expressions` entry (spec §2) keyed by feature_id, in resolution order.
 struct ApplyResult {
     body: String,
     any_applied: bool,
@@ -216,9 +216,11 @@ async fn apply_features_html(
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
             current = next;
             applied |= changed;
+            let (label, custom_label) = expression_label(canvas, &ma.node_id);
             timings.push(NodeTiming {
                 node_id: ma.node_id.clone(),
-                label: expression_label(canvas, &ma.node_id),
+                label,
+                custom_label,
                 time_ms,
             });
         }
@@ -230,15 +232,19 @@ async fn apply_features_html(
             actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
         );
         any_applied |= applied;
-        // The feature MATCHED (>=1 expression action). Build its entry (spec §2).
-        if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
-            matched.push((feature_id.clone(), entry));
+        // The feature is MARKED only when it actually CHANGED the body (spec
+        // v2.1 applied-gate) AND it traversed >=1 expression node (build_entry).
+        if applied {
+            if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
+                matched.push((feature_id.clone(), entry));
+            }
         }
     }
-    // Inject `window.rre.features_matched` as the FINAL step — after all sanitized
-    // component transforms (spec §2 sanitizer bypass) — only when >=1 matched.
+    // Inject `window.rre.feature_expressions` as the FINAL step — after all
+    // sanitized component transforms (spec §2 sanitizer bypass) — only when
+    // >=1 feature matched.
     if !matched.is_empty() {
-        current = inject_html_features_matched(current, &matched);
+        current = inject_html_feature_expressions(current, &matched);
     }
     ApplyResult {
         body: current,
@@ -247,11 +253,11 @@ async fn apply_features_html(
     }
 }
 
-/// Append the trusted `window.rre.features_matched` script immediately before
+/// Append the trusted `window.rre.feature_expressions` script immediately before
 /// `</body>` (or at the end of the document if there is none). The serialized
 /// map has every `<` escaped to `<` so an embedded `</script>` cannot break
 /// out — XSS-safe; this is first-party trusted data (spec §2).
-fn inject_html_features_matched(body: String, matched: &[(String, FeatureEntry)]) -> String {
+fn inject_html_feature_expressions(body: String, matched: &[(String, FeatureEntry)]) -> String {
     let map: serde_json::Map<String, serde_json::Value> = matched
         .iter()
         .map(|(id, entry)| (id.clone(), serde_json::to_value(entry).unwrap_or_default()))
@@ -259,8 +265,9 @@ fn inject_html_features_matched(body: String, matched: &[(String, FeatureEntry)]
     let json = serde_json::to_string(&serde_json::Value::Object(map))
         .unwrap_or_else(|_| "{}".to_string())
         .replace('<', "\\u003c");
-    let script =
-        format!("<script>window.rre=window.rre||{{}};window.rre.features_matched={json};</script>");
+    let script = format!(
+        "<script>window.rre=window.rre||{{}};window.rre.feature_expressions={json};</script>"
+    );
     match body.rfind("</body>") {
         Some(idx) => {
             let mut out = String::with_capacity(body.len() + script.len());
@@ -325,9 +332,11 @@ async fn apply_features_json(
             let changed = json_apply::apply_action_json(&mut current, &ma.action, &av.outcomes);
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
             applied |= changed;
+            let (label, custom_label) = expression_label(canvas, &ma.node_id);
             timings.push(NodeTiming {
                 node_id: ma.node_id.clone(),
-                label: expression_label(canvas, &ma.node_id),
+                label,
+                custom_label,
                 time_ms,
             });
         }
@@ -339,15 +348,19 @@ async fn apply_features_json(
             actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
         );
         any_applied |= applied;
-        // The feature MATCHED (>=1 expression action). Build its entry (spec §2).
-        if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
-            matched.push((feature_id.clone(), entry));
+        // The feature is MARKED only when it actually CHANGED the body (spec
+        // v2.1 applied-gate) AND it traversed >=1 expression node (build_entry).
+        if applied {
+            if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
+                matched.push((feature_id.clone(), entry));
+            }
         }
     }
-    // Inject `body.rre.features_matched` (spec §2): create `rre` if absent, merge
-    // `features_matched` without clobbering other `rre.*` keys. Only when matched.
+    // Inject `body.rre.feature_expressions` (spec v2.2): create `rre` if absent,
+    // merge `feature_expressions` without clobbering other `rre.*` keys. Only
+    // when >=1 feature matched.
     if !matched.is_empty() {
-        inject_json_features_matched(&mut current, &matched);
+        inject_json_feature_expressions(&mut current, &matched);
     }
     // Serialize the final chained body. A serialize error (≈never for a Value)
     // falls back to the original untouched body.
@@ -369,10 +382,13 @@ async fn apply_features_json(
     }
 }
 
-/// Merge the matched features' entries into `body["rre"]["features_matched"]`
-/// (spec §2). Creates the `rre` object if absent; sets `features_matched`
+/// Merge the matched features' entries into `body["rre"]["feature_expressions"]`
+/// (spec v2.2). Creates the `rre` object if absent; sets `feature_expressions`
 /// without clobbering other `rre.*` keys. A non-object `body` is left untouched.
-fn inject_json_features_matched(body: &mut serde_json::Value, matched: &[(String, FeatureEntry)]) {
+fn inject_json_feature_expressions(
+    body: &mut serde_json::Value,
+    matched: &[(String, FeatureEntry)],
+) {
     let Some(root) = body.as_object_mut() else {
         return; // top-level non-object body: nothing to namespace under.
     };
@@ -384,13 +400,13 @@ fn inject_json_features_matched(body: &mut serde_json::Value, matched: &[(String
         *rre = serde_json::Value::Object(serde_json::Map::new());
     }
     let rre_obj = rre.as_object_mut().expect("just ensured object");
-    let fm: serde_json::Map<String, serde_json::Value> = matched
+    let fe: serde_json::Map<String, serde_json::Value> = matched
         .iter()
         .map(|(id, entry)| (id.clone(), serde_json::to_value(entry).unwrap_or_default()))
         .collect();
     rre_obj.insert(
-        "features_matched".to_string(),
-        serde_json::Value::Object(fm),
+        "feature_expressions".to_string(),
+        serde_json::Value::Object(fe),
     );
 }
 
@@ -670,13 +686,18 @@ fn canvas_name(c: Canvas) -> &'static str {
     }
 }
 
-/// Display label for an expression node (spec §4): the manifest label for the
-/// action kind, with the raw kind string as the fieldless fallback. The proxy
-/// has no manifest at runtime, so the action kind IS the label (mirrors the
-/// `eval.rs` `label()` helper — a node-id->label lookup over the canvas).
-fn expression_label(canvas: &CanvasGraph, node_id: &str) -> String {
+/// Display label + custom label for an expression node (spec §4/v2.3): the
+/// manifest label for the action kind (the proxy has no manifest at runtime, so
+/// the action kind IS the label — fieldless fallback) plus the node's
+/// `custom_label`. Mirrors the `eval.rs` `label()` helper — a node-id->label
+/// lookup over the canvas.
+fn expression_label(canvas: &CanvasGraph, node_id: &str) -> (String, Option<String>) {
     match canvas.nodes.iter().find(|n| n.id() == node_id) {
-        Some(Node::Expression { action, .. }) => action.kind.clone(),
-        _ => node_id.to_string(),
+        Some(Node::Expression {
+            action,
+            custom_label,
+            ..
+        }) => (action.kind.clone(), custom_label.clone()),
+        _ => (node_id.to_string(), None),
     }
 }

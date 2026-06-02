@@ -356,6 +356,7 @@ fn build_journey(
                 timings.push(NodeTiming {
                     node_id: step.node_id.clone(),
                     label: label_for(&step.node_id, &step.kind),
+                    custom_label: expression_custom_label(canvas, &step.node_id),
                     time_ms: step_time_ms,
                 });
             }
@@ -439,6 +440,15 @@ fn label(canvas: &CanvasGraph, _state: &AppState, node_id: &str, kind: &str) -> 
                 _ => kind.to_string(),
             }
         }
+    }
+}
+
+/// The `custom_label` (spec v2.3) of an Expression node, if any. `None` for
+/// non-expression nodes or when unset; carried through to `custom_expression_label`.
+fn expression_custom_label(canvas: &CanvasGraph, node_id: &str) -> Option<String> {
+    match canvas.nodes.iter().find(|n| n.id() == node_id) {
+        Some(Node::Expression { custom_label, .. }) => custom_label.clone(),
+        _ => None,
     }
 }
 

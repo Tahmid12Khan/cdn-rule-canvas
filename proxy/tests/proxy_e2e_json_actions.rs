@@ -191,11 +191,12 @@ async fn run_full(upstream_json: &str, upstream_path: &str) -> reqwest::Response
         .unwrap()
 }
 
-/// Spec §1/§2: a matched feature stamps `x-rre-feature-<id>: true` and injects
-/// `body.rre.features_matched[<id>]` with the spec §2 shape (parallel
-/// outcome_ids/labels, `time_took` as a `d.dd` string, expensive_nodes top-3).
+/// Spec §1/§2 + v2.2: a matched feature stamps `x-rre-feature-<id>: true` and
+/// injects `body.rre.feature_expressions[<id>]` with the v2.2 shape (an
+/// `expressions` array of objects, `time_took` as a `d.dd` string,
+/// expensive_nodes top-3 in the same object shape).
 #[tokio::test]
-async fn matched_feature_injects_header_and_features_matched() {
+async fn matched_feature_injects_header_and_feature_expressions() {
     let res = run_full(
         r#"{"api":"dn-article","body":["p1","p2","p3"]}"#,
         "/article/3",
@@ -212,14 +213,30 @@ async fn matched_feature_injects_header_and_features_matched() {
 
     let body = res.text().await.unwrap();
     let v: Value = serde_json::from_str(&body).unwrap();
-    let entry = &v["rre"]["features_matched"][FEATURE];
+    let entry = &v["rre"]["feature_expressions"][FEATURE];
 
-    // The matched path traversed t_body then a_pw (parallel arrays, in order).
-    assert_eq!(entry["outcome_ids"], json!(["t_body", "a_pw"]));
-    assert_eq!(
-        entry["outcome_labels"],
-        json!(["trim_json", "add_attribute"])
-    );
+    // v2.2: the matched path traversed t_body then a_pw, as an `expressions`
+    // array of objects (in order).
+    let expressions = entry["expressions"].as_array().unwrap();
+    let ids: Vec<&str> = expressions
+        .iter()
+        .map(|e| e["expression_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["t_body", "a_pw"]);
+    let labels: Vec<&str> = expressions
+        .iter()
+        .map(|e| e["expression_label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, vec!["trim_json", "add_attribute"]);
+    for e in expressions {
+        // custom_expression_label is always present (here "" — none set).
+        assert_eq!(e["custom_expression_label"].as_str(), Some(""));
+        let t = e["expression_time_in_ms"].as_str().unwrap();
+        assert!(
+            is_d_dd(t),
+            "expression_time_in_ms should be d.dd, got {t:?}"
+        );
+    }
 
     // §3: time_took is a STRING formatted `d.dd` (two decimals).
     let time_took = entry["time_took"].as_str().expect("time_took is a string");
@@ -228,16 +245,20 @@ async fn matched_feature_injects_header_and_features_matched() {
         "time_took should be d.dd, got {time_took:?}"
     );
 
-    // §2: expensive_nodes is the top-3 (here 2) expression nodes, DESC by time,
-    // each a `d.dd` string.
+    // v2.2: expensive_nodes is the top-3 (here 2) expression nodes, DESC by time,
+    // each the SAME Expression object shape, with `d.dd` strings.
     let expensive = entry["expensive_nodes"].as_array().unwrap();
     assert_eq!(expensive.len(), 2, "two expression nodes -> two expensive");
     let mut prev = f64::INFINITY;
     for n in expensive {
-        assert!(n["outcome_id"].is_string());
-        assert!(n["outcome_label"].is_string());
-        let t = n["outcome_time_in_ms"].as_str().unwrap();
-        assert!(is_d_dd(t), "outcome_time_in_ms should be d.dd, got {t:?}");
+        assert!(n["expression_id"].is_string());
+        assert!(n["expression_label"].is_string());
+        assert!(n["custom_expression_label"].is_string());
+        let t = n["expression_time_in_ms"].as_str().unwrap();
+        assert!(
+            is_d_dd(t),
+            "expression_time_in_ms should be d.dd, got {t:?}"
+        );
         let parsed: f64 = t.parse().unwrap();
         assert!(parsed <= prev, "expensive_nodes must be DESC by time");
         prev = parsed;
@@ -261,6 +282,111 @@ async fn non_matching_feature_omits_header_and_rre() {
     let body = res.text().await.unwrap();
     let v: Value = serde_json::from_str(&body).unwrap();
     assert!(v.get("rre").is_none(), "no rre key when nothing matched");
+}
+
+const HTML_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
+
+/// Active-version whose only expression is an `apply_outcome` referencing an
+/// HTML-only outcome (a single `html_injection` component). On a JSON response
+/// `apply_action_json` skips the non-JSON component -> `changed = false`, so the
+/// applied-gate (spec v2.1) must NOT mark the feature.
+fn html_only_active_version_body() -> Value {
+    json!({
+        "version_number": 1,
+        "rule_graph": {
+            "anonymous": {
+                "root_node_id": "start",
+                "nodes": [
+                    { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
+                    { "kind": "decision", "id": "d_api",
+                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+                      "position": { "x": 0.0, "y": 0.0 } },
+                    { "kind": "expression", "id": "n_html",
+                      "action": { "type": "apply_outcome", "outcome_id": HTML_OUTCOME },
+                      "position": { "x": 200.0, "y": 0.0 } },
+                    { "kind": "end", "id": "end", "position": { "x": 400.0, "y": 0.0 } }
+                ],
+                "edges": [
+                    { "id": "e0", "source_node_id": "start",  "target_node_id": "d_api",  "branch": "yes" },
+                    { "id": "e1", "source_node_id": "d_api",  "target_node_id": "n_html", "branch": "yes" },
+                    { "id": "e2", "source_node_id": "d_api",  "target_node_id": "end",    "branch": "no"  },
+                    { "id": "e3", "source_node_id": "n_html", "target_node_id": "end",    "branch": "yes" }
+                ]
+            },
+            "registered": { "root_node_id": null, "nodes": [], "edges": [] },
+            "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+        },
+        "applicability": {},
+        "outcomes": [
+            {
+                "id": HTML_OUTCOME, "title": "HtmlWall", "is_builtin": false, "order_index": 0,
+                "components": [
+                    { "id": "44444444-4444-4444-4444-444444444444", "slug": "wall",
+                      "type": "html_injection",
+                      "config": { "type": "html_injection", "target_selector": "#article-body",
+                                  "placement_mode": "append", "html_body": "<div>wall</div>" },
+                      "placement": "inline", "order_index": 0 }
+                ]
+            }
+        ]
+    })
+}
+
+/// Spec v2.1 applied-gate: a feature whose only expression is a no-op on the
+/// response (an `apply_outcome` of an HTML-only outcome, on a JSON body ->
+/// `changed=false`) does NOT get an `x-rre-feature` header and is ABSENT from
+/// `feature_expressions` — even though it traversed an expression node and its
+/// (empty) json_selector would "always apply".
+#[tokio::test]
+async fn no_op_expression_is_not_marked_applied_gate() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/article/5"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"api":"dn-article","body":["p1","p2","p3"]}"#.as_bytes(),
+            "application/json; charset=utf-8",
+        ))
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(html_only_active_version_body()))
+        .mount(&backend)
+        .await;
+
+    let base = spawn(&upstream.uri(), &backend.uri()).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base}/article/5"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap();
+
+    // No-op on JSON -> overall apply_status skipped, no marker header.
+    assert_eq!(
+        res.headers()
+            .get("x-rre-apply-status")
+            .and_then(|v| v.to_str().ok()),
+        Some("skipped"),
+    );
+    assert!(
+        res.headers()
+            .get(format!("x-rre-feature-{FEATURE}"))
+            .is_none(),
+        "a no-op expression must not stamp a marker header (applied-gate)"
+    );
+
+    let body = res.text().await.unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
+    // Absent from feature_expressions: no rre key at all (nothing applied).
+    assert!(
+        v.get("rre").is_none(),
+        "no rre key when the only expression was a no-op"
+    );
+    // The body itself is unchanged.
+    assert_eq!(v["body"], json!(["p1", "p2", "p3"]));
 }
 
 /// A value is `d.dd`: digits, a dot, exactly two trailing digits.
