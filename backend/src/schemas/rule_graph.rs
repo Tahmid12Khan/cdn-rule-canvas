@@ -80,6 +80,12 @@ pub enum Node {
         /// The body action applied at this node (same open shape as a
         /// decision's processor: `{ "type": "<kind>", <fields…> }`).
         action: ProcessorConfig,
+        /// Optional author-supplied display name for this expression. Empty/absent
+        /// means no custom name; a non-empty value must be snake_case
+        /// (`^[a-z0-9]+(_[a-z0-9]+)*$`). Surfaced by the proxy as
+        /// `custom_expression_label`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_label: Option<String>,
         /// Canvas coordinates.
         position: Position,
     },

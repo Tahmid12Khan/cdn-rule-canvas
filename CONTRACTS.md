@@ -220,7 +220,10 @@ pub struct CanvasGraph { pub nodes: Vec<Node>, pub edges: Vec<Edge>, #[serde(def
 pub enum Node {
     Start      { id: String, position: Position },                              // kind = "start"
     Decision   { id: String, processor: ProcessorConfig, position: Position },  // kind = "decision"
-    Expression { id: String, action: ProcessorConfig, position: Position },     // kind = "expression"
+    // `custom_label`: optional author display name; #[serde(default, skip_serializing_if = "Option::is_none")].
+    // Empty/absent = no custom name (valid); non-empty MUST be snake_case `^[a-z0-9]+(_[a-z0-9]+)*$`
+    // (validated identically in backend + frontend). Proxy surfaces it as `custom_expression_label`.
+    Expression { id: String, action: ProcessorConfig, custom_label: Option<String>, position: Position }, // kind = "expression"
     End        { id: String, position: Position },                              // kind = "end"
 }
 // `Node::id()` covers all four; helpers `is_start`/`is_end`/`is_expression`/`is_decision`.
@@ -366,6 +369,7 @@ the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
 | `processor_kind_known` | a Decision node's `processor.type` / an Expression node's `action.type` is a manifest `kind` |
 | `processor_field_required` | each `required` field (and each `required_unless` field whose condition is unsatisfied) is present and non-empty |
 | `processor_field_option` | a `select` field's value is one of its `options[].value` |
+| `expression_custom_label_invalid` | an Expression node's `custom_label`, when non-empty (after trim), is snake_case `^[a-z0-9]+(_[a-z0-9]+)*$`; empty/absent is valid. `loc = "<canvas>.nodes[<node_id>].custom_label"` |
 
 Empty canvas (zero nodes) is valid (no start/end required). Processor checks run per Decision node's
 `processor` AND per Expression node's `action` against the matched manifest spec. `required_unless

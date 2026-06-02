@@ -45,6 +45,8 @@ pub enum Node {
     Expression {
         id: String,
         action: ProcessorRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_label: Option<String>,
         position: Position,
     },
     End {

@@ -445,6 +445,7 @@ fn expression_apply(id: &str, outcome_id: Uuid) -> Node {
                 serde_json::Value::String(outcome_id.to_string()),
             )]),
         },
+        custom_label: None,
         position: Position { x: 0.0, y: 0.0 },
     }
 }

@@ -75,6 +75,17 @@ fn expression_apply(id: &str, outcome_id: Uuid) -> Node {
     Node::Expression {
         id: id.to_string(),
         action: processor(json!({"type": "apply_outcome", "outcome_id": outcome_id.to_string()})),
+        custom_label: None,
+        position: pos(),
+    }
+}
+
+/// A `trim_json` expression node carrying an optional `custom_label`.
+fn expression_trim_labeled(id: &str, custom_label: Option<&str>) -> Node {
+    Node::Expression {
+        id: id.to_string(),
+        action: processor(json!({"type": "trim_json", "json_path": "$.body", "length": 0})),
+        custom_label: custom_label.map(str::to_string),
         position: pos(),
     }
 }
@@ -569,6 +580,7 @@ fn json_action_pipeline_validates() {
             Node::Expression {
                 id: "t".to_string(),
                 action: processor(json!({"type": "trim_json", "json_path": "$.body", "length": 0})),
+                custom_label: None,
                 position: pos(),
             },
             Node::Expression {
@@ -576,6 +588,7 @@ fn json_action_pipeline_validates() {
                 action: processor(
                     json!({"type": "add_attribute", "json_path": "$.paywall_show", "value": "<html>paywall_showed</html>"}),
                 ),
+                custom_label: None,
                 position: pos(),
             },
             end("e"),
@@ -670,4 +683,60 @@ fn non_empty_canvas_not_touched_by_normalize() {
     // registered and customer were empty and get the default graph.
     assert_eq!(graph.registered.edges[0].id, "e_start_end");
     assert_eq!(graph.customer.edges[0].id, "e_start_end");
+}
+
+/// A `start → expression(trim_json, custom_label) → end` canvas; the expression's
+/// `custom_label` is the value under test.
+fn canvas_with_custom_label(custom_label: Option<&str>) -> CanvasGraph {
+    CanvasGraph {
+        nodes: vec![
+            start("s"),
+            expression_trim_labeled("t", custom_label),
+            end("e"),
+        ],
+        edges: vec![
+            edge("e0", "s", "t", Branch::Yes),
+            edge("e1", "t", "e", Branch::Yes),
+        ],
+        root_node_id: Some("s".to_string()),
+    }
+}
+
+// 23. v2.3 expression_custom_label_invalid: a valid snake_case custom_label passes.
+#[test]
+fn custom_label_snake_case_valid() {
+    let canvas = canvas_with_custom_label(Some("my_custom_name_2"));
+    assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
+}
+
+// 24. v2.3 expression_custom_label_invalid: empty string and absent both pass.
+#[test]
+fn custom_label_empty_and_absent_valid() {
+    let empty = canvas_with_custom_label(Some(""));
+    assert!(rule_graph_service::validate(&anon(empty), &HashSet::new(), &manifest()).is_ok());
+    let absent = canvas_with_custom_label(None);
+    assert!(rule_graph_service::validate(&anon(absent), &HashSet::new(), &manifest()).is_ok());
+}
+
+// 25. v2.3 expression_custom_label_invalid: uppercase, spaces, and
+//     leading/trailing/double underscore each fail with the stable rule_id.
+#[test]
+fn custom_label_invalid_forms_fail() {
+    for bad in ["MyName", "my name", "_lead", "trail_", "double__under"] {
+        let canvas = canvas_with_custom_label(Some(bad));
+        let ds = details(rule_graph_service::validate(
+            &anon(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(
+            has_rule(&ds, "expression_custom_label_invalid"),
+            "custom_label {bad:?} should fail expression_custom_label_invalid"
+        );
+        assert!(
+            ds.iter()
+                .any(|d| d.loc == "anonymous.nodes[t].custom_label"),
+            "custom_label {bad:?} should report loc anonymous.nodes[t].custom_label"
+        );
+    }
 }

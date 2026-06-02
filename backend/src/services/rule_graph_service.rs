@@ -191,9 +191,15 @@ fn validate_canvas(
             Node::Decision { processor, .. } => {
                 validate_processor(canvas, idx, processor, spec_by_kind, details);
             }
-            Node::Expression { action, .. } => {
+            Node::Expression {
+                id,
+                action,
+                custom_label,
+                ..
+            } => {
                 validate_processor(canvas, idx, action, spec_by_kind, details);
                 validate_apply_outcome_ref(canvas, idx, action, valid_outcome_ids, details);
+                validate_custom_label(canvas, id, custom_label.as_deref(), details);
             }
             Node::Start { .. } | Node::End { .. } => {}
         }
@@ -447,6 +453,40 @@ fn validate_apply_outcome_ref(
     }
 }
 
+/// `expression_custom_label_invalid`: an expression node's optional
+/// `custom_label`, when present and non-empty (after trim), must be snake_case
+/// (`^[a-z0-9]+(_[a-z0-9]+)*$`). An empty/absent value is valid (no custom name).
+fn validate_custom_label(
+    canvas: &'static str,
+    node_id: &str,
+    custom_label: Option<&str>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    let Some(label) = custom_label else { return };
+    if label.trim().is_empty() {
+        return;
+    }
+    if !is_snake_case(label) {
+        details.push(ValidationDetail::new(
+            format!("{canvas}.nodes[{node_id}].custom_label"),
+            "Custom name must be snake_case (lowercase letters, digits, single underscores) or left empty.".to_string(),
+            "expression_custom_label_invalid",
+        ));
+    }
+}
+
+/// `^[a-z0-9]+(_[a-z0-9]+)*$` without a regex crate: split on `_`; every segment
+/// must be non-empty (rejects leading/trailing/double underscore) and contain
+/// only `a-z`/`0-9` bytes.
+fn is_snake_case(value: &str) -> bool {
+    value.split('_').all(|seg| {
+        !seg.is_empty()
+            && seg
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    })
+}
+
 /// Validate one Decision processor / Expression action against the matched
 /// manifest spec.
 ///
@@ -673,6 +713,7 @@ mod tests {
             action: processor(
                 json!({"type": "apply_outcome", "outcome_id": outcome_id.to_string()}),
             ),
+            custom_label: None,
             position: pos(),
         }
     }
@@ -1310,6 +1351,7 @@ mod tests {
                 Node::Expression {
                     id: "a".to_string(),
                     action: processor(json!({"type": "not_a_real_action"})),
+                    custom_label: None,
                     position: pos(),
                 },
                 end("e"),
@@ -1338,6 +1380,7 @@ mod tests {
                 Node::Expression {
                     id: "a".to_string(),
                     action: processor(json!({"type": "apply_outcome", "outcome_id": ""})),
+                    custom_label: None,
                     position: pos(),
                 },
                 end("e"),
@@ -1367,6 +1410,7 @@ mod tests {
                     action: processor(
                         json!({"type": "trim_json", "json_path": "$.body", "length": 0}),
                     ),
+                    custom_label: None,
                     position: pos(),
                 },
                 end("e"),
