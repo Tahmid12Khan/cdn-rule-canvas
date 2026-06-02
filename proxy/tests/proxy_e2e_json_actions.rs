@@ -193,7 +193,7 @@ async fn run_full(upstream_json: &str, upstream_path: &str) -> reqwest::Response
 
 /// Spec §1/§2 + v2.2: a matched feature stamps `x-rre-feature-<id>: true` and
 /// injects `body.rre.feature_expressions[<id>]` with the v2.2 shape (an
-/// `expressions` array of objects, `time_took` as a `d.dd` string,
+/// `expressions` array of objects, `time_took_ms` as a `d.dd` string,
 /// expensive_nodes top-3 in the same object shape).
 #[tokio::test]
 async fn matched_feature_injects_header_and_feature_expressions() {
@@ -231,18 +231,18 @@ async fn matched_feature_injects_header_and_feature_expressions() {
     for e in expressions {
         // custom_expression_label is always present (here "" — none set).
         assert_eq!(e["custom_expression_label"].as_str(), Some(""));
-        let t = e["expression_time_in_ms"].as_str().unwrap();
+        let t = e["expression_time_ms"].as_str().unwrap();
         assert!(
             is_d_dd(t),
-            "expression_time_in_ms should be d.dd, got {t:?}"
+            "expression_time_ms should be d.dd, got {t:?}"
         );
     }
 
-    // §3: time_took is a STRING formatted `d.dd` (two decimals).
-    let time_took = entry["time_took"].as_str().expect("time_took is a string");
+    // §3: time_took_ms is a STRING formatted `d.dd` (two decimals).
+    let time_took_ms = entry["time_took_ms"].as_str().expect("time_took_ms is a string");
     assert!(
-        is_d_dd(time_took),
-        "time_took should be d.dd, got {time_took:?}"
+        is_d_dd(time_took_ms),
+        "time_took_ms should be d.dd, got {time_took_ms:?}"
     );
 
     // v2.2: expensive_nodes is the top-3 (here 2) expression nodes, DESC by time,
@@ -254,10 +254,10 @@ async fn matched_feature_injects_header_and_feature_expressions() {
         assert!(n["expression_id"].is_string());
         assert!(n["expression_label"].is_string());
         assert!(n["custom_expression_label"].is_string());
-        let t = n["expression_time_in_ms"].as_str().unwrap();
+        let t = n["expression_time_ms"].as_str().unwrap();
         assert!(
             is_d_dd(t),
-            "expression_time_in_ms should be d.dd, got {t:?}"
+            "expression_time_ms should be d.dd, got {t:?}"
         );
         let parsed: f64 = t.parse().unwrap();
         assert!(parsed <= prev, "expensive_nodes must be DESC by time");

@@ -79,7 +79,7 @@ export const SummaryExpression = z.object({
   expression_id: z.string(),
   expression_label: z.string(),
   custom_expression_label: z.string(),
-  expression_time_in_ms: z.string(),
+  expression_time_ms: z.string(),
 });
 export type SummaryExpression = z.infer<typeof SummaryExpression>;
 
@@ -88,7 +88,7 @@ export type SummaryExpression = z.infer<typeof SummaryExpression>;
 // times are strings formatted "d.dd" so trailing zeros survive (0.10, not 0.1).
 export const EvalSummary = z.object({
   expressions: z.array(SummaryExpression),
-  time_took: z.string(),
+  time_took_ms: z.string(),
   expensive_nodes: z.array(SummaryExpression),
 });
 export type EvalSummary = z.infer<typeof EvalSummary>;

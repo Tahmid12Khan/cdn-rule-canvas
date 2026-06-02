@@ -57,7 +57,7 @@ detail here seems underspecified.
     "<feature_id>": {
       "outcome_ids":    ["t_body", "a_pw"],            // last 10 expression node ids, in order
       "outcome_labels": ["Trim JSON", "Add Attribute"],// parallel labels
-      "time_took":      "1.21",                         // whole-feature time, ms, string "d.dd"
+      "time_took_ms":      "1.21",                         // whole-feature time, ms, string "d.dd"
       "expensive_nodes": [                              // top 3 expression nodes by time, DESC
         { "outcome_id": "a_pw",   "outcome_label": "Add Attribute", "outcome_time_in_ms": "0.80" },
         { "outcome_id": "t_body", "outcome_label": "Trim JSON",     "outcome_time_in_ms": "0.41" }
@@ -67,7 +67,7 @@ detail here seems underspecified.
 }
 ```
 
-- `time_took` = the feature's total `eval_ms + transform_ms` (sum of per-node apply
+- `time_took_ms` = the feature's total `eval_ms + transform_ms` (sum of per-node apply
   times), formatted `d.dd`.
 - `expensive_nodes` = expression nodes sorted by per-node apply time DESC, top 3
   (fewer if the path has <3 expression nodes).
@@ -138,7 +138,7 @@ test panel can render timing + the rich journey:
   ```jsonc
   "summary": {
     "outcome_ids": [...], "outcome_labels": [...],
-    "time_took": "d.dd",
+    "time_took_ms": "d.dd",
     "expensive_nodes": [{ "outcome_id","outcome_label","outcome_time_in_ms" }]
   }
   ```
@@ -244,7 +244,7 @@ byte-identical (minus `ToSchema`).
   - JSON: `curl -s -D - http://localhost:9000/proxy/v2/content/2-1-1997318` →
     header `x-rre-feature-dn-json-article: true`; body has
     `rre.features_matched["dn-json-article"]` with outcome_ids `["t_body","a_pw"]`,
-    labels, `time_took` `d.dd`, `expensive_nodes` top-3 desc.
+    labels, `time_took_ms` `d.dd`, `expensive_nodes` top-3 desc.
   - HTML: `curl -s http://localhost:9000/article.html` → ends with a
     `<script>window.rre.features_matched=…</script>`; `x-rre-feature-dn-article: true`.
   - Test panel (browser, after hard reload): journey collapsed by default with
@@ -299,12 +299,12 @@ New shape — identical for JSON body, HTML window, and the eval `summary`:
     "<feature_id>": {
       "expressions": [                                  // last-10 traversed, in order
         { "expression_id": "t_body", "expression_label": "trim_json",
-          "custom_expression_label": "", "expression_time_in_ms": "0.02" }
+          "custom_expression_label": "", "expression_time_ms": "0.02" }
       ],
-      "time_took": "1.29",                              // d.dd string (unchanged)
+      "time_took_ms": "1.29",                              // d.dd string (unchanged)
       "expensive_nodes": [                              // top-3 by time DESC, SAME object shape
         { "expression_id": "t_body", "expression_label": "trim_json",
-          "custom_expression_label": "", "expression_time_in_ms": "0.02" }
+          "custom_expression_label": "", "expression_time_ms": "0.02" }
       ]
     }
   }
@@ -313,11 +313,11 @@ New shape — identical for JSON body, HTML window, and the eval `summary`:
 
 - `expression_id` = canvas node id. `expression_label` = the action kind string
   (proxy has no manifest at runtime → fieldless fallback = raw kind, e.g.
-  `trim_json`, `apply_outcome`). `expression_time_in_ms` / `time_took` are still
+  `trim_json`, `apply_outcome`). `expression_time_ms` / `time_took_ms` are still
   `d.dd` STRINGS (§3). `custom_expression_label` is the node's `custom_label`
   (v2.3), `""` when unset.
 - `NodeTiming` gains `custom_label` so the forwarder can carry it through.
-- `FeatureEntry` becomes `{ expressions: Vec<Expression>, time_took,
+- `FeatureEntry` becomes `{ expressions: Vec<Expression>, time_took_ms,
   expensive_nodes: Vec<Expression> }`; the old `ExpensiveNode` collapses into the
   one `Expression` struct (it now carries time too).
 
@@ -358,7 +358,7 @@ New shape — identical for JSON body, HTML window, and the eval `summary`:
     **ABSENT** (no-op on JSON).
   - body `rre.feature_expressions["dn-json-article"].expressions` =
     `[{expression_id:"t_body",…}, {expression_id:"a_pw",…}]` with
-    `custom_expression_label` + `expression_time_in_ms` (`d.dd`); `expensive_nodes`
+    `custom_expression_label` + `expression_time_ms` (`d.dd`); `expensive_nodes`
     top-3 DESC; no `dn-article` key.
 - HTML `curl -s http://localhost:9000/article.html`: `x-rre-feature-dn-article: true`;
   `x-rre-feature-dn-json-article` ABSENT; `<script>window.rre.feature_expressions=…</script>`.
@@ -378,10 +378,10 @@ New shape — identical for JSON body, HTML window, and the eval `summary`:
 > expressions that it went through. it is not the decision node or end node but
 > the expression nodes. Also all empty canvas should have start -> end, if not
 > already both in frontend and backend. ... also for
-> rre.features_matched[feature_name].time_took = {time}ms show that for both json
+> rre.features_matched[feature_name].time_took_ms = {time}ms show that for both json
 > and html. This will give an idea of how much time it took for whole feature.
 > similarly extend {outcome_ids, outcome_labels} to {outcome_ids, outcome_labels,
-> time_took}. also for rre.features_matched[feature_name].expensive_nodes =
+> time_took_ms}. also for rre.features_matched[feature_name].expensive_nodes =
 > [{outcome_id, outcome_label, outcome_time_in_ms}] for top 3 nodes sorted in desc
 > order. for time_in_ms it format should be d.dd, for ex: 0.10, 1.20, 1.21, 123,
 > 123455, 123.12 - showing only last 2 digits after floating point. also the

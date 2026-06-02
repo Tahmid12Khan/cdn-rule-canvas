@@ -11,22 +11,22 @@ describe("EvalSummary (v2.2 reshape)", () => {
         expression_id: "t_body",
         expression_label: "trim_json",
         custom_expression_label: "",
-        expression_time_in_ms: "0.02",
+        expression_time_ms: "0.02",
       },
       {
         expression_id: "a_pw",
         expression_label: "add_attribute",
         custom_expression_label: "show_paywall",
-        expression_time_in_ms: "0.80",
+        expression_time_ms: "0.80",
       },
     ],
-    time_took: "1.29",
+    time_took_ms: "1.29",
     expensive_nodes: [
       {
         expression_id: "a_pw",
         expression_label: "add_attribute",
         custom_expression_label: "show_paywall",
-        expression_time_in_ms: "0.80",
+        expression_time_ms: "0.80",
       },
     ],
   };
@@ -38,10 +38,10 @@ describe("EvalSummary (v2.2 reshape)", () => {
       expression_id: "t_body",
       expression_label: "trim_json",
       custom_expression_label: "",
-      expression_time_in_ms: "0.02",
+      expression_time_ms: "0.02",
     });
     expect(parsed.expensive_nodes[0].expression_id).toBe("a_pw");
-    expect(parsed.time_took).toBe("1.29");
+    expect(parsed.time_took_ms).toBe("1.29");
   });
 
   it("rejects the old outcome_ids/outcome_labels shape", () => {
@@ -49,7 +49,7 @@ describe("EvalSummary (v2.2 reshape)", () => {
       EvalSummary.safeParse({
         outcome_ids: ["t_body"],
         outcome_labels: ["Trim JSON"],
-        time_took: "1.29",
+        time_took_ms: "1.29",
         expensive_nodes: [],
       }).success,
     ).toBe(false);

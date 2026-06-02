@@ -27,7 +27,7 @@ pub struct Expression {
     /// The node's `custom_label` (spec v2.3), `""` when unset.
     pub custom_expression_label: String,
     /// Per-node apply time, `d.dd`.
-    pub expression_time_in_ms: String,
+    pub expression_time_ms: String,
 }
 
 /// A single feature's `feature_expressions` entry (spec v2.2). Also the
@@ -37,7 +37,7 @@ pub struct FeatureEntry {
     /// Last-10 expression nodes the matched path traversed, in order.
     pub expressions: Vec<Expression>,
     /// Whole-feature time (`eval_ms + sum(per-node apply times)`), `d.dd`.
-    pub time_took: String,
+    pub time_took_ms: String,
     /// Expression nodes sorted by per-node apply time DESC, top 3.
     pub expensive_nodes: Vec<Expression>,
 }
@@ -59,7 +59,7 @@ fn to_expression(t: &NodeTiming) -> Expression {
             .map(str::trim)
             .unwrap_or_default()
             .to_string(),
-        expression_time_in_ms: fmt_ms(t.time_ms),
+        expression_time_ms: fmt_ms(t.time_ms),
     }
 }
 
@@ -75,9 +75,9 @@ pub fn build_entry(timings: &[NodeTiming], eval_ms: f64) -> Option<FeatureEntry>
     let start = timings.len().saturating_sub(10);
     let expressions: Vec<Expression> = timings[start..].iter().map(to_expression).collect();
 
-    // time_took = eval_ms + sum of every per-node apply time (not just last 10).
+    // time_took_ms = eval_ms + sum of every per-node apply time (not just last 10).
     let sum_ms: f64 = timings.iter().map(|t| t.time_ms).sum();
-    let time_took = fmt_ms(eval_ms + sum_ms);
+    let time_took_ms = fmt_ms(eval_ms + sum_ms);
 
     // expensive_nodes: sort by per-node time DESC, top 3.
     let mut by_time: Vec<&NodeTiming> = timings.iter().collect();
@@ -91,7 +91,7 @@ pub fn build_entry(timings: &[NodeTiming], eval_ms: f64) -> Option<FeatureEntry>
 
     Some(FeatureEntry {
         expressions,
-        time_took,
+        time_took_ms,
         expensive_nodes,
     })
 }
@@ -142,8 +142,8 @@ mod tests {
             .collect();
         assert_eq!(ids, vec!["a", "b", "c", "d", "e"]);
 
-        // time_took = eval_ms(0) + sum = 6.75.
-        assert_eq!(entry.time_took, "6.75");
+        // time_took_ms = eval_ms(0) + sum = 6.75.
+        assert_eq!(entry.time_took_ms, "6.75");
 
         // expensive_nodes: top 3 DESC -> b(3.0), d(2.0), c(1.0).
         let ids: Vec<&str> = entry
@@ -152,7 +152,7 @@ mod tests {
             .map(|n| n.expression_id.as_str())
             .collect();
         assert_eq!(ids, vec!["b", "d", "c"]);
-        assert_eq!(entry.expensive_nodes[0].expression_time_in_ms, "3.00");
+        assert_eq!(entry.expensive_nodes[0].expression_time_ms, "3.00");
         assert_eq!(entry.expensive_nodes.len(), 3);
     }
 
@@ -163,8 +163,8 @@ mod tests {
         assert_eq!(entry.expressions.len(), 10);
         assert_eq!(entry.expressions.first().unwrap().expression_id, "n2"); // last 10 = n2..n11
         assert_eq!(entry.expressions.last().unwrap().expression_id, "n11");
-        // time_took still sums ALL 12 nodes (not just last 10).
-        assert_eq!(entry.time_took, "12.00");
+        // time_took_ms still sums ALL 12 nodes (not just last 10).
+        assert_eq!(entry.time_took_ms, "12.00");
     }
 
     #[test]

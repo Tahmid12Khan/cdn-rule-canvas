@@ -392,18 +392,18 @@ async fn json_eval_has_summary_and_per_step_time() {
     assert_eq!(labels, vec!["trim_json", "add_attribute"]);
     for e in expressions {
         assert_eq!(e["custom_expression_label"].as_str(), Some(""));
-        let t = e["expression_time_in_ms"].as_str().unwrap();
-        assert!(is_d_dd(t), "expression_time_in_ms d.dd, got {t:?}");
+        let t = e["expression_time_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "expression_time_ms d.dd, got {t:?}");
     }
-    let time_took = summary["time_took"].as_str().expect("time_took string");
-    assert!(is_d_dd(time_took), "time_took d.dd, got {time_took:?}");
+    let time_took_ms = summary["time_took_ms"].as_str().expect("time_took_ms string");
+    assert!(is_d_dd(time_took_ms), "time_took_ms d.dd, got {time_took_ms:?}");
 
     let expensive = summary["expensive_nodes"].as_array().unwrap();
     assert_eq!(expensive.len(), 2, "two expression nodes");
     let mut prev = f64::INFINITY;
     for n in expensive {
-        let t = n["expression_time_in_ms"].as_str().unwrap();
-        assert!(is_d_dd(t), "expression_time_in_ms d.dd, got {t:?}");
+        let t = n["expression_time_ms"].as_str().unwrap();
+        assert!(is_d_dd(t), "expression_time_ms d.dd, got {t:?}");
         let parsed: f64 = t.parse().unwrap();
         assert!(parsed <= prev, "expensive_nodes DESC by time");
         prev = parsed;
