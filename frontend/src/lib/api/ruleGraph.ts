@@ -38,6 +38,10 @@ export const GraphNode = z.discriminatedUnion("kind", [
     kind: z.literal("expression"),
     id: z.string(),
     action: ProcessorConfig,
+    // Optional snake_case display name (spec §v2.3). Mirrors backend
+    // Node::Expression `custom_label: Option<String>` (skip-serialized when
+    // None) — omitted on the wire when unset.
+    custom_label: z.string().optional(),
     position: Position,
   }),
   z.object({

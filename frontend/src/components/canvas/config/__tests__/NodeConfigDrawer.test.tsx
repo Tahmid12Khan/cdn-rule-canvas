@@ -135,6 +135,103 @@ describe("NodeConfigDrawer (view-only mode)", () => {
   });
 });
 
+describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
+  const CUSTOM_LABEL_MESSAGE =
+    "Custom name must be snake_case (lowercase letters, digits, single underscores) or left empty.";
+  const OUTCOME_ID = "11111111-1111-1111-1111-111111111111";
+
+  function openExpression() {
+    const s = useRuleBuilderStore.getState();
+    s.addNode("anonymous", {
+      id: "a1",
+      type: "expressionNode",
+      position: { x: 0, y: 0 },
+      data: { action: { type: "apply_outcome", outcome_id: OUTCOME_ID } },
+    });
+    s.openNodeConfig("a1");
+    if (!useRuleBuilderStore.getState().isEditing) s.toggleEdit();
+  }
+
+  it("renders the optional Custom name input for an expression node", async () => {
+    openExpression();
+    renderWithQuery(
+      <NodeConfigDrawer
+        canvasKey="anonymous"
+        outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
+      />,
+    );
+    expect(await screen.findByLabelText(/Custom name/)).toBeInTheDocument();
+  });
+
+  it("accepts a valid snake_case custom name and persists it on Save", async () => {
+    const user = userEvent.setup();
+    openExpression();
+    renderWithQuery(
+      <NodeConfigDrawer
+        canvasKey="anonymous"
+        outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
+      />,
+    );
+    // Wait for the manifest-driven form (and the custom-name input) to mount.
+    await screen.findByLabelText(/Custom name/);
+    // Pick the outcome so the form is valid.
+    await user.selectOptions(screen.getByLabelText(/Outcome/), OUTCOME_ID);
+    await user.type(screen.getByLabelText(/Custom name/), "show_paywall");
+    expect(screen.queryByText(CUSTOM_LABEL_MESSAGE)).toBeNull();
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    await waitFor(() => expect(saveBtn).toBeEnabled());
+    await user.click(saveBtn);
+    const node = useRuleBuilderStore
+      .getState()
+      .canvases.anonymous.nodes.find((n) => n.id === "a1");
+    expect(
+      node && "custom_label" in node.data && node.data.custom_label,
+    ).toBe("show_paywall");
+  });
+
+  it("rejects uppercase / space / leading-underscore with the inline message and disables Save", async () => {
+    const user = userEvent.setup();
+    openExpression();
+    renderWithQuery(
+      <NodeConfigDrawer
+        canvasKey="anonymous"
+        outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
+      />,
+    );
+    await screen.findByLabelText(/Custom name/);
+    await user.selectOptions(screen.getByLabelText(/Outcome/), OUTCOME_ID);
+    const input = screen.getByLabelText(/Custom name/);
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+
+    for (const bad of ["Paywall", "show paywall", "_paywall"]) {
+      await user.clear(input);
+      await user.type(input, bad);
+      await waitFor(() =>
+        expect(screen.getByText(CUSTOM_LABEL_MESSAGE)).toBeInTheDocument(),
+      );
+      expect(saveBtn).toBeDisabled();
+    }
+  });
+
+  it("allows an empty custom name (Save stays enabled)", async () => {
+    const user = userEvent.setup();
+    openExpression();
+    renderWithQuery(
+      <NodeConfigDrawer
+        canvasKey="anonymous"
+        outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
+      />,
+    );
+    await screen.findByLabelText(/Custom name/);
+    await user.selectOptions(screen.getByLabelText(/Outcome/), OUTCOME_ID);
+    // Custom name left blank.
+    expect(screen.queryByText(CUSTOM_LABEL_MESSAGE)).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    );
+  });
+});
+
 describe("NodeConfigDrawer required_unless", () => {
   beforeEach(() => {
     useRuleBuilderStore.getState().toggleEdit();

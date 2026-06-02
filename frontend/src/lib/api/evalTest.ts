@@ -72,20 +72,24 @@ export const JourneyStep = z.object({
 });
 export type JourneyStep = z.infer<typeof JourneyStep>;
 
+// One expression node in the summary (features-matched-spec §v2.2). Same object
+// shape for both `expressions` and `expensive_nodes`. `custom_expression_label`
+// is the node's custom_label (v2.3), "" when unset. Times are "d.dd" strings.
+export const SummaryExpression = z.object({
+  expression_id: z.string(),
+  expression_label: z.string(),
+  custom_expression_label: z.string(),
+  expression_time_in_ms: z.string(),
+});
+export type SummaryExpression = z.infer<typeof SummaryExpression>;
+
 // Per-feature timing summary for the canvas under test (features-matched-spec
-// §5). Mirrors a single feature's `features_matched` entry. All times are
-// strings formatted "d.dd" so trailing zeros survive (0.10, not 0.1).
+// §5 / §v2.2). Mirrors a single feature's `feature_expressions` entry. All
+// times are strings formatted "d.dd" so trailing zeros survive (0.10, not 0.1).
 export const EvalSummary = z.object({
-  outcome_ids: z.array(z.string()),
-  outcome_labels: z.array(z.string()),
+  expressions: z.array(SummaryExpression),
   time_took: z.string(),
-  expensive_nodes: z.array(
-    z.object({
-      outcome_id: z.string(),
-      outcome_label: z.string(),
-      outcome_time_in_ms: z.string(),
-    }),
-  ),
+  expensive_nodes: z.array(SummaryExpression),
 });
 export type EvalSummary = z.infer<typeof EvalSummary>;
 

@@ -214,12 +214,13 @@ export interface RuleBuilderState {
     processor: ProcessorConfig,
   ) => void;
   // Update an expression node's action config (+ optional resolved outcome
-  // title for apply_outcome display).
+  // title for apply_outcome display, + optional custom_label — spec §v2.3).
   updateNodeAction: (
     k: CanvasKey,
     nodeId: string,
     action: ProcessorConfig,
     outcomeTitle?: string,
+    customLabel?: string,
   ) => void;
 
   // --- save support ---
@@ -542,9 +543,11 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       };
     }),
 
-  updateNodeAction: (k, nodeId, action, outcomeTitle) =>
+  updateNodeAction: (k, nodeId, action, outcomeTitle, customLabel) =>
     set((state) => {
       const canvas = state.canvases[k];
+      // Persist a trimmed custom_label; "" / blank => undefined (no custom name).
+      const custom_label = customLabel?.trim() ? customLabel.trim() : undefined;
       return {
         dirty: true,
         testHighlight: null,
@@ -554,7 +557,7 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
             ...canvas,
             nodes: canvas.nodes.map((n) =>
               n.id === nodeId && n.type === "expressionNode"
-                ? { ...n, data: { ...n.data, action, outcomeTitle } }
+                ? { ...n, data: { ...n.data, action, outcomeTitle, custom_label } }
                 : n,
             ),
           },

@@ -28,10 +28,13 @@ export interface DecisionNodeData {
 // Performs one body action and passes through. `action` is the generic
 // ProcessorConfig (`{ type, …fields }`). For `apply_outcome` the action carries
 // `outcome_id`; `outcomeTitle` is a denormalized display cache (NOT persisted),
-// re-resolved from the outcomes query on deserialize.
+// re-resolved from the outcomes query on deserialize. `custom_label` is an
+// optional snake_case display name persisted on the wire (spec §v2.3); absent /
+// "" = no custom name.
 export interface ExpressionNodeData {
   action: ProcessorConfig;
   outcomeTitle?: string;
+  custom_label?: string;
 }
 // Terminal. Stops the flow. Zero outgoing edges. ≥1 per non-empty canvas.
 export interface EndNodeData {

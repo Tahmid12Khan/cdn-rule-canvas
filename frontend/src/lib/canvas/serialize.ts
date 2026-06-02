@@ -34,10 +34,14 @@ export function serializeCanvas(
           };
         }
         if (n.type === "expressionNode") {
+          // Omit custom_label when empty/absent so the wire mirrors the
+          // backend's skip_serializing_if = Option::is_none (spec §v2.3).
+          const customLabel = n.data.custom_label?.trim();
           return {
             kind: "expression",
             id: n.id,
             action: n.data.action,
+            ...(customLabel ? { custom_label: customLabel } : {}),
             position,
           };
         }

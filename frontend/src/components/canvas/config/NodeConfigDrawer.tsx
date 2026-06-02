@@ -19,6 +19,7 @@ import {
   type OutcomeSelectOption,
 } from "@/components/canvas/config/GenericNodeForm";
 import { useNodeTypes } from "@/hooks/useNodeTypes";
+import { validateCustomLabel } from "@/lib/canvas/customLabel";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { CanvasKey, ProcessorConfig, RFNode } from "@/lib/canvas/types";
 
@@ -66,6 +67,8 @@ export function NodeConfigDrawer({
       ? node.data.action
       : null;
   const spec = initial ? specByKind(initial.type) : undefined;
+  // Expression nodes carry an optional snake_case custom name (spec §v2.3).
+  const initialCustomLabel = isExpression ? (node.data.custom_label ?? "") : "";
 
   // View-only when the version is not in edit mode. Decision forms still load
   // but render disabled; Save/Delete/discard are suppressed.
@@ -73,22 +76,30 @@ export function NodeConfigDrawer({
 
   const [draft, setDraft] = useState<ProcessorConfig | null>(initial);
   const [valid, setValid] = useState(false);
+  const [customLabel, setCustomLabel] = useState(initialCustomLabel);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Re-seed draft whenever a new node is opened.
   useEffect(() => {
     setDraft(initial);
     setValid(false);
+    setCustomLabel(initialCustomLabel);
     setConfirmDiscard(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configNodeId]);
+
+  // Inline error for the custom-name field (null = valid; empty counts valid).
+  const customLabelError = isExpression
+    ? validateCustomLabel(customLabel)
+    : null;
 
   const dirty =
     !readOnly &&
     hasForm &&
     initial != null &&
     draft != null &&
-    !sameProcessor(draft, initial);
+    (!sameProcessor(draft, initial) ||
+      (isExpression && customLabel.trim() !== initialCustomLabel.trim()));
 
   function close() {
     setConfirmDiscard(false);
@@ -108,13 +119,15 @@ export function NodeConfigDrawer({
     if (isDecision) {
       updateNodeProcessor(canvasKey, node.id, draft);
     } else if (isExpression) {
+      // Block save on an invalid custom name (spec §v2.3).
+      if (customLabelError) return;
       // For apply_outcome, cache the chosen outcome's title for display.
       const outcomeId = draft.outcome_id;
       const outcomeTitle =
         typeof outcomeId === "string"
           ? outcomes.find((o) => o.id === outcomeId)?.title
           : undefined;
-      updateNodeAction(canvasKey, node.id, draft, outcomeTitle);
+      updateNodeAction(canvasKey, node.id, draft, outcomeTitle, customLabel);
     } else {
       return;
     }
@@ -215,6 +228,32 @@ export function NodeConfigDrawer({
               </p>
             )}
 
+            {/* Expression nodes: optional snake_case custom name (spec §v2.3). */}
+            {isExpression && initial && spec && (
+              <div className="mt-4">
+                <label
+                  htmlFor="field-custom_label"
+                  className="mb-1 block text-sm font-medium text-nav"
+                >
+                  Custom name (optional)
+                </label>
+                <input
+                  id="field-custom_label"
+                  type="text"
+                  value={customLabel}
+                  onChange={(e) => setCustomLabel(e.target.value)}
+                  readOnly={readOnly}
+                  disabled={readOnly}
+                  placeholder="e.g. show_paywall"
+                  aria-invalid={Boolean(customLabelError) || undefined}
+                  className="w-full rounded-md border border-status-prevBg px-3 py-2 text-sm focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                {customLabelError && (
+                  <p className="mt-1 text-xs text-danger">{customLabelError}</p>
+                )}
+              </div>
+            )}
+
             {/* Start: persisted entry marker. */}
             {isStart && (
               <dl className="space-y-3" data-testid="start-inspect">
@@ -269,7 +308,7 @@ export function NodeConfigDrawer({
                   <button
                     type="button"
                     onClick={onSave}
-                    disabled={!valid}
+                    disabled={!valid || Boolean(customLabelError)}
                     className="rounded-md bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Save

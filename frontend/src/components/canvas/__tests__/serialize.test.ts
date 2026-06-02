@@ -155,6 +155,53 @@ describe("deserialize of empty backend canvas (spec §6)", () => {
   });
 });
 
+describe("custom_label round-trip (spec §v2.3)", () => {
+  const withCustomLabel: RuleGraph = {
+    anonymous: {
+      root_node_id: "start",
+      nodes: [
+        { kind: "start", id: "start", position: { x: 0, y: 0 } },
+        {
+          kind: "expression",
+          id: "n_act",
+          action: { type: "apply_outcome", outcome_id: OUTCOME_ID },
+          custom_label: "show_paywall",
+          position: { x: 100, y: 100 },
+        },
+        { kind: "end", id: "end", position: { x: 200, y: 200 } },
+      ],
+      edges: [
+        { id: "e0", source_node_id: "start", target_node_id: "n_act", branch: "yes" },
+        { id: "e1", source_node_id: "n_act", target_node_id: "end", branch: "yes" },
+      ],
+    },
+    registered: emptyCanonical,
+    customer: emptyCanonical,
+  };
+
+  it("round-trips custom_label on an expression node", () => {
+    const canvases = deserializeRuleGraph(withCustomLabel, () => "Paywall");
+    const exprNode = canvases.anonymous.nodes.find(
+      (n) => n.type === "expressionNode",
+    );
+    expect(
+      exprNode && "custom_label" in exprNode.data && exprNode.data.custom_label,
+    ).toBe("show_paywall");
+    const back = serializeRuleGraph(canvases);
+    expect(back).toEqual(withCustomLabel);
+  });
+
+  it("omits custom_label on the wire when unset (matches backend skip)", () => {
+    // The base fixture has NO custom_label — serialize must not emit the key.
+    const canvases = deserializeRuleGraph(fixture, () => "X");
+    const back = serializeRuleGraph(canvases);
+    const serializedExpr = back.anonymous.nodes.find(
+      (n) => n.kind === "expression",
+    );
+    expect(serializedExpr && "custom_label" in serializedExpr).toBe(false);
+  });
+});
+
 describe("serialize PERSISTS the start + end nodes", () => {
   const start: RFNode = {
     id: START_NODE_ID,

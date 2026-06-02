@@ -43,10 +43,10 @@ describe("buildPalette (manifest-driven)", () => {
     });
   });
 
-  it("builds an Apply Outcome expression chip in the content category", () => {
+  it("builds an Apply expression chip in the content category", () => {
     const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES);
     const content = palette.find((c) => c.id === "content")!;
-    const apply = content.chips.find((c) => c.label === "Apply Outcome")!;
+    const apply = content.chips.find((c) => c.label === "Apply")!;
     expect(apply.enabled).toBe(true);
     expect(apply.payload).toEqual({
       kind: "expression",

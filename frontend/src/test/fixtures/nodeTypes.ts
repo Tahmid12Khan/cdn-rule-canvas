@@ -247,7 +247,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
     },
     {
       kind: "apply_outcome",
-      label: "Apply Outcome",
+      label: "Apply",
       category: "content",
       applies_to: "all",
       node_kind: "expression",

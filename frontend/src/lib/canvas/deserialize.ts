@@ -78,7 +78,8 @@ export function deserializeCanvas(
         id: n.id,
         type: "expressionNode",
         position,
-        data: { action: n.action, outcomeTitle },
+        // custom_label round-trips off the wire (spec §v2.3); absent when unset.
+        data: { action: n.action, outcomeTitle, custom_label: n.custom_label },
       };
     }
     return {
