@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 This repo holds **two projects**:
-- **zen** — upstream GoRules Business Rules Engine (Rust). Cargo workspace: `core/*`, `bindings/*`, `playground`. Docs: `README.md`.
+- **zen** — upstream GoRules Business Rules Engine (Rust), vendored as a library. Cargo workspace: `core/engine`, `core/expression`, `core/types`, `core/template`, `core/macros`. (The upstream bindings / playground / examples / test-data were removed — RRE only needs these 5 crates.)
 - **RRE** (Response Rule Engine) — app built ON zen: visual paywall/regwall rule authoring + a request-time HTML-rewriting proxy. Dirs: `backend/ proxy/ frontend/ infra/`. Docs: `RRE_README.md`, `docs/architecture.md`.
 
 **`CONTRACTS.md` (repo root) is the authoritative spec** for DB schema, REST routes, rule_graph JSON, and zen integration. It wins over any `tasks/*.md` on conflicts. Read it before backend/frontend/proxy work.

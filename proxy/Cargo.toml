@@ -9,8 +9,8 @@ edition = "2021"
 publish = false
 
 [dependencies]
-# zen via PATH (mirrors playground/Cargo.toml). zen-types is re-exported through
-# zen_engine::model::* — do NOT add a direct zen-types path dep.
+# zen via PATH. zen-types is re-exported through zen_engine::model::* — do NOT
+# add a direct zen-types path dep.
 zen-engine = { path = "../core/engine" }
 zen-expression = { path = "../core/expression" }
 

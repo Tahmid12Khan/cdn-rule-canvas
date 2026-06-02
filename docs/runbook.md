@@ -103,13 +103,11 @@ Every proxied response carries `X-RRE-Trace-Id` and `X-RRE-Apply-Status`
 | Frontend shows backend offline | `NEXT_PUBLIC_API_BASE` baked wrong at build | rebuild with the correct build-arg (`make restart`) |
 | Stale data after schema change | old volume | `make down-clean` then `make up` |
 
-## CI
+## Quality gates
 
-`.github/workflows/rre-ci.yml` runs the per-service gate chain
-(fmt/lint → typecheck → test → build) for `backend`, `proxy`, and `frontend`,
-then builds all three Docker images. The aggregate `ci-ok` job is the one to
-require in branch protection for `main`. Rust caches key on `Cargo.lock`
-(`Swatinem/rust-cache`); the frontend caches `~/.npm` on the lockfile hash.
+There is no CI workflow. `make check` runs the per-service gate chain
+(fmt/lint → typecheck → test → build) for `backend`, `proxy`, and `frontend`
+locally; run it before pushing.
 
 ## Manual host-side runs (without Docker)
 

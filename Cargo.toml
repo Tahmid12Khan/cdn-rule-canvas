@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "core/*",
-    "bindings/*",
-    "playground"
+    "core/engine",
+    "core/expression",
+    "core/types",
+    "core/template",
+    "core/macros",
 ]
 
 [workspace.dependencies]

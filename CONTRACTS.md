@@ -696,7 +696,7 @@ file by the frontend scaffold; the proxy does not consume frontend types.
 
 ## ZEN-ENGINE INTEGRATION FACTS (verified)
 
-- Depend via PATH (playground/Cargo.toml template): `zen-engine = { path = "../core/engine" }`,
+- Depend via PATH: `zen-engine = { path = "../core/engine" }`,
   `zen-expression = { path = "../core/expression" }`.
 - Evaluate:
   ```rust

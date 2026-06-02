@@ -15,12 +15,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # The core/* crates inherit their deps from the root workspace, so the root
-# Cargo.toml must be present for them to resolve. Trim its `members` to the
-# core/* crates actually copied into this context (bindings/* and playground are
-# not). proxy/ carries its own empty [workspace] table, so it stays a standalone
-# crate detached from this root workspace.
+# Cargo.toml must be present for them to resolve. proxy/ carries its own empty
+# [workspace] table, so it stays a standalone crate detached from this root
+# workspace.
 COPY Cargo.toml ./Cargo.toml
-RUN sed -i '/"bindings\/\*"/d; /"playground"/d' Cargo.toml
 
 # zen path deps the proxy builds against + the proxy crate itself.
 COPY core ./core

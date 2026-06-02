@@ -87,8 +87,8 @@ untouched" — the applier and evaluator never panic into the client.
 
 ## zen-engine integration
 
-The proxy reuses the zen JDM decision engine (the same engine that powers the
-playground). Each canvas Decision node maps to a `CustomNode` + `SwitchNode`
+The proxy reuses the zen JDM decision engine. Each canvas Decision node maps to
+a `CustomNode` + `SwitchNode`
 pair; each Outcome node to an `ExpressionNode` + `OutputNode`. A single
 `CanvasNodeAdapter` dispatches custom nodes to pure `CanvasProcessor`
 implementations (`metaTags`, `deviceType`). Branch routing relies on

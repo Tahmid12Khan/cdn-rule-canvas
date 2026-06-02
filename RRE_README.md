@@ -1,9 +1,8 @@
 # Response Rule Engine (RRE)
 
-> This file documents the **RRE** application that lives alongside the upstream
-> `zen` rules engine in this repository. It does **not** replace the main
-> [`README.md`](./README.md) (which documents `zen` itself). RRE reuses the
-> `core/*` zen crates as a library — see [`docs/architecture.md`](docs/architecture.md).
+> Deep-dive companion to the top-level [`README.md`](./README.md). RRE reuses the
+> vendored `zen` rules engine (`core/*`, MIT) as a library — see
+> [`docs/architecture.md`](docs/architecture.md).
 
 RRE turns visual decision graphs into request-time HTML transformations. Editors
 build rule graphs in a web admin; a high-throughput proxy evaluates them against
@@ -93,9 +92,8 @@ make proxy-check    # just the proxy crate
 make frontend-check # just the frontend
 ```
 
-CI (`.github/workflows/rre-ci.yml`) runs the same per-service gate chain on a
-matrix, then builds all Docker images; the aggregate `ci-ok` job gates merges to
-`main`.
+There is no CI workflow — `make check` runs the per-service gate chain locally;
+run it before pushing.
 
 End-to-end:
 

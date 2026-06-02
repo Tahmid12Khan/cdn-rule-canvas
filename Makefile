@@ -41,7 +41,7 @@ ps: ## Show service status
 restart: ## Recreate and restart all services
 	@$(COMPOSE) up --build -d
 
-# --- local quality gates (mirror .github/workflows/rre-ci.yml) ----------------
+# --- local quality gates ------------------------------------------------------
 
 backend-check: ## fmt + clippy + test + build the backend crate
 	cd backend && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
