@@ -36,7 +36,7 @@ async fn migration_0007_transforms_outcomes_to_pipeline() {
     let pool = &db.state.pool;
 
     let up = include_str!("../migrations/0007_expression_nodes.up.sql");
-    sqlx::query(&function_block(up))
+    sqlx::query(sqlx::AssertSqlSafe(function_block(up)))
         .execute(pool)
         .await
         .expect("recreate up function");
@@ -142,7 +142,7 @@ async fn migration_0007_transforms_outcomes_to_pipeline() {
 
     // Best-effort down reverse: apply_outcome expression -> outcome again.
     let down = include_str!("../migrations/0007_expression_nodes.down.sql");
-    sqlx::query(&function_block(down))
+    sqlx::query(sqlx::AssertSqlSafe(function_block(down)))
         .execute(pool)
         .await
         .expect("recreate down function");

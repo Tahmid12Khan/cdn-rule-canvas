@@ -29,11 +29,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/features", post(create).get(list))
         .route(
-            "/features/:fid",
+            "/features/{fid}",
             axum::routing::get(get).patch(update).delete(delete),
         )
         .route(
-            "/features/:fid/active-version",
+            "/features/{fid}/active-version",
             axum::routing::get(active_version),
         )
 }
@@ -63,7 +63,7 @@ pub async fn create(
     get,
     path = "/api/v1/features",
     params(PageParams),
-    responses((status = 200, description = "Feature page", body = crate::schemas::pagination::PageFeatureRead)),
+    responses((status = 200, description = "Feature page", body = inline(Page<FeatureRead>))),
     tag = "features"
 )]
 pub async fn list(

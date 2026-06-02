@@ -22,7 +22,7 @@ pub async fn insert(
     let sql = format!(
         r#"INSERT INTO rre.features (id, name, "type") VALUES ($1, $2, $3) RETURNING {COLS}"#
     );
-    sqlx::query_as::<_, Feature>(&sql)
+    sqlx::query_as::<_, Feature>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(name)
         .bind(r#type)
@@ -33,7 +33,7 @@ pub async fn insert(
 /// Find a feature by slug. `None` when absent.
 pub async fn find(pool: &PgPool, id: &str) -> Result<Option<Feature>, sqlx::Error> {
     let sql = format!("SELECT {COLS} FROM rre.features WHERE id = $1");
-    sqlx::query_as::<_, Feature>(&sql)
+    sqlx::query_as::<_, Feature>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -48,7 +48,7 @@ pub async fn list_paged(
     let sql = format!(
         "SELECT {COLS} FROM rre.features ORDER BY created_at DESC, id ASC LIMIT $1 OFFSET $2"
     );
-    sqlx::query_as::<_, Feature>(&sql)
+    sqlx::query_as::<_, Feature>(sqlx::AssertSqlSafe(sql))
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
@@ -72,7 +72,7 @@ pub async fn update_name(
     let sql = format!(
         "UPDATE rre.features SET name = $2, updated_at = now() WHERE id = $1 RETURNING {COLS}"
     );
-    sqlx::query_as::<_, Feature>(&sql)
+    sqlx::query_as::<_, Feature>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(name)
         .fetch_optional(pool)

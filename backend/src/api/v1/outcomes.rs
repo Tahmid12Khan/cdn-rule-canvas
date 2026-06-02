@@ -33,16 +33,16 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
-            "/versions/:vid/outcomes",
+            "/versions/{vid}/outcomes",
             get_route(list_for_version).post(create),
         )
         .route(
-            "/outcomes/:oid",
+            "/outcomes/{oid}",
             get_route(get).patch(update).delete(delete),
         )
-        .route("/outcomes/:oid/clone", post_route(clone))
-        .route("/outcomes/:oid/reorder", post_route(reorder_components))
-        .route("/outcomes/:oid/components", post_route(add_component))
+        .route("/outcomes/{oid}/clone", post_route(clone))
+        .route("/outcomes/{oid}/reorder", post_route(reorder_components))
+        .route("/outcomes/{oid}/components", post_route(add_component))
 }
 
 /// Map a `validator::ValidationErrors` into the uniform 422 envelope.

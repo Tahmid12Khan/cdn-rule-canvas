@@ -50,7 +50,7 @@ where
     E: PgExecutor<'e>,
 {
     let sql = format!("SELECT {VERSION_COLUMNS} FROM rre.versions WHERE id = $1");
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(executor)
         .await
@@ -69,7 +69,7 @@ where
         "SELECT {VERSION_COLUMNS} FROM rre.versions \
          WHERE feature_id = $1 AND version_number = $2"
     );
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(feature_id)
         .bind(version_number)
         .fetch_optional(executor)
@@ -115,7 +115,7 @@ where
         "SELECT {VERSION_COLUMNS} FROM rre.versions \
          WHERE feature_id = $1 AND status = $2"
     );
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(feature_id)
         .bind(status)
         .fetch_optional(executor)
@@ -142,7 +142,7 @@ where
          VALUES ($1, $2, $3, $4, $5, $6, $6) \
          RETURNING {VERSION_COLUMNS}"
     );
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(feature_id)
         .bind(version_number)
         .bind(description)
@@ -178,7 +178,7 @@ where
          WHERE id = $1 \
          RETURNING {VERSION_COLUMNS}"
     );
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(description)
         .bind(rule_graph)
@@ -200,7 +200,7 @@ where
 {
     let sql =
         format!("UPDATE rre.versions SET status = $2 WHERE id = $1 RETURNING {VERSION_COLUMNS}");
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(status)
         .fetch_one(executor)
@@ -216,7 +216,7 @@ where
     E: PgExecutor<'e>,
 {
     let sql = format!("SELECT {VERSION_COLUMNS} FROM rre.versions WHERE id = $1 FOR UPDATE");
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(executor)
         .await
@@ -288,7 +288,7 @@ pub async fn list_paged(
          ORDER BY version_number DESC \
          LIMIT $4 OFFSET $5"
     );
-    sqlx::query_as::<_, Version>(&sql)
+    sqlx::query_as::<_, Version>(sqlx::AssertSqlSafe(sql))
         .bind(feature_id)
         .bind(status)
         .bind(search)
@@ -331,7 +331,7 @@ pub async fn list_outcomes(pool: &PgPool, version_id: Uuid) -> Result<Vec<Outcom
         "SELECT {OUTCOME_COLUMNS} FROM rre.outcomes \
          WHERE version_id = $1 ORDER BY order_index ASC, created_at ASC"
     );
-    sqlx::query_as::<_, Outcome>(&sql)
+    sqlx::query_as::<_, Outcome>(sqlx::AssertSqlSafe(sql))
         .bind(version_id)
         .fetch_all(pool)
         .await
@@ -347,7 +347,7 @@ pub async fn list_components_for_outcomes(
         "SELECT {COMPONENT_COLUMNS} FROM rre.components \
          WHERE outcome_id = ANY($1) ORDER BY order_index ASC, created_at ASC"
     );
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(outcome_ids)
         .fetch_all(pool)
         .await

@@ -41,10 +41,6 @@ impl PageParams {
 
 /// Generic paginated response envelope.
 #[derive(Debug, Serialize, ToSchema)]
-#[aliases(
-    PageFeatureRead = Page<crate::schemas::feature::FeatureRead>,
-    PageVersionSummary = Page<crate::schemas::version::VersionSummary>
-)]
 pub struct Page<T> {
     /// Items on the current page.
     pub items: Vec<T>,

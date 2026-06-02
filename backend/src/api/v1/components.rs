@@ -26,7 +26,7 @@ use crate::state::AppState;
 
 /// Build the per-component sub-router (`/components/{cid}`).
 pub fn router() -> Router<AppState> {
-    Router::new().route("/components/:cid", patch_route(update).delete(delete))
+    Router::new().route("/components/{cid}", patch_route(update).delete(delete))
 }
 
 /// Map a `validator::ValidationErrors` into the uniform 422 envelope.

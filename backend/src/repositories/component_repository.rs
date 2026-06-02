@@ -31,7 +31,7 @@ where
          VALUES ($1, $2, $3, $4, $5, $6, $7) \
          RETURNING {COLS}"
     );
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(outcome_id)
         .bind(slug)
@@ -49,7 +49,7 @@ where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
     let sql = format!("SELECT {COLS} FROM rre.components WHERE id = $1");
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(exec)
         .await
@@ -68,7 +68,7 @@ where
          WHERE outcome_id = $1 \
          ORDER BY order_index ASC, created_at ASC"
     );
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(outcome_id)
         .fetch_all(exec)
         .await
@@ -88,7 +88,7 @@ where
          WHERE outcome_id = ANY($1) \
          ORDER BY outcome_id, order_index ASC, created_at ASC"
     );
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(outcome_ids)
         .fetch_all(exec)
         .await
@@ -118,7 +118,7 @@ where
          WHERE id = $1 \
          RETURNING {COLS}"
     );
-    sqlx::query_as::<_, Component>(&sql)
+    sqlx::query_as::<_, Component>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(slug)
         .bind(r#type)

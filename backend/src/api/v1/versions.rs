@@ -28,14 +28,17 @@ use crate::{
 /// All version routes, nested under a feature.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/features/:fid/versions", post_route(create).get(list))
+        .route("/features/{fid}/versions", post_route(create).get(list))
         .route(
-            "/features/:fid/versions/:vnum",
+            "/features/{fid}/versions/{vnum}",
             get_route(get).patch(update).delete(delete),
         )
-        .route("/features/:fid/versions/:vnum/publish", post_route(publish))
         .route(
-            "/features/:fid/versions/:vnum/unpublish",
+            "/features/{fid}/versions/{vnum}/publish",
+            post_route(publish),
+        )
+        .route(
+            "/features/{fid}/versions/{vnum}/unpublish",
             post_route(unpublish),
         )
 }
@@ -73,7 +76,7 @@ pub async fn create(
         VersionListQuery
     ),
     responses(
-        (status = 200, description = "Version page", body = PageVersionSummary),
+        (status = 200, description = "Version page", body = inline(Page<VersionSummary>)),
         (status = 404, description = "Feature not found")
     ),
     tag = "versions"
