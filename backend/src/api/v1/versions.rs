@@ -215,23 +215,5 @@ pub async fn delete(
 
 /// Run `validator` checks and convert failures into the uniform 422 envelope.
 fn validate<T: Validate>(body: &T) -> AppResult<()> {
-    body.validate().map_err(|errors| {
-        let details = errors
-            .field_errors()
-            .into_iter()
-            .flat_map(|(field, errs)| {
-                errs.iter().map(move |e| {
-                    crate::error::ValidationDetail::new(
-                        field.to_string(),
-                        e.message
-                            .as_ref()
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| e.code.to_string()),
-                        e.code.to_string(),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        AppError::validation(details)
-    })
+    body.validate().map_err(AppError::from)
 }

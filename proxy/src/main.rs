@@ -23,7 +23,12 @@ async fn main() -> anyhow::Result<()> {
     observability::init();
 
     // One reqwest client per process (connection pool), shared via AppState.
+    // A reverse proxy must NOT follow upstream 3xx redirects — that turns a
+    // malicious/compromised `Location` (169.254.169.254, RFC1918, the backend)
+    // into an SSRF pivot. Disable redirect-following and surface the 3xx to the
+    // client unchanged.
     let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(settings.upstream_connect_timeout_secs))
         .timeout(Duration::from_secs(settings.upstream_read_timeout_secs))
         .build()

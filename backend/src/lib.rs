@@ -38,21 +38,17 @@ pub fn build_app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Construct the CORS layer. Falls back to a permissive any-origin policy if the
-/// configured origin is not a valid header value.
+/// Construct the CORS layer scoped to `frontend_origin`. Fails CLOSED: an
+/// unparseable `FRONTEND_ORIGIN` is a fatal startup configuration error
+/// (panics at build time, never at request time), rather than silently
+/// downgrading to a permissive any-origin policy.
 fn build_cors(frontend_origin: &str) -> CorsLayer {
     let layer = CorsLayer::new()
         .allow_methods(AllowMethods::any())
         .allow_headers(AllowHeaders::any());
 
-    match HeaderValue::from_str(frontend_origin) {
-        Ok(origin) => layer.allow_origin(origin),
-        Err(_) => {
-            tracing::warn!(
-                origin = frontend_origin,
-                "invalid FRONTEND_ORIGIN; falling back to any-origin CORS"
-            );
-            layer.allow_origin(tower_http::cors::Any)
-        }
-    }
+    let origin = HeaderValue::from_str(frontend_origin).unwrap_or_else(|_| {
+        panic!("invalid FRONTEND_ORIGIN '{frontend_origin}': not a valid header value")
+    });
+    layer.allow_origin(origin)
 }

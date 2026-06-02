@@ -5,6 +5,7 @@
 // non-builtin outcomes, Clone / Delete. Add Outcome creates a new outcome.
 // Reuses the canvas-subtree's minimal outcomes API to avoid a collision with
 // Task 15's `lib/api/outcomes.ts`. (Task 11/15 reuse)
+import { useState } from "react";
 import Link from "next/link";
 import {
   useMutation,
@@ -13,11 +14,13 @@ import {
 } from "@tanstack/react-query";
 import { z } from "zod";
 
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { apiSend } from "@/lib/api/client";
 import {
   CanvasOutcome,
   listCanvasOutcomes,
 } from "@/lib/api/canvasOutcomes";
+import { toUserError, type UserError } from "@/lib/errors/userError";
 import { useOnboardingStore } from "@/state/onboardingStore";
 
 interface OutcomeListSectionProps {
@@ -43,6 +46,9 @@ export function OutcomeListSection({
   const queryClient = useQueryClient();
   const completeOnboarding = useOnboardingStore((s) => s.complete);
   const queryKey = ["outcomes", versionId] as const;
+  // Surface add/clone/remove failures (409/5xx/network) instead of failing
+  // silently (mirrors ApplicabilityForm's toUserError + ErrorBanner pattern).
+  const [mutationError, setMutationError] = useState<UserError | null>(null);
 
   const { data: outcomes = [], isLoading } = useQuery({
     queryKey,
@@ -55,17 +61,30 @@ export function OutcomeListSection({
   const add = useMutation({
     mutationFn: () => createOutcome(versionId, "New Outcome"),
     onSuccess: () => {
+      setMutationError(null);
       completeOnboarding("outcome");
       return invalidate();
     },
+    onError: (err) =>
+      setMutationError(toUserError(err, { surface: "create" })),
   });
   const clone = useMutation({
     mutationFn: (oid: string) => cloneOutcome(oid),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setMutationError(null);
+      return invalidate();
+    },
+    onError: (err) =>
+      setMutationError(toUserError(err, { surface: "create" })),
   });
   const remove = useMutation({
     mutationFn: (oid: string) => deleteOutcome(oid),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setMutationError(null);
+      return invalidate();
+    },
+    onError: (err) =>
+      setMutationError(toUserError(err, { surface: "delete" })),
   });
 
   return (
@@ -83,6 +102,8 @@ export function OutcomeListSection({
           </button>
         )}
       </div>
+
+      {mutationError && <ErrorBanner error={mutationError} />}
 
       {isLoading ? (
         <p className="text-sm text-status-prev">Loading outcomes…</p>

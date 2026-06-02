@@ -64,6 +64,10 @@ fn active_version_body() -> serde_json::Value {
 }
 
 async fn spawn(upstream: &str, backend: &str) -> String {
+    spawn_with_cap(upstream, backend, 16 * 1024 * 1024).await
+}
+
+async fn spawn_with_cap(upstream: &str, backend: &str, max_upstream_body_bytes: usize) -> String {
     let settings = Settings {
         proxy_bind_addr: "127.0.0.1:0".to_string(),
         upstream_base_url: upstream.to_string(),
@@ -73,6 +77,8 @@ async fn spawn(upstream: &str, backend: &str) -> String {
         compiled_cache_capacity: 256,
         upstream_connect_timeout_secs: 2,
         upstream_read_timeout_secs: 10,
+        max_upstream_body_bytes,
+        max_decompressed_bytes: 16 * 1024 * 1024,
         feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };
@@ -305,4 +311,38 @@ async fn fails_open_when_backend_unavailable() {
     );
     let body = res.text().await.unwrap();
     assert!(body.contains("original"));
+}
+
+/// H2: an upstream body larger than `max_upstream_body_bytes` is rejected with a
+/// 502 (clean error) rather than buffered unbounded — the proxy never OOMs on a
+/// large/streamed upstream body.
+#[tokio::test]
+async fn rejects_oversized_upstream_body() {
+    let big = "x".repeat(64 * 1024); // 64 KiB body, cap set to 1 KiB below.
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/article/big"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(big.into_bytes(), "text/html; charset=utf-8"),
+        )
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
+
+    let base = spawn_with_cap(&upstream.uri(), &backend.uri(), 1024).await;
+
+    let res = reqwest::Client::new()
+        .get(format!("{base}/article/big"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 502, "oversized body -> 502 (H2)");
 }

@@ -70,3 +70,38 @@ fn unknown_operator_errors() {
     let cfg = json!({ "type": "meta_tags", "tag_name": "x", "operator": "startsWith" });
     assert!(p.evaluate(&cfg, &ctx("<html></html>")).is_err());
 }
+
+/// M5: when `needs_meta_tags` is false the HTML DOM is NOT parsed and `meta_tags`
+/// stays empty even though the body carries `<meta>` tags — the gate the evaluator
+/// uses to skip the parse for canvases without a meta_tags node.
+#[test]
+fn needs_meta_tags_false_skips_parse() {
+    let html = r#"<html><head><meta name="paywall" content="true"></head><body></body></html>"#;
+    let mut parts = EvaluationContextParts::from_request(
+        &HeaderMap::new(),
+        "/",
+        &HashMap::new(),
+        html.to_string(),
+        false,
+    );
+    parts.needs_meta_tags = false;
+    let ctx = parts.into_context();
+    assert!(
+        ctx.meta_tags.is_empty(),
+        "gated parse must leave meta_tags empty"
+    );
+
+    // The default (true) path still extracts them.
+    let parts = EvaluationContextParts::from_request(
+        &HeaderMap::new(),
+        "/",
+        &HashMap::new(),
+        html.to_string(),
+        false,
+    );
+    let ctx = parts.into_context();
+    assert_eq!(
+        ctx.meta_tags.get("paywall").map(String::as_str),
+        Some("true")
+    );
+}

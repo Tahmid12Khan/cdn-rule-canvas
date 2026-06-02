@@ -144,6 +144,7 @@ fn validate_target_path(target_path: &str) -> Result<(), String> {
 
 /// Create-component request body.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComponentCreate {
     /// Stable slug within the outcome.
     #[validate(length(min = 1, max = 120))]
@@ -160,6 +161,7 @@ pub struct ComponentCreate {
 
 /// Patch-component request body. All fields optional.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComponentUpdate {
     /// New slug.
     #[validate(length(min = 1, max = 120))]

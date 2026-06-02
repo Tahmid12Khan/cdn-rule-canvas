@@ -11,6 +11,7 @@ use crate::schemas::component::ComponentRead;
 
 /// Create-outcome request body.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct OutcomeCreate {
     /// Display title.
     #[validate(length(min = 1, max = 100))]
@@ -22,6 +23,7 @@ pub struct OutcomeCreate {
 
 /// Patch-outcome request body. All fields optional.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct OutcomeUpdate {
     /// New title.
     #[validate(length(min = 1, max = 100))]
@@ -75,6 +77,7 @@ impl OutcomeRead {
 
 /// One element of a reorder request body (`Vec<ReorderItem>`).
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReorderItem {
     /// Target component id.
     pub id: Uuid,

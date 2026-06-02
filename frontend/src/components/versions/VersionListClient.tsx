@@ -15,20 +15,28 @@ import { AddVersionDialog } from "@/components/versions/AddVersionDialog";
 import { DeploymentStatusRow } from "@/components/versions/DeploymentStatusRow";
 import { SearchInput } from "@/components/versions/SearchInput";
 import { VersionsTable } from "@/components/versions/VersionsTable";
-import { getFeature } from "@/lib/api/features";
+import { getFeature, type FeatureRead } from "@/lib/api/features";
 import { listVersions } from "@/lib/api/versions";
 import { toUserError } from "@/lib/errors/userError";
 
 const PAGE_SIZE = 20;
 
+type VersionsPage = Awaited<ReturnType<typeof listVersions>>;
+
 interface VersionListClientProps {
   featureId: string;
   featureType: string;
+  // SSR-prefetched seeds. Only valid for the initial query keys
+  // (page 1, empty search); used as initialData to skip the hydrate→fetch hop.
+  initialFeature?: FeatureRead;
+  initialVersions?: VersionsPage;
 }
 
 export function VersionListClient({
   featureId,
   featureType,
+  initialFeature,
+  initialVersions,
 }: VersionListClientProps) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -42,12 +50,16 @@ export function VersionListClient({
   const featureQuery = useQuery({
     queryKey: ["feature", featureId],
     queryFn: () => getFeature(featureId),
+    initialData: initialFeature,
   });
 
+  // The prefetch matches the initial key only (page 1 / empty search).
+  const isInitialVersionsKey = search === "" && page === 1;
   const versionsQuery = useQuery({
     queryKey: ["versions", featureId, { search, page, page_size: PAGE_SIZE }],
     queryFn: () =>
       listVersions(featureId, { search, page, page_size: PAGE_SIZE }),
+    initialData: isInitialVersionsKey ? initialVersions : undefined,
   });
 
   // Resolve a deployment version UUID -> its version_number using the loaded

@@ -23,7 +23,7 @@ use axum::{
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::error::{AppError, AppResult, ValidationDetail};
+use crate::error::{AppError, AppResult};
 use crate::schemas::component::{ComponentCreate, ComponentRead};
 use crate::schemas::outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem};
 use crate::services::outcome_service;
@@ -43,25 +43,6 @@ pub fn router() -> Router<AppState> {
         .route("/outcomes/{oid}/clone", post_route(clone))
         .route("/outcomes/{oid}/reorder", post_route(reorder_components))
         .route("/outcomes/{oid}/components", post_route(add_component))
-}
-
-/// Map a `validator::ValidationErrors` into the uniform 422 envelope.
-fn map_validation(errs: validator::ValidationErrors) -> AppError {
-    let details = errs
-        .field_errors()
-        .into_iter()
-        .flat_map(|(field, errors)| {
-            errors.iter().map(move |e| {
-                let msg = e
-                    .message
-                    .as_ref()
-                    .map(|m| m.to_string())
-                    .unwrap_or_else(|| e.code.to_string());
-                ValidationDetail::new(field.to_string(), msg, e.code.to_string())
-            })
-        })
-        .collect();
-    AppError::validation(details)
 }
 
 /// `GET /versions/{vid}/outcomes` — list outcomes (components nested, ordered).
@@ -102,7 +83,7 @@ pub async fn create(
     Path(vid): Path<Uuid>,
     Json(body): Json<OutcomeCreate>,
 ) -> AppResult<impl IntoResponse> {
-    body.validate().map_err(map_validation)?;
+    body.validate().map_err(AppError::from)?;
     let outcome = outcome_service::create(&state.pool, vid, body).await?;
     Ok((StatusCode::CREATED, Json(outcome)))
 }
@@ -145,7 +126,7 @@ pub async fn update(
     Path(oid): Path<Uuid>,
     Json(body): Json<OutcomeUpdate>,
 ) -> AppResult<Json<OutcomeRead>> {
-    body.validate().map_err(map_validation)?;
+    body.validate().map_err(AppError::from)?;
     let outcome = outcome_service::update(&state.pool, oid, body).await?;
     Ok(Json(outcome))
 }
@@ -232,7 +213,7 @@ pub async fn add_component(
     Path(oid): Path<Uuid>,
     Json(body): Json<ComponentCreate>,
 ) -> AppResult<impl IntoResponse> {
-    body.validate().map_err(map_validation)?;
+    body.validate().map_err(AppError::from)?;
     let component = outcome_service::add_component(&state.pool, oid, body).await?;
     Ok((StatusCode::CREATED, Json(component)))
 }

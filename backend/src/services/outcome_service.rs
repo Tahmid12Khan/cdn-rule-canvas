@@ -163,18 +163,22 @@ pub async fn create(
     version_id: Uuid,
     input: OutcomeCreate,
 ) -> AppResult<OutcomeRead> {
-    let status = outcomes::version_status(pool, version_id)
+    let mut tx = pool.begin().await?;
+
+    // Lock the governing version row FOR UPDATE before the draft check so a
+    // concurrent publish (which also locks the row) cannot slip past the guard.
+    let status = outcomes::version_status_for_update(&mut *tx, version_id)
         .await?
         .ok_or_else(|| version_not_found(version_id))?;
     require_draft(status)?;
 
-    let next = outcomes::max_order_index(pool, version_id)
+    let next = outcomes::max_order_index(&mut *tx, version_id)
         .await?
         .map(|m| m + 1)
         .unwrap_or(0);
 
     let outcome = outcomes::insert(
-        pool,
+        &mut *tx,
         Uuid::new_v4(),
         version_id,
         &input.title,
@@ -184,6 +188,7 @@ pub async fn create(
     )
     .await?;
 
+    tx.commit().await?;
     Ok(OutcomeRead::from_parts(outcome, Vec::new()))
 }
 
@@ -194,7 +199,9 @@ pub async fn update(
     outcome_id: Uuid,
     input: OutcomeUpdate,
 ) -> AppResult<OutcomeRead> {
-    let (_vid, status) = outcomes::version_status_for_outcome(pool, outcome_id)
+    let mut tx = pool.begin().await?;
+
+    let (_vid, status) = outcomes::version_status_for_outcome_for_update(&mut *tx, outcome_id)
         .await?
         .ok_or_else(|| outcome_not_found(outcome_id))?;
     require_draft(status)?;
@@ -205,7 +212,7 @@ pub async fn update(
     let touch_description = input.description.as_ref().map(|d| Some(d.as_str()));
 
     let updated = outcomes::update(
-        pool,
+        &mut *tx,
         outcome_id,
         input.title.as_deref(),
         touch_description,
@@ -214,14 +221,17 @@ pub async fn update(
     .await?
     .ok_or_else(|| outcome_not_found(outcome_id))?;
 
-    let comps = components::list_for_outcome(pool, outcome_id).await?;
+    let comps = components::list_for_outcome(&mut *tx, outcome_id).await?;
+    tx.commit().await?;
     let reads: Vec<ComponentRead> = comps.into_iter().map(ComponentRead::from).collect();
     Ok(OutcomeRead::from_parts(updated, reads))
 }
 
 /// Delete an outcome. Rejects builtin outcomes and non-DRAFT versions.
 pub async fn delete(pool: &PgPool, outcome_id: Uuid) -> AppResult<()> {
-    let outcome = outcomes::find(pool, outcome_id)
+    let mut tx = pool.begin().await?;
+
+    let outcome = outcomes::find(&mut *tx, outcome_id)
         .await?
         .ok_or_else(|| outcome_not_found(outcome_id))?;
 
@@ -231,33 +241,36 @@ pub async fn delete(pool: &PgPool, outcome_id: Uuid) -> AppResult<()> {
         ));
     }
 
-    let status = outcomes::version_status(pool, outcome.version_id)
+    // Lock the governing version row before the draft check + delete.
+    let status = outcomes::version_status_for_update(&mut *tx, outcome.version_id)
         .await?
         .ok_or_else(|| version_not_found(outcome.version_id))?;
     require_draft(status)?;
 
-    let removed = outcomes::delete(pool, outcome_id).await?;
+    let removed = outcomes::delete(&mut *tx, outcome_id).await?;
     if removed == 0 {
         return Err(outcome_not_found(outcome_id));
     }
+    tx.commit().await?;
     Ok(())
 }
 
 /// Deep-clone an outcome (incl. its components) within the same version.
 /// New UUIDs, `is_builtin = false`, title `"{title} (copy)"`. TX-wrapped.
 pub async fn clone_outcome(pool: &PgPool, outcome_id: Uuid) -> AppResult<OutcomeRead> {
-    let source = outcomes::find(pool, outcome_id)
+    let mut tx = pool.begin().await?;
+
+    let source = outcomes::find(&mut *tx, outcome_id)
         .await?
         .ok_or_else(|| outcome_not_found(outcome_id))?;
 
-    let status = outcomes::version_status(pool, source.version_id)
+    // Lock the governing version row FOR UPDATE before the draft check + clone.
+    let status = outcomes::version_status_for_update(&mut *tx, source.version_id)
         .await?
         .ok_or_else(|| version_not_found(source.version_id))?;
     require_draft(status)?;
 
-    let source_components = components::list_for_outcome(pool, outcome_id).await?;
-
-    let mut tx = pool.begin().await?;
+    let source_components = components::list_for_outcome(&mut *tx, outcome_id).await?;
 
     let next = outcomes::max_order_index(&mut *tx, source.version_id)
         .await?
@@ -306,23 +319,25 @@ pub async fn add_component(
     outcome_id: Uuid,
     input: ComponentCreate,
 ) -> AppResult<ComponentRead> {
-    let (_vid, status) = outcomes::version_status_for_outcome(pool, outcome_id)
+    let config_json = validated_config_json(&input.r#type, &input.config)?;
+
+    let mut tx = pool.begin().await?;
+
+    let (_vid, status) = outcomes::version_status_for_outcome_for_update(&mut *tx, outcome_id)
         .await?
         .ok_or_else(|| outcome_not_found(outcome_id))?;
     require_draft(status)?;
 
-    let config_json = validated_config_json(&input.r#type, &input.config)?;
-
     let next = match input.order_index {
         Some(idx) => idx,
-        None => components::max_order_index(pool, outcome_id)
+        None => components::max_order_index(&mut *tx, outcome_id)
             .await?
             .map(|m| m + 1)
             .unwrap_or(0),
     };
 
     let inserted = components::insert(
-        pool,
+        &mut *tx,
         Uuid::new_v4(),
         outcome_id,
         &input.slug,
@@ -333,6 +348,7 @@ pub async fn add_component(
     )
     .await?;
 
+    tx.commit().await?;
     Ok(ComponentRead::from(inserted))
 }
 
@@ -342,11 +358,13 @@ pub async fn update_component(
     component_id: Uuid,
     input: ComponentUpdate,
 ) -> AppResult<ComponentRead> {
-    let existing = components::find(pool, component_id)
+    let mut tx = pool.begin().await?;
+
+    let existing = components::find(&mut *tx, component_id)
         .await?
         .ok_or_else(|| component_not_found(component_id))?;
 
-    let (_vid, status) = outcomes::version_status_for_component(pool, component_id)
+    let (_vid, status) = outcomes::version_status_for_component_for_update(&mut *tx, component_id)
         .await?
         .ok_or_else(|| component_not_found(component_id))?;
     require_draft(status)?;
@@ -362,7 +380,7 @@ pub async fn update_component(
     };
 
     let updated = components::update(
-        pool,
+        &mut *tx,
         component_id,
         input.slug.as_deref(),
         input.r#type.as_deref(),
@@ -373,20 +391,24 @@ pub async fn update_component(
     .await?
     .ok_or_else(|| component_not_found(component_id))?;
 
+    tx.commit().await?;
     Ok(ComponentRead::from(updated))
 }
 
 /// Delete a component. Version must be DRAFT.
 pub async fn delete_component(pool: &PgPool, component_id: Uuid) -> AppResult<()> {
-    let (_vid, status) = outcomes::version_status_for_component(pool, component_id)
+    let mut tx = pool.begin().await?;
+
+    let (_vid, status) = outcomes::version_status_for_component_for_update(&mut *tx, component_id)
         .await?
         .ok_or_else(|| component_not_found(component_id))?;
     require_draft(status)?;
 
-    let removed = components::delete(pool, component_id).await?;
+    let removed = components::delete(&mut *tx, component_id).await?;
     if removed == 0 {
         return Err(component_not_found(component_id));
     }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -397,13 +419,15 @@ pub async fn reorder(
     outcome_id: Uuid,
     items: Vec<ReorderItem>,
 ) -> AppResult<Vec<ComponentRead>> {
-    let (_vid, status) = outcomes::version_status_for_outcome(pool, outcome_id)
+    let mut tx = pool.begin().await?;
+
+    let (_vid, status) = outcomes::version_status_for_outcome_for_update(&mut *tx, outcome_id)
         .await?
         .ok_or_else(|| outcome_not_found(outcome_id))?;
     require_draft(status)?;
 
     // Validate every referenced component belongs to this outcome.
-    let existing = components::list_for_outcome(pool, outcome_id).await?;
+    let existing = components::list_for_outcome(&mut *tx, outcome_id).await?;
     let owned: std::collections::HashSet<Uuid> = existing.iter().map(|c| c.id).collect();
     for item in &items {
         if !owned.contains(&item.id) {
@@ -418,13 +442,12 @@ pub async fn reorder(
         }
     }
 
-    let mut tx = pool.begin().await?;
-    for item in &items {
-        components::set_order(&mut *tx, item.id, item.order_index).await?;
-    }
-    tx.commit().await?;
+    // Apply all order changes in one round-trip (avoids one UPDATE per item).
+    let orders: Vec<(Uuid, i32)> = items.iter().map(|i| (i.id, i.order_index)).collect();
+    components::set_order_bulk(&mut *tx, &orders).await?;
 
-    let reordered = components::list_for_outcome(pool, outcome_id).await?;
+    let reordered = components::list_for_outcome(&mut *tx, outcome_id).await?;
+    tx.commit().await?;
     Ok(reordered.into_iter().map(ComponentRead::from).collect())
 }
 

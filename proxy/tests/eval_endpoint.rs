@@ -62,6 +62,8 @@ async fn spawn_app() -> String {
         compiled_cache_capacity: 256,
         upstream_connect_timeout_secs: 2,
         upstream_read_timeout_secs: 10,
+        max_upstream_body_bytes: 16 * 1024 * 1024,
+        max_decompressed_bytes: 16 * 1024 * 1024,
         feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };

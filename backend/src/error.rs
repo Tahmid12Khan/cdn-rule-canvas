@@ -174,3 +174,27 @@ impl From<sqlx::Error> for AppError {
         AppError::Internal(anyhow::Error::new(err))
     }
 }
+
+/// Convert a `validator::ValidationErrors` into the uniform 422 envelope. Each
+/// field error becomes one [`ValidationDetail`] keyed by `(loc, msg, rule_id)`;
+/// the fallback message is the error `code` when no custom message is set. This
+/// is the single mapping used by every router/service validation entrypoint.
+impl From<validator::ValidationErrors> for AppError {
+    fn from(errors: validator::ValidationErrors) -> Self {
+        let details = errors
+            .field_errors()
+            .into_iter()
+            .flat_map(|(field, errs)| {
+                errs.iter().map(move |e| {
+                    let msg = e
+                        .message
+                        .as_ref()
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| e.code.to_string());
+                    ValidationDetail::new(field.to_string(), msg, e.code.to_string())
+                })
+            })
+            .collect();
+        AppError::validation(details)
+    }
+}

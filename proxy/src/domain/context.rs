@@ -73,6 +73,10 @@ pub struct EvaluationContextParts {
     /// When true, `html` carries a JSON body: `into_context` parses it into
     /// `response_json` and leaves `meta_tags` empty (no HTML parse).
     pub is_json: bool,
+    /// Only parse the HTML DOM for `<meta>` tags when the canvas being
+    /// evaluated actually contains a `meta_tags` node. `false` skips the full
+    /// `scraper::Html` parse and leaves `meta_tags` empty. Ignored for JSON.
+    pub needs_meta_tags: bool,
 }
 
 impl EvaluationContextParts {
@@ -98,6 +102,10 @@ impl EvaluationContextParts {
             device,
             html: body,
             is_json,
+            // Default to parsing meta tags; the hot path overrides this via
+            // `needs_meta_tags` once it knows whether the canvas has a meta_tags
+            // node. Direct callers (tests) keep the previous always-parse behavior.
+            needs_meta_tags: true,
         }
     }
 
@@ -117,7 +125,12 @@ impl EvaluationContextParts {
                 response_json,
             };
         }
-        let meta_tags = extract_meta_tags(&self.html);
+        // Skip the full DOM parse when the canvas has no meta_tags node.
+        let meta_tags = if self.needs_meta_tags {
+            extract_meta_tags(&self.html)
+        } else {
+            HashMap::new()
+        };
         EvaluationContext {
             request_headers: self.request_headers,
             request_path: self.request_path,

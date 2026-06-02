@@ -93,7 +93,11 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     } = upstream;
 
     // Decode for modification (gzip/identity). Unsupported encoding -> pass-through.
-    let body_string = match encoding::decode_for_modify(content_encoding.as_deref(), body.clone()) {
+    let body_string = match encoding::decode_for_modify(
+        content_encoding.as_deref(),
+        body.clone(),
+        state.settings.max_decompressed_bytes,
+    ) {
         Ok(s) => s,
         Err(_) => {
             tracing::warn!(encoding = ?content_encoding, "encoding=unsupported");
@@ -150,9 +154,14 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     metrics::histogram!("proxy_e2e_ms").record(e2e_start.elapsed().as_secs_f64() * 1000.0);
 
     // 6. Re-encode + rebuild. Stamp a match-marker header for every matched
-    //    feature (spec §1).
-    let out_bytes = encoding::reencode(content_encoding.as_deref(), final_body);
+    //    feature (spec §1). If the upstream said gzip but re-encoding fell back
+    //    to identity bytes, drop the now-stale `content-encoding` so the header
+    //    matches the body.
+    let (out_bytes, gzipped) = encoding::reencode(content_encoding.as_deref(), final_body);
     strip_hop_by_hop(&mut resp_headers);
+    if !gzipped {
+        resp_headers.remove(axum::http::header::CONTENT_ENCODING);
+    }
     set_content_length(&mut resp_headers, out_bytes.len());
     let mut res = rebuild_response(status, resp_headers, out_bytes, apply_status);
     for (feature_id, _) in &matched {
@@ -198,8 +207,18 @@ async fn apply_features_html(
             );
             continue;
         }
-        let ctx =
-            EvaluationContextParts::from_request(headers, path, cookies, current.clone(), false);
+        // Only the HTML body needs parsing when the canvas has a meta_tags
+        // node; otherwise skip the parse AND the full-body clone by passing
+        // an empty body — the raw HTML is read only to extract meta tags.
+        let needs_meta_tags = canvas_has_meta_tags(av.canvas(canvas_class));
+        let body_for_ctx = if needs_meta_tags {
+            current.clone()
+        } else {
+            String::new()
+        };
+        let mut ctx =
+            EvaluationContextParts::from_request(headers, path, cookies, body_for_ctx, false);
+        ctx.needs_meta_tags = needs_meta_tags;
         let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
         if actions.is_empty() {
             log_skipped(feature_id, canvas_label, eval_ms);
@@ -568,7 +587,7 @@ pub(crate) async fn send_upstream(
         builder = builder.body(body_bytes.to_vec());
     }
 
-    let resp = builder.send().await.map_err(map_reqwest_error)?;
+    let mut resp = builder.send().await.map_err(map_reqwest_error)?;
 
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_encoding = header_string(resp.headers(), reqwest::header::CONTENT_ENCODING);
@@ -583,7 +602,22 @@ pub(crate) async fn send_upstream(
         }
     }
 
-    let body = resp.bytes().await.map_err(map_reqwest_error)?;
+    // Bound the buffered upstream body. Reject up front when the advertised
+    // Content-Length already exceeds the cap, AND bound the actual read so a
+    // chunked/streamed body cannot grow past the budget (a 502 is cleaner than
+    // serving a truncated body).
+    let cap = state.settings.max_upstream_body_bytes;
+    if resp.content_length().is_some_and(|len| len as usize > cap) {
+        return Err(ProxyError::UpstreamTooLarge);
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(map_reqwest_error)? {
+        if buf.len() + chunk.len() > cap {
+            return Err(ProxyError::UpstreamTooLarge);
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    let body = Bytes::from(buf);
 
     Ok(UpstreamResponse {
         status,
@@ -676,6 +710,18 @@ fn parse_cookies(headers: &HeaderMap) -> HashMap<String, String> {
         }
     }
     map
+}
+
+/// True when the canvas has at least one `meta_tags` decision node — the only
+/// reason to parse the HTML DOM for `<meta>` tags. When false, the evaluator
+/// skips both the parse and the full-body clone.
+fn canvas_has_meta_tags(canvas: &CanvasGraph) -> bool {
+    canvas.nodes.iter().any(|n| {
+        matches!(
+            n,
+            Node::Decision { processor, .. } if processor.kind == "meta_tags"
+        )
+    })
 }
 
 fn canvas_name(c: Canvas) -> &'static str {

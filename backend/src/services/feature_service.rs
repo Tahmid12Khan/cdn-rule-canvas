@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use validator::Validate;
 
 use crate::{
-    error::{AppError, AppResult, ValidationDetail},
+    error::{AppError, AppResult},
     repositories::feature_repository as repo,
     schemas::{
         feature::{FeatureCreate, FeatureRead, FeatureUpdate},
@@ -22,7 +22,7 @@ const PG_UNIQUE_VIOLATION: &str = "23505";
 
 /// Create a feature. Duplicate slug → [`AppError::SlugConflict`].
 pub async fn create(pool: &PgPool, input: FeatureCreate) -> AppResult<FeatureRead> {
-    input.validate().map_err(validation_to_app_error)?;
+    input.validate().map_err(AppError::from)?;
 
     match repo::insert(pool, &input.id, &input.name, input.r#type).await {
         Ok(feature) => Ok(feature.into()),
@@ -34,8 +34,7 @@ pub async fn create(pool: &PgPool, input: FeatureCreate) -> AppResult<FeatureRea
 pub async fn list(pool: &PgPool, params: &PageParams) -> AppResult<Page<FeatureRead>> {
     let (limit, offset, page, page_size) = params.resolve();
 
-    let rows = repo::list_paged(pool, limit, offset).await?;
-    let total = repo::count(pool).await?;
+    let (rows, total) = tokio::try_join!(repo::list_paged(pool, limit, offset), repo::count(pool))?;
 
     let items = rows.into_iter().map(FeatureRead::from).collect();
     Ok(Page::new(items, page, page_size, total))
@@ -50,7 +49,7 @@ pub async fn get(pool: &PgPool, id: &str) -> AppResult<FeatureRead> {
 /// Update a feature's name. Absent → [`AppError::FeatureNotFound`]. A `None`
 /// `name` is a no-op that still returns the current row.
 pub async fn update(pool: &PgPool, id: &str, input: FeatureUpdate) -> AppResult<FeatureRead> {
-    input.validate().map_err(validation_to_app_error)?;
+    input.validate().map_err(AppError::from)?;
 
     match input.name {
         Some(name) => {
@@ -86,26 +85,6 @@ fn map_insert_error(err: sqlx::Error, id: &str) -> AppError {
         }
     }
     err.into()
-}
-
-/// Convert a `validator::ValidationErrors` into a 422 [`AppError::Validation`].
-fn validation_to_app_error(errors: validator::ValidationErrors) -> AppError {
-    let mut details = Vec::new();
-    for (field, errs) in errors.field_errors() {
-        for e in errs {
-            let msg = e
-                .message
-                .as_ref()
-                .map(|m| m.to_string())
-                .unwrap_or_else(|| format!("invalid value for '{field}'"));
-            details.push(ValidationDetail::new(
-                field.to_string(),
-                msg,
-                e.code.to_string(),
-            ));
-        }
-    }
-    AppError::validation(details)
 }
 
 #[cfg(test)]
@@ -148,7 +127,7 @@ mod tests {
     #[test]
     fn validation_error_maps_to_422_with_details() {
         let err = create_input("X", "").validate().unwrap_err();
-        let app = validation_to_app_error(err);
+        let app = AppError::from(err);
         match app {
             AppError::Validation { details } => assert!(!details.is_empty()),
             other => panic!("expected validation error, got {other:?}"),

@@ -7,6 +7,8 @@
   "compiled_cache_capacity": 256,
   "upstream_connect_timeout_secs": 2,
   "upstream_read_timeout_secs": 10,
+  "max_upstream_body_bytes": 16777216,
+  "max_decompressed_bytes": 16777216,
   "feature_map_path": "proxy/config/feature_map.yaml",
   "sanitizer_config_path": "proxy/config/sanitizer.yaml"
 }

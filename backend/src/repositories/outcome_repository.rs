@@ -196,3 +196,61 @@ where
     .fetch_optional(exec)
     .await
 }
+
+/// Lock a version row `FOR UPDATE` and return its status (`None` if absent).
+/// Used by guarded outcome/component mutations to serialize against a concurrent
+/// publish (which also takes the version row lock) — closing the draft-edit
+/// TOCTOU window.
+pub async fn version_status_for_update<'e, E>(
+    exec: E,
+    version_id: Uuid,
+) -> Result<Option<VersionStatus>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    sqlx::query_scalar::<_, VersionStatus>(
+        "SELECT status FROM rre.versions WHERE id = $1 FOR UPDATE",
+    )
+    .bind(version_id)
+    .fetch_optional(exec)
+    .await
+}
+
+/// Resolve + lock the owning version row `FOR UPDATE` for a given outcome id.
+/// `None` if the outcome does not exist.
+pub async fn version_status_for_outcome_for_update<'e, E>(
+    exec: E,
+    outcome_id: Uuid,
+) -> Result<Option<(Uuid, VersionStatus)>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, (Uuid, VersionStatus)>(
+        "SELECT v.id, v.status FROM rre.versions v \
+         JOIN rre.outcomes o ON o.version_id = v.id \
+         WHERE o.id = $1 FOR UPDATE OF v",
+    )
+    .bind(outcome_id)
+    .fetch_optional(exec)
+    .await
+}
+
+/// Resolve + lock the owning version row `FOR UPDATE` for a given component id.
+/// `None` if the component does not exist.
+pub async fn version_status_for_component_for_update<'e, E>(
+    exec: E,
+    component_id: Uuid,
+) -> Result<Option<(Uuid, VersionStatus)>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, (Uuid, VersionStatus)>(
+        "SELECT v.id, v.status FROM rre.versions v \
+         JOIN rre.outcomes o ON o.version_id = v.id \
+         JOIN rre.components c ON c.outcome_id = o.id \
+         WHERE c.id = $1 FOR UPDATE OF v",
+    )
+    .bind(component_id)
+    .fetch_optional(exec)
+    .await
+}

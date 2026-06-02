@@ -8,12 +8,15 @@
 //   - Delete: enabled only for DRAFT | PREV
 // Unpublish runs inline (env derived from status); Make Live / Edit / Delete
 // open the parent dialogs via callbacks.
+import { useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { VersionStatus } from "@/lib/api/enums";
 import { unpublishVersion } from "@/lib/api/versions";
+import { toUserError, type UserError } from "@/lib/errors/userError";
 
 interface RowActionsMenuProps {
   featureId: string;
@@ -36,6 +39,12 @@ export function RowActionsMenu({
   onDelete,
 }: RowActionsMenuProps) {
   const queryClient = useQueryClient();
+  // Surface unpublish failures (409/5xx/network) instead of failing silently on
+  // this production-affecting action (toUserError + ErrorBanner pattern). The
+  // error banner renders below the (now-closed) menu, so close the menu on
+  // error too — otherwise Radix's open-menu aria-hidden swallows the alert.
+  const [open, setOpen] = useState(false);
+  const [unpublishError, setUnpublishError] = useState<UserError | null>(null);
 
   const canMakeLive = status !== "live";
   const canUnpublish = status === "live" || status === "staging";
@@ -47,24 +56,51 @@ export function RowActionsMenu({
         environment: status === "live" ? "live" : "staging",
       }),
     onSuccess: () => {
+      setUnpublishError(null);
       void queryClient.invalidateQueries({ queryKey: ["versions", featureId] });
       void queryClient.invalidateQueries({ queryKey: ["feature", featureId] });
+    },
+    onError: (err) => {
+      setOpen(false);
+      setUnpublishError(toUserError(err, { surface: "publish" }));
     },
   });
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={`Actions for version ${versionNumber}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-status-prevFg hover:bg-status-prevBg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-        >
-          <span aria-hidden className="text-lg leading-none">
-            ⋯
-          </span>
-        </button>
-      </DropdownMenu.Trigger>
+    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+      <div className="relative inline-block">
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            aria-label={`Actions for version ${versionNumber}`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-status-prevFg hover:bg-status-prevBg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+          >
+            <span aria-hidden className="text-lg leading-none">
+              ⋯
+            </span>
+          </button>
+        </DropdownMenu.Trigger>
+
+        {unpublishError && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 text-left">
+            <ErrorBanner
+              error={unpublishError}
+              onRetry={
+                unpublishError.retryable
+                  ? () => unpublish.mutate()
+                  : undefined
+              }
+            />
+            <button
+              type="button"
+              onClick={() => setUnpublishError(null)}
+              className="mt-1 text-xs font-medium text-status-prevFg underline hover:text-nav"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
 
       <DropdownMenu.Portal>
         <DropdownMenu.Content

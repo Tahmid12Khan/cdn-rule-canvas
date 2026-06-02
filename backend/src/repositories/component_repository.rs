@@ -142,6 +142,30 @@ where
         .map(|_| ())
 }
 
+/// Set the ordering of many components in ONE round-trip. `items` is a slice of
+/// `(component_id, order_index)`; bound as parallel arrays joined via `unnest`
+/// (no string interpolation). A no-op on an empty slice.
+pub async fn set_order_bulk<'e, E>(exec: E, items: &[(Uuid, i32)]) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    if items.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Uuid> = items.iter().map(|(id, _)| *id).collect();
+    let orders: Vec<i32> = items.iter().map(|(_, ord)| *ord).collect();
+    sqlx::query(
+        "UPDATE rre.components SET order_index = data.ord, updated_at = now() \
+         FROM unnest($1::uuid[], $2::int[]) AS data(id, ord) \
+         WHERE rre.components.id = data.id",
+    )
+    .bind(&ids)
+    .bind(&orders)
+    .execute(exec)
+    .await
+    .map(|_| ())
+}
+
 /// Delete a component by id. Returns the number of rows removed.
 pub async fn delete<'e, E>(exec: E, id: Uuid) -> Result<u64, sqlx::Error>
 where

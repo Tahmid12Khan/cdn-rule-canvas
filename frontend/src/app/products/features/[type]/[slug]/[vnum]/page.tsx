@@ -14,18 +14,19 @@ import { getVersion } from "@/lib/api/canvasVersions";
 export default async function VersionDetailPage({
   params,
 }: {
-  params: { type: string; slug: string; vnum: string };
+  params: Promise<{ type: string; slug: string; vnum: string }>;
 }) {
-  const vnum = Number(params.vnum);
+  const { type, slug, vnum: vnumParam } = await params;
+  const vnum = Number(vnumParam);
   if (!Number.isInteger(vnum)) notFound();
 
   try {
-    const version = await getVersion(params.slug, vnum);
+    const version = await getVersion(slug, vnum);
     return (
       <RuleBuilderClient
-        fid={params.slug}
+        fid={slug}
         vnum={vnum}
-        type={params.type}
+        type={type}
         initialVersion={version}
       />
     );

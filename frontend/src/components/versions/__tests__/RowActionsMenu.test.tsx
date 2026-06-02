@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { RowActionsMenu } from "@/components/versions/RowActionsMenu";
+import { API_BASE } from "@/lib/api/client";
 import type { VersionStatus } from "@/lib/api/enums";
+import { server } from "@/test/mocks/server";
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
@@ -118,5 +121,30 @@ describe("RowActionsMenu", () => {
       "aria-disabled",
       "true",
     );
+  });
+
+  it("surfaces an error banner when Unpublish fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(
+        `${API_BASE}/api/v1/features/dn-article/versions/1/unpublish`,
+        () =>
+          HttpResponse.json(
+            { error: { code: "INTERNAL_ERROR", message: "boom" } },
+            { status: 500 },
+          ),
+      ),
+    );
+    renderMenu("live");
+
+    await user.click(
+      screen.getByRole("button", { name: /actions for version 1/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Unpublish" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(
+      screen.getByRole("button", { name: /dismiss/i }),
+    ).toBeInTheDocument();
   });
 });

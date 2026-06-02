@@ -14,6 +14,8 @@ pub enum ProxyError {
     UpstreamUnavailable,
     #[error("bad upstream response")]
     UpstreamProtocol,
+    #[error("upstream response too large")]
+    UpstreamTooLarge,
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -25,6 +27,7 @@ impl ProxyError {
             ProxyError::UpstreamUnavailable | ProxyError::UpstreamProtocol => {
                 StatusCode::BAD_GATEWAY
             }
+            ProxyError::UpstreamTooLarge => StatusCode::BAD_GATEWAY,
             ProxyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -35,6 +38,7 @@ impl ProxyError {
             ProxyError::UpstreamTimeout => "UPSTREAM_TIMEOUT",
             ProxyError::UpstreamUnavailable => "UPSTREAM_UNAVAILABLE",
             ProxyError::UpstreamProtocol => "UPSTREAM_PROTOCOL",
+            ProxyError::UpstreamTooLarge => "UPSTREAM_TOO_LARGE",
             ProxyError::Internal(_) => "INTERNAL_ERROR",
         }
     }

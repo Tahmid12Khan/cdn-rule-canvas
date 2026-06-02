@@ -14,7 +14,7 @@
 // The per-component config editing is delegated to Task 16's
 // <ComponentConfigModal/>, which lifts a validated { slug, type, config,
 // placement } payload back here.
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   useMutation,
@@ -39,7 +39,7 @@ import { SortableComponentList } from "@/components/outcome/SortableComponentLis
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { Placement } from "@/lib/api/enums";
 import { toUserError, type UserError } from "@/lib/errors/userError";
-import { getVersion } from "@/lib/api/canvasVersions";
+import { getVersion, type VersionRead } from "@/lib/api/canvasVersions";
 import { useOnboardingStore } from "@/state/onboardingStore";
 import {
   addComponent,
@@ -64,6 +64,10 @@ export interface OutcomeEditorPageProps {
   featureSlug: string;
   vnum: string;
   outcomeId: string;
+  // SSR-prefetched seeds: used as TanStack initialData so the editor
+  // hydrates without a client-side fetch waterfall.
+  initialOutcome?: OutcomeRead;
+  initialVersion?: VersionRead;
 }
 
 // A staged component: the server row plus local edit bookkeeping.
@@ -99,6 +103,8 @@ export function OutcomeEditorPage({
   featureSlug,
   vnum,
   outcomeId,
+  initialOutcome,
+  initialVersion,
 }: OutcomeEditorPageProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -111,6 +117,7 @@ export function OutcomeEditorPage({
   const query = useQuery({
     queryKey: ["outcome", outcomeId],
     queryFn: () => getOutcome(outcomeId),
+    initialData: initialOutcome,
   });
 
   // Reuse the same ['version', fid, vnum] cache RuleBuilderClient warms so the
@@ -122,6 +129,7 @@ export function OutcomeEditorPage({
     queryKey: ["version", featureSlug, vnumNumber],
     queryFn: () => getVersion(featureSlug, vnumNumber),
     enabled: Number.isFinite(vnumNumber),
+    initialData: initialVersion,
   });
   const editable = versionQuery.data?.status === "draft";
   const readOnly = versionQuery.data !== undefined && !editable;
@@ -133,21 +141,30 @@ export function OutcomeEditorPage({
   const [configTarget, setConfigTarget] = useState<ConfigTarget | null>(null);
   const [saveError, setSaveError] = useState<UserError | null>(null);
 
-  // Seed local state once when the query first resolves.
+  // Seed local state once per loaded outcome id. The ref guards against
+  // re-seeding on re-render (which would clobber edits); the effect re-runs
+  // when a new outcome resolves.
   const seededId = useRef<string | null>(null);
-  if (query.data && seededId.current !== query.data.id) {
-    seededId.current = query.data.id;
+  const loadedId = query.data?.id ?? null;
+  useEffect(() => {
+    const outcome = query.data;
+    if (!outcome || seededId.current === outcome.id) return;
+    seededId.current = outcome.id;
     setDetails({
-      title: query.data.title,
-      description: query.data.description ?? "",
+      title: outcome.title,
+      description: outcome.description ?? "",
     });
     setComponents(
-      [...query.data.components]
+      [...outcome.components]
         .sort((a, b) => a.order_index - b.order_index)
         .map(toStaged),
     );
     setDeletedIds([]);
-  }
+    // Intentionally keyed on the loaded outcome id; seed inputs are stable for
+    // a given outcome. The editor unmounts on Save (router.push), so no
+    // post-Save re-seed is needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId]);
 
   const versionPath = `/products/features/${featureType}/${featureSlug}/${vnum}`;
 
@@ -224,8 +241,6 @@ export function OutcomeEditorPage({
           queryKey: ["outcomes", query.data.version_id],
         });
       }
-      // Re-seed from the refetched outcome on next render.
-      seededId.current = null;
       router.push(versionPath);
     },
     onError: (err: unknown) => {

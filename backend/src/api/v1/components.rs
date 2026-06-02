@@ -19,7 +19,7 @@ use axum::{
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::error::{AppError, AppResult, ValidationDetail};
+use crate::error::{AppError, AppResult};
 use crate::schemas::component::{ComponentRead, ComponentUpdate};
 use crate::services::outcome_service;
 use crate::state::AppState;
@@ -27,25 +27,6 @@ use crate::state::AppState;
 /// Build the per-component sub-router (`/components/{cid}`).
 pub fn router() -> Router<AppState> {
     Router::new().route("/components/{cid}", patch_route(update).delete(delete))
-}
-
-/// Map a `validator::ValidationErrors` into the uniform 422 envelope.
-fn map_validation(errs: validator::ValidationErrors) -> AppError {
-    let details = errs
-        .field_errors()
-        .into_iter()
-        .flat_map(|(field, errors)| {
-            errors.iter().map(move |e| {
-                let msg = e
-                    .message
-                    .as_ref()
-                    .map(|m| m.to_string())
-                    .unwrap_or_else(|| e.code.to_string());
-                ValidationDetail::new(field.to_string(), msg, e.code.to_string())
-            })
-        })
-        .collect();
-    AppError::validation(details)
 }
 
 /// `PATCH /components/{cid}` — update a component (version must be DRAFT).
@@ -67,7 +48,7 @@ pub async fn update(
     Path(cid): Path<Uuid>,
     Json(body): Json<ComponentUpdate>,
 ) -> AppResult<Json<ComponentRead>> {
-    body.validate().map_err(map_validation)?;
+    body.validate().map_err(AppError::from)?;
     let component = outcome_service::update_component(&state.pool, cid, body).await?;
     Ok(Json(component))
 }

@@ -19,6 +19,14 @@ pub struct Settings {
     pub compiled_cache_capacity: u64,
     pub upstream_connect_timeout_secs: u64,
     pub upstream_read_timeout_secs: u64,
+    /// Cap on the buffered upstream RESPONSE body (bytes). Bodies whose
+    /// `Content-Length` exceeds this — or that stream past it — are rejected
+    /// with a 502 (`UpstreamTooLarge`) rather than buffered, to bound memory.
+    pub max_upstream_body_bytes: usize,
+    /// Cap on the INFLATED size of a gzip upstream body (bytes). Decompression
+    /// past this falls back to pass-through (serving the original compressed
+    /// bytes), bounding decompression-bomb memory.
+    pub max_decompressed_bytes: usize,
     pub feature_map_path: String,
     pub sanitizer_config_path: String,
 }

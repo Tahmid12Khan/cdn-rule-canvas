@@ -17,6 +17,17 @@ use std::sync::Arc;
 use zen_engine::{DecisionEngine, EvaluationOptions};
 use zen_expression::variable::Variable;
 
+thread_local! {
+    /// One current-thread Tokio runtime per blocking thread, built once and
+    /// reused across `evaluate()` calls instead of rebuilt per feature/request.
+    /// `enable_all` keeps the IO/timer drivers available, matching the
+    /// previous per-call runtime exactly.
+    static EVAL_RT: std::io::Result<tokio::runtime::Runtime> =
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+}
+
 use crate::domain::adapter::CanvasNodeAdapter;
 use crate::domain::context::{EvaluationContext, EvaluationContextParts};
 use crate::domain::graph::{Canvas, CanvasGraph, Node};
@@ -115,36 +126,33 @@ impl<'a> GraphEvaluator<'a> {
         //    built INSIDE the closure. Trace is ON so we can recover the matched
         //    expression nodes (and their order) from the `__expr` markers.
         let rows: Vec<RawTraceRow> = tokio::task::spawn_blocking(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(_) => return Vec::new(),
-            };
-
-            rt.block_on(async move {
-                let eval_ctx = ctx.into_context();
-                let adapter = CanvasNodeAdapter {
-                    registry,
-                    ctx: Arc::new(eval_ctx),
+            EVAL_RT.with(|rt| {
+                let Ok(rt) = rt else {
+                    return Vec::new();
                 };
-                let engine = DecisionEngine::default().with_adapter(Arc::new(adapter));
-                let decision = engine.create_decision(content);
-                let opts = EvaluationOptions {
-                    trace: true,
-                    max_depth: 10,
-                };
-                match decision
-                    .evaluate_with_opts(Variable::from(input_value), opts)
-                    .await
-                {
-                    Ok(resp) => resp.trace.map_or_else(Vec::new, trace_rows),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "eval=error");
-                        Vec::new()
+                rt.block_on(async move {
+                    let eval_ctx = ctx.into_context();
+                    let adapter = CanvasNodeAdapter {
+                        registry,
+                        ctx: Arc::new(eval_ctx),
+                    };
+                    let engine = DecisionEngine::default().with_adapter(Arc::new(adapter));
+                    let decision = engine.create_decision(content);
+                    let opts = EvaluationOptions {
+                        trace: true,
+                        max_depth: 10,
+                    };
+                    match decision
+                        .evaluate_with_opts(Variable::from(input_value), opts)
+                        .await
+                    {
+                        Ok(resp) => resp.trace.map_or_else(Vec::new, trace_rows),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "eval=error");
+                            Vec::new()
+                        }
                     }
-                }
+                })
             })
         })
         .await
@@ -200,29 +208,27 @@ impl<'a> GraphEvaluator<'a> {
         // All crossing of the spawn_blocking boundary must be Send. DecisionGraphTrace
         // is !Send (contains Variable/Rc<str>), so we serialise to JSON inside.
         let rows: Result<Vec<RawTraceRow>, String> = tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| e.to_string())?;
+            EVAL_RT.with(|rt| {
+                let rt = rt.as_ref().map_err(|e| e.to_string())?;
+                rt.block_on(async move {
+                    let adapter = CanvasNodeAdapter { registry, ctx };
+                    let engine = DecisionEngine::default().with_adapter(Arc::new(adapter));
 
-            rt.block_on(async move {
-                let adapter = CanvasNodeAdapter { registry, ctx };
-                let engine = DecisionEngine::default().with_adapter(Arc::new(adapter));
-
-                let mut compiled_content = content;
-                compiled_content.compile();
-                let decision = engine.create_decision(Arc::new(compiled_content));
-                let opts = EvaluationOptions {
-                    trace: true,
-                    max_depth: 10,
-                };
-                match decision
-                    .evaluate_with_opts(Variable::from(input_value), opts)
-                    .await
-                {
-                    Ok(resp) => Ok(resp.trace.map_or_else(Vec::new, trace_rows)),
-                    Err(e) => Err(format!("eval error: {e}")),
-                }
+                    let mut compiled_content = content;
+                    compiled_content.compile();
+                    let decision = engine.create_decision(Arc::new(compiled_content));
+                    let opts = EvaluationOptions {
+                        trace: true,
+                        max_depth: 10,
+                    };
+                    match decision
+                        .evaluate_with_opts(Variable::from(input_value), opts)
+                        .await
+                    {
+                        Ok(resp) => Ok(resp.trace.map_or_else(Vec::new, trace_rows)),
+                        Err(e) => Err(format!("eval error: {e}")),
+                    }
+                })
             })
         })
         .await

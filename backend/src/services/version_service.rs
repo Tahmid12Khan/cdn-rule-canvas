@@ -24,11 +24,9 @@ use crate::{
             VersionUpdate,
         },
     },
-    services::rule_graph_service,
+    services::{outcome_service, rule_graph_service},
 };
 
-/// Title of the builtin "show content" outcome seeded into every new version.
-const SHOW_CONTENT_TITLE: &str = "Show Content";
 /// Default actor when no auth context is wired (MVP).
 const SYSTEM_ACTOR: &str = "system";
 
@@ -143,7 +141,7 @@ pub async fn create_version(
         Some(src) => carry_forward_outcomes(&mut tx, src.id, version.id).await?,
         // First version of the feature: seed the single builtin outcome.
         None => {
-            seed_builtin_outcome(&mut tx, version.id).await?;
+            outcome_service::seed_builtin(&mut *tx, version.id).await?;
             HashMap::new()
         }
     };
@@ -231,6 +229,19 @@ async fn carry_forward_outcomes(
     let source_outcomes =
         outcome_repository::list_for_version(&mut **tx, source_version_id).await?;
 
+    // Batch-load every source component in ONE round-trip (avoids N+1), then
+    // group app-side by `outcome_id`. Mirrors the active-version read path.
+    let source_outcome_ids: Vec<Uuid> = source_outcomes.iter().map(|o| o.id).collect();
+    let mut components_by_outcome: HashMap<Uuid, Vec<Component>> = HashMap::new();
+    if !source_outcome_ids.is_empty() {
+        for c in component_repository::list_for_outcomes(&mut **tx, &source_outcome_ids).await? {
+            components_by_outcome
+                .entry(c.outcome_id)
+                .or_default()
+                .push(c);
+        }
+    }
+
     let mut id_map: HashMap<Uuid, Uuid> = HashMap::with_capacity(source_outcomes.len());
 
     for outcome in source_outcomes {
@@ -246,9 +257,10 @@ async fn carry_forward_outcomes(
         .await?;
         id_map.insert(outcome.id, new_outcome.id);
 
-        let source_components =
-            component_repository::list_for_outcome(&mut **tx, outcome.id).await?;
-        for c in source_components {
+        for c in components_by_outcome
+            .remove(&outcome.id)
+            .unwrap_or_default()
+        {
             component_repository::insert(
                 &mut **tx,
                 Uuid::new_v4(),
@@ -302,24 +314,6 @@ fn remap_outcome_refs(graph: &mut RuleGraph, map: &HashMap<Uuid, Uuid>) {
     }
 }
 
-/// Insert the protected builtin "Show Content" outcome for a freshly created
-/// version. Written here (rather than `outcome_repository`) because it is part
-/// of the version-creation unit of work.
-async fn seed_builtin_outcome(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    version_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO rre.outcomes (version_id, title, is_builtin, order_index) \
-         VALUES ($1, $2, true, 0)",
-    )
-    .bind(version_id)
-    .bind(SHOW_CONTENT_TITLE)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
 /// List versions for a feature, filtered + paginated.
 pub async fn list(
     pool: &PgPool,
@@ -341,8 +335,10 @@ pub async fn list(
     let (limit, offset, page_no, page_size) = PageParams { page, page_size }.resolve();
     let search = search.as_deref().filter(|s| !s.is_empty());
 
-    let rows = repo::list_paged(pool, feature_id, status, search, limit, offset).await?;
-    let total = repo::count(pool, feature_id, status, search).await?;
+    let (rows, total) = tokio::try_join!(
+        repo::list_paged(pool, feature_id, status, search, limit, offset),
+        repo::count(pool, feature_id, status, search),
+    )?;
 
     let items = rows.into_iter().map(to_summary).collect();
     Ok(Page::new(items, page_no, page_size, total))

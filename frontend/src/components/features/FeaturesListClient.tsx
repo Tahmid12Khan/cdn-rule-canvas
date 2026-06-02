@@ -16,13 +16,24 @@ import { listFeatures } from "@/lib/api/features";
 
 const PAGE_SIZE = 20;
 
-export function FeaturesListClient() {
+type FeaturesPage = Awaited<ReturnType<typeof listFeatures>>;
+
+interface FeaturesListClientProps {
+  // SSR-prefetched first page. Seeds initialData on the page-1 key so
+  // the list hydrates without a client-side fetch waterfall.
+  initialFeatures?: FeaturesPage;
+}
+
+export function FeaturesListClient({
+  initialFeatures,
+}: FeaturesListClientProps = {}) {
   const [page, setPage] = useState(1);
 
   const { data, isPending, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["features", { page, page_size: PAGE_SIZE }],
     queryFn: () => listFeatures({ page, page_size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
+    initialData: page === 1 ? initialFeatures : undefined,
   });
 
   return (

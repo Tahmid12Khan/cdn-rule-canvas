@@ -16,6 +16,7 @@ use crate::{
 
 /// Request body for `POST /features/{fid}/versions`.
 #[derive(Debug, Clone, Default, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VersionCreate {
     /// Optional description for the new version.
     #[validate(length(max = 2000))]
@@ -36,6 +37,7 @@ pub struct VersionCreate {
 
 /// Request body for `PATCH /features/{fid}/versions/{vnum}`.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VersionUpdate {
     /// Updated description.
     #[validate(length(max = 2000))]
@@ -110,6 +112,7 @@ pub enum PublishEnvironment {
 
 /// Request body for publish/unpublish.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PublishRequest {
     /// Target environment.
     pub environment: PublishEnvironment,

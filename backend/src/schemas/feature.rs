@@ -19,6 +19,7 @@ pub static SLUG_RE: Lazy<Regex> =
 
 /// Request body for `POST /features`.
 #[derive(Debug, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FeatureCreate {
     /// Slug primary key (kebab-case, lowercase, 3..=64 chars).
     #[validate(length(min = 3, max = 64), regex(path = *SLUG_RE))]
@@ -32,6 +33,7 @@ pub struct FeatureCreate {
 
 /// Request body for `PATCH /features/{fid}`.
 #[derive(Debug, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FeatureUpdate {
     /// New human-readable name.
     #[validate(length(min = 1, max = 200))]

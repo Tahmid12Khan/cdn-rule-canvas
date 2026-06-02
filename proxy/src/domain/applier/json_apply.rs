@@ -346,13 +346,19 @@ pub fn apply_action_html(
     };
     match kind {
         "apply_outcome" => match lookup_outcome(action, outcomes) {
-            Some(outcome) => match orchestrator::apply_outcome(body.clone(), outcome, sanitizer) {
-                Ok(m) => (m.html, m.applied),
-                Err(e) => {
-                    tracing::warn!(error = %e, "apply_outcome (html) failed, serving original");
-                    (body, false)
+            // Snapshot the body before moving it into the orchestrator so the Err
+            // arm can fail open to the ORIGINAL upstream HTML (never an empty body);
+            // the success path consumes the clone-free `ModificationResult`.
+            Some(outcome) => {
+                let original = body.clone();
+                match orchestrator::apply_outcome(body, outcome, sanitizer) {
+                    Ok(m) => (m.html, m.applied),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "apply_outcome (html) failed, serving original");
+                        (original, false)
+                    }
                 }
-            },
+            }
             None => {
                 tracing::warn!("apply_outcome action: outcome not found, skipped");
                 (body, false)

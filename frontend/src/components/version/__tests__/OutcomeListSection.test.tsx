@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -107,6 +108,37 @@ describe("OutcomeListSection", () => {
     );
     await waitFor(() =>
       expect(screen.getByText("No outcomes yet.")).toBeInTheDocument(),
+    );
+  });
+
+  it("surfaces an error banner when Add Outcome fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API_BASE}/api/v1/versions/${VERSION_ID}/outcomes`, () =>
+        HttpResponse.json([]),
+      ),
+      http.post(`${API_BASE}/api/v1/versions/${VERSION_ID}/outcomes`, () =>
+        HttpResponse.json(
+          { error: { code: "INTERNAL_ERROR", message: "boom" } },
+          { status: 500 },
+        ),
+      ),
+    );
+    render(
+      <OutcomeListSection
+        versionId={VERSION_ID}
+        routeBase="/products/features/html/dn-article/1"
+        editable
+      />,
+      { wrapper },
+    );
+    await waitFor(() =>
+      expect(screen.getByText("No outcomes yet.")).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /add outcome/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toBeInTheDocument(),
     );
   });
 });
