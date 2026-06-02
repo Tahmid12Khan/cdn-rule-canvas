@@ -268,10 +268,12 @@ async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> an
     // insert would error and abort the whole seed. Clear this feature's versions
     // first (outcomes/components cascade) so the canonical insert is always clean.
     // Scoped to JSON_FEATURE_ID only — never touches dn-article.
-    sqlx::query("UPDATE rre.features SET live_version_id = NULL, staging_version_id = NULL WHERE id = $1")
-        .bind(JSON_FEATURE_ID)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "UPDATE rre.features SET live_version_id = NULL, staging_version_id = NULL WHERE id = $1",
+    )
+    .bind(JSON_FEATURE_ID)
+    .execute(&mut **tx)
+    .await?;
     sqlx::query("DELETE FROM rre.versions WHERE feature_id = $1")
         .bind(JSON_FEATURE_ID)
         .execute(&mut **tx)

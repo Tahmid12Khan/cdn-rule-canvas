@@ -44,9 +44,43 @@ use crate::{
     error::{AppError, AppResult, ValidationDetail},
     schemas::{
         node_type::{Control, Field, NodeManifest, NodeTypeSpec},
-        rule_graph::{Branch, CanvasGraph, Node, ProcessorConfig, RuleGraph},
+        rule_graph::{Branch, CanvasGraph, Edge, Node, Position, ProcessorConfig, RuleGraph},
     },
 };
+
+/// Normalize a full [`RuleGraph`]: any canvas with zero nodes is replaced with
+/// the default `start → end` graph (one start node, one end node, one edge).
+/// Non-empty canvases are untouched.
+pub fn normalize(graph: &mut RuleGraph) {
+    normalize_canvas(&mut graph.anonymous);
+    normalize_canvas(&mut graph.registered);
+    normalize_canvas(&mut graph.customer);
+}
+
+/// Replace an empty [`CanvasGraph`] (zero nodes) with the default start → end
+/// graph. Non-empty canvases are returned untouched.
+fn normalize_canvas(canvas: &mut CanvasGraph) {
+    if !canvas.nodes.is_empty() {
+        return;
+    }
+    canvas.nodes = vec![
+        Node::Start {
+            id: "start".to_string(),
+            position: Position { x: 40.0, y: 160.0 },
+        },
+        Node::End {
+            id: "end".to_string(),
+            position: Position { x: 940.0, y: 160.0 },
+        },
+    ];
+    canvas.edges = vec![Edge {
+        id: "e_start_end".to_string(),
+        source_node_id: "start".to_string(),
+        target_node_id: "end".to_string(),
+        branch: Branch::Yes,
+    }];
+    canvas.root_node_id = Some("start".to_string());
+}
 
 /// Validate a full [`RuleGraph`] across all three canvases.
 ///

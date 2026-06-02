@@ -160,8 +160,10 @@ pub async fn create_version(
     };
 
     // Remap outcome references from the source ids onto the new outcome ids, then
-    // validate with the same rule the update path uses (422 on failure).
+    // normalize empty canvases, then validate with the same rule the update
+    // path uses (422 on failure).
     remap_outcome_refs(&mut graph, &outcome_id_map);
+    rule_graph_service::normalize(&mut graph);
 
     let valid_outcome_ids: HashSet<Uuid> =
         outcome_repository::list_for_version(&mut *tx, version.id)
@@ -371,20 +373,22 @@ pub async fn update(
         .await?
         .ok_or_else(|| version_not_found(feature_id, version_number))?;
 
-    let rule_graph_json = match &body.rule_graph {
-        Some(graph) => {
+    let rule_graph_json = match body.rule_graph {
+        Some(mut graph) => {
             if version.status != VersionStatus::Draft {
                 return Err(AppError::VersionEditLocked(format!(
                     "Version {version_number} is {:?} and cannot be edited",
                     version.status
                 )));
             }
-            // Validate the graph against the version's outcomes (422 on failure).
+            // Normalize empty canvases then validate against the version's outcomes
+            // (422 on failure).
+            rule_graph_service::normalize(&mut graph);
             let outcomes = outcome_repository::list_for_version(pool, version.id).await?;
             let valid_outcome_ids: std::collections::HashSet<Uuid> =
                 outcomes.iter().map(|o| o.id).collect();
-            rule_graph_service::validate(graph, &valid_outcome_ids, manifest)?;
-            Some(serde_json::to_value(graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)
+            rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
+            Some(serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)
         }
         None => None,
     };

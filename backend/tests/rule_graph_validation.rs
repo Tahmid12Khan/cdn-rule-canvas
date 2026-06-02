@@ -591,3 +591,83 @@ fn json_action_pipeline_validates() {
     };
     assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
 }
+
+// 21. §6 empty-canvas normalization: all-empty RuleGraph → start + end + e_start_end
+//     on every canvas; root_node_id == "start"; normalized graph passes validation.
+#[test]
+fn empty_canvas_normalizes_to_start_end() {
+    let mut graph = RuleGraph::default();
+    rule_graph_service::normalize(&mut graph);
+
+    for (name, canvas) in [
+        ("anonymous", &graph.anonymous),
+        ("registered", &graph.registered),
+        ("customer", &graph.customer),
+    ] {
+        assert_eq!(canvas.nodes.len(), 2, "{name}: expected 2 nodes");
+        assert_eq!(canvas.edges.len(), 1, "{name}: expected 1 edge");
+        assert_eq!(
+            canvas.root_node_id.as_deref(),
+            Some("start"),
+            "{name}: root_node_id must be 'start'"
+        );
+
+        let start_node = canvas.nodes.iter().find(|n| n.id() == "start");
+        let end_node = canvas.nodes.iter().find(|n| n.id() == "end");
+        assert!(
+            start_node.map(|n| n.is_start()).unwrap_or(false),
+            "{name}: missing start node"
+        );
+        assert!(
+            end_node.map(|n| n.is_end()).unwrap_or(false),
+            "{name}: missing end node"
+        );
+
+        let e = &canvas.edges[0];
+        assert_eq!(e.id, "e_start_end", "{name}: edge id");
+        assert_eq!(e.source_node_id, "start", "{name}: edge source");
+        assert_eq!(e.target_node_id, "end", "{name}: edge target");
+        assert_eq!(e.branch, Branch::Yes, "{name}: edge branch");
+    }
+
+    // Normalized graph must pass end-to-end validation.
+    assert!(
+        rule_graph_service::validate(&graph, &HashSet::new(), &manifest()).is_ok(),
+        "normalized graph must pass validation"
+    );
+}
+
+// 22. §6 empty-canvas normalization: a non-empty canvas is left untouched;
+//     empty siblings still receive the default graph.
+#[test]
+fn non_empty_canvas_not_touched_by_normalize() {
+    let mut graph = RuleGraph {
+        anonymous: CanvasGraph {
+            nodes: vec![
+                Node::Start {
+                    id: "s".to_string(),
+                    position: Position { x: 0.0, y: 0.0 },
+                },
+                Node::End {
+                    id: "e".to_string(),
+                    position: Position { x: 1.0, y: 0.0 },
+                },
+            ],
+            edges: vec![Edge {
+                id: "custom_edge".to_string(),
+                source_node_id: "s".to_string(),
+                target_node_id: "e".to_string(),
+                branch: Branch::Yes,
+            }],
+            root_node_id: Some("s".to_string()),
+        },
+        ..Default::default()
+    };
+    rule_graph_service::normalize(&mut graph);
+
+    // anonymous was non-empty: its edge must remain unchanged.
+    assert_eq!(graph.anonymous.edges[0].id, "custom_edge");
+    // registered and customer were empty and get the default graph.
+    assert_eq!(graph.registered.edges[0].id, "e_start_end");
+    assert_eq!(graph.customer.edges[0].id, "e_start_end");
+}
