@@ -6,12 +6,14 @@ This repo holds **two projects**:
 
 **`CONTRACTS.md` (repo root) is the authoritative spec** for DB schema, REST routes, rule_graph JSON, and zen integration. It wins over any `tasks/*.md` on conflicts. Read it before backend/frontend/proxy work.
 
+**License:** RRE code is **FSL-1.1-MIT** (source-available, noncompete — see `LICENSE` / `NOTICE`), NOT open source. Vendored zen `core/*` stays MIT. Don't add MIT headers to RRE files.
+
 ## Commands
 
 ```bash
 make up            # build + start full stack, seed demo feature `dn-article`
 make down          # stop (down-clean also drops the pg volume)
-make check         # all per-service gates (mirrors CI)
+make check         # all per-service gates — the ONLY gate (no CI; run before push)
 make backend-check / proxy-check / frontend-check
 ```
 
@@ -26,6 +28,7 @@ Ports: frontend 3000 · backend 8000 · proxy 9000 · demo-upstream 9001 · post
 - **SQLx uses RUNTIME queries only** (`sqlx::query_as::<_, T>(...)`, never the `query!` compile-time macros) → the backend builds without a live DB.
 - **proxy depends on zen via path** (`../core/engine`, `../core/expression`). zen-types is re-exported through `zen_engine::model::*` — do NOT add a direct `zen-types` dep.
 - **proxy `reqwest` has no `gzip` feature** — the proxy controls encoding itself (`infra::encoding`) so it can rewrite gzipped bodies; auto-decompression would strip `content-encoding`.
+- **Proxy/backend are long-lived native binaries — REBUILD + restart after editing a serialized response struct** (e.g. `proxy/src/domain/features_matched.rs`). The frontend zod-validates `/__rre/eval`, so a stale proxy binary → generic "Something went wrong" in the Test panel (schema skew, not a code bug).
 
 ## zen integration (the point of the proxy)
 
