@@ -10,6 +10,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 
 import { CanvasSlider } from "@/components/canvas/CanvasSlider";
+import { CompareDialog } from "@/components/canvas/compare/CompareDialog";
 import { NodeConfigDrawer } from "@/components/canvas/config/NodeConfigDrawer";
 import { NodePalette } from "@/components/canvas/palette/NodePalette";
 import { ReadOnlyBanner } from "@/components/canvas/ReadOnlyBanner";
@@ -90,6 +91,7 @@ export function RuleBuilderClient({
   const isDraft = version.status === "draft";
   const canMakeLive = version.status !== "live";
   const [makeLiveOpen, setMakeLiveOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   // Narrow the decorative route param to the feature content kind used by the
   // palette filter, TestPanel inputs, applicability gate and component forms.
@@ -136,6 +138,13 @@ export function RuleBuilderClient({
         onOpenChange={setMakeLiveOpen}
       />
 
+      <CompareDialog
+        fid={fid}
+        currentVersion={version}
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+      />
+
       <header className="space-y-3">
         <VersionHeader
           versionNumber={version.version_number}
@@ -170,6 +179,13 @@ export function RuleBuilderClient({
               ].join(" ")}
             >
               {isEditing ? "Editing" : "Edit"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompareOpen(true)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-nav hover:bg-brand-50 hover:text-brand-700"
+            >
+              Compare
             </button>
             {canMakeLive && (
               <button
