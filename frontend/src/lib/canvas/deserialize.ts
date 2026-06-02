@@ -35,8 +35,10 @@ function defaultCanvas(): CanvasWorkingState {
   const edge: RFEdge = {
     id: "e_start_end",
     source: START_NODE_ID,
+    // Start node's only source handle is "out" — sourceHandle MUST match it or
+    // React Flow v12 drops the edge (error #008). Branch stays "yes" by convention.
+    sourceHandle: "out",
     target: END_NODE_ID,
-    sourceHandle: "yes",
     type: "labeledEdge",
     data: { branch: "yes" },
   };
@@ -91,11 +93,17 @@ export function deserializeCanvas(
     };
   });
 
+  // Source-node kind decides the render handle id: a decision routes via its
+  // "yes"/"no" handles; start/expression have a single "out" handle. Setting
+  // sourceHandle to the wire branch ("yes") for a start/expression source makes
+  // React Flow v12 drop the edge (error #008), so map it to the real handle.
+  const kindById = new Map(g.nodes.map((n) => [n.id, n.kind]));
   const edges = g.edges.map<RFEdge>((e) => ({
     id: e.id,
     source: e.source_node_id,
     target: e.target_node_id,
-    sourceHandle: e.branch,
+    sourceHandle:
+      kindById.get(e.source_node_id) === "decision" ? e.branch : "out",
     type: "labeledEdge",
     data: { branch: e.branch },
   }));

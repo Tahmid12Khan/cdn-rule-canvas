@@ -77,7 +77,7 @@ function emptyCanvas(): CanvasWorkingState {
     id: "e_start_end",
     source: START_NODE_ID,
     target: END_NODE_ID,
-    sourceHandle: "yes",
+    sourceHandle: "out",
     type: "labeledEdge",
     data: { branch: "yes" },
   };

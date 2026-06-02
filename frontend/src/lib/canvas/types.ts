@@ -57,9 +57,13 @@ export type RFEndNode = Node<EndNodeData, "endNode">;
 
 export type RFNode = RFStartNode | RFDecisionNode | RFExpressionNode | RFEndNode;
 
-// edge.data carries the YES/NO branch for the LabeledEdge renderer
+// edge.data carries the YES/NO branch for the LabeledEdge renderer + serialize.
 export type Branch = "yes" | "no";
 export type RFEdgeData = {
   branch: Branch;
 };
-export type RFEdge = Edge<RFEdgeData> & { sourceHandle: Branch | null };
+// `sourceHandle` is the RENDER handle id and MUST match a real source handle on
+// the node: "yes"/"no" for a decision, "out" for start/expression (React Flow
+// v12 drops an edge whose sourceHandle doesn't exist — error #008). The canonical
+// wire branch lives in `data.branch`, NOT here.
+export type RFEdge = Edge<RFEdgeData> & { sourceHandle: string | null };

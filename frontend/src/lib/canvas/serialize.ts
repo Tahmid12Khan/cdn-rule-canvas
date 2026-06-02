@@ -55,8 +55,11 @@ export function serializeCanvas(
       id: e.id,
       source_node_id: e.source,
       target_node_id: e.target,
-      // sourceHandle is canonical; fall back to data.branch then "yes".
-      branch: (e.sourceHandle ?? e.data?.branch ?? "yes") as Branch,
+      // data.branch is the canonical wire value (yes/no). sourceHandle is a
+      // render-only handle id ("out" for start/expression), so it must NOT feed
+      // the wire branch. Decision sourceHandle ("yes"/"no") is used as a fallback.
+      branch: (e.data?.branch ??
+        (e.sourceHandle === "no" ? "no" : "yes")) as Branch,
     })),
   };
 }

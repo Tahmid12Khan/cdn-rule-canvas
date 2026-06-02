@@ -59,7 +59,7 @@ export function CanvasFallbackList({ canvas }: CanvasFallbackListProps) {
       <ul>
         {canvas.edges.map((e) => (
           <li key={e.id}>{`Connection ${e.source} → ${e.target} on ${
-            e.sourceHandle ?? e.data?.branch ?? "yes"
+            e.data?.branch ?? "yes"
           } branch`}</li>
         ))}
       </ul>

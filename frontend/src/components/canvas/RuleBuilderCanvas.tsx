@@ -137,12 +137,16 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!editable || !conn.source || !conn.target) return;
-      const branch = (conn.sourceHandle ?? "yes") as Branch;
+      // Keep the actual dragged handle id as sourceHandle ("yes"/"no" on a
+      // decision, "out" on start/expression) so React Flow v12 renders the edge
+      // (error #008 otherwise). The wire branch is yes/no only.
+      const handle = conn.sourceHandle ?? "out";
+      const branch: Branch = handle === "no" ? "no" : "yes";
       const edge: RFEdge = {
         id: nextId("e"),
         source: conn.source,
         target: conn.target,
-        sourceHandle: branch,
+        sourceHandle: handle,
         type: "labeledEdge",
         data: { branch },
       };
