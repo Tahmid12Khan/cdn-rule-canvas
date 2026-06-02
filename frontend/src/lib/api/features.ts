@@ -13,8 +13,8 @@ export const FeatureRead = z.object({
   id: z.string(),
   name: z.string(),
   type: FeatureType,
-  staging_version_id: z.string().uuid().nullable(),
-  live_version_id: z.string().uuid().nullable(),
+  staging_version_id: z.guid().nullable(),
+  live_version_id: z.guid().nullable(),
   created_at: z.string(), // ISO8601 (DateTime<Utc>)
   updated_at: z.string(),
 });

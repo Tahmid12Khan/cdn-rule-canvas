@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { ReactFlowProvider } from "reactflow";
+import { ReactFlowProvider } from "@xyflow/react";
 import { describe, expect, it } from "vitest";
 
 import { EndNode } from "@/components/canvas/nodes/EndNode";

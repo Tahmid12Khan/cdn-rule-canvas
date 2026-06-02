@@ -7,14 +7,14 @@
 // apply_outcome. Purple rounded rectangle to distinguish action nodes from the
 // teal decision diamond.
 import { memo, useState } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { fieldDisplayValue, nodeSummary, nodeTitle } from "@/lib/canvas/manifest";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { ExpressionNodeData } from "@/lib/canvas/types";
+import type { RFExpressionNode } from "@/lib/canvas/types";
 
-function ExpressionNodeImpl({ id, data, selected }: NodeProps<ExpressionNodeData>) {
+function ExpressionNodeImpl({ id, data, selected }: NodeProps<RFExpressionNode>) {
   const hasError = useRuleBuilderStore((s) => Boolean(s.nodeErrors[id]));
   const errorMsg = useRuleBuilderStore((s) => s.nodeErrors[id]);
   const onPath = useRuleBuilderStore(

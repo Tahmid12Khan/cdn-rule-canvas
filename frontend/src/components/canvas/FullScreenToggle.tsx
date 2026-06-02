@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 interface FullScreenToggleProps {
-  targetRef: React.RefObject<HTMLElement>;
+  targetRef: React.RefObject<HTMLElement | null>;
 }
 
 export function FullScreenToggle({ targetRef }: FullScreenToggleProps) {

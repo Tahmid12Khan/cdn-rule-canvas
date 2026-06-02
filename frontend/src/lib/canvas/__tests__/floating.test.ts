@@ -1,4 +1,4 @@
-import { Position } from "reactflow";
+import { Position } from "@xyflow/react";
 import { describe, expect, it } from "vitest";
 
 import { closestSide, type NodeRect } from "@/lib/canvas/floating";

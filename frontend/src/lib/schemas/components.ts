@@ -43,7 +43,7 @@ export const ContentTruncationConfig = z.object({
     .string()
     .min(1, "Enter a CSS selector (e.g. .article-body) for the content to truncate"),
   word_count: z
-    .number({ invalid_type_error: "Enter a number for the word count" })
+    .number({ error: "Enter a number for the word count" })
     .int("Word count must be a whole number (no decimals)")
     .min(1, "Word count must be at least 1")
     .max(10000, "Word count can't exceed 10000 — pick a smaller value"),

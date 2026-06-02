@@ -11,7 +11,7 @@ import { VersionStatus } from "@/lib/api/enums";
 import { Applicability, RuleGraph } from "@/lib/api/ruleGraph";
 
 export const VersionRead = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   feature_id: z.string(),
   version_number: z.number().int(),
   description: z.string().nullable(),

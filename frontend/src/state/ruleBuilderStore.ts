@@ -11,7 +11,7 @@ import {
   type EdgeChange,
   type Node,
   type NodeChange,
-} from "reactflow";
+} from "@xyflow/react";
 import { create } from "zustand";
 
 import type { RuleGraph } from "@/lib/api/ruleGraph";

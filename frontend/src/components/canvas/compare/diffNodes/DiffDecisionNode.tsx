@@ -6,14 +6,14 @@
 // Title + one-line summary come from the manifest helpers, identical to the
 // editor, so a node reads the same in the diff as on the canvas.
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { nodeSummary, nodeTitle } from "@/lib/canvas/manifest";
 import { nodePlateClass } from "@/components/canvas/compare/diffStyles";
-import type { DiffNodeData } from "@/components/canvas/compare/diffData";
+import type { DiffRFNode } from "@/components/canvas/compare/diffData";
 
-function DiffDecisionNodeImpl({ data }: NodeProps<DiffNodeData>) {
+function DiffDecisionNodeImpl({ data }: NodeProps<DiffRFNode>) {
   const { manifest, specByKind } = useNodeTypes();
   const node = data.graphNode;
   const processor = node.kind === "decision" ? node.processor : { type: "" };

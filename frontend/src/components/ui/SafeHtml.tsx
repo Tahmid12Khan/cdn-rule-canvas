@@ -18,7 +18,7 @@ export function SafeHtml({ html, className }: SafeHtmlProps) {
   return (
     <div
       className={className}
-      // eslint-disable-next-line react/no-danger -- sanitized by DOMPurify above; sole sanctioned sink.
+      // Sanitized by DOMPurify above; this is the sole sanctioned HTML sink.
       dangerouslySetInnerHTML={{ __html: clean }}
     />
   );

@@ -30,7 +30,7 @@ export type ContentKind = z.infer<typeof ContentKind>;
 export const EvalContext = z.object({
   device_type: DeviceType.optional(),
   user_agent: z.string().optional(),
-  meta_tags: z.record(z.string()).optional(),
+  meta_tags: z.record(z.string(), z.string()).optional(),
   path: z.string().optional(),
   url: z.string().optional(),
   response_json: z.unknown().optional(),

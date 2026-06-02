@@ -8,8 +8,8 @@ import { z } from "zod";
 import { apiGet } from "@/lib/api/client";
 
 export const CanvasOutcome = z.object({
-  id: z.string().uuid(),
-  version_id: z.string().uuid(),
+  id: z.guid(),
+  version_id: z.guid(),
   title: z.string(),
   is_builtin: z.boolean(),
   order_index: z.number().int(),

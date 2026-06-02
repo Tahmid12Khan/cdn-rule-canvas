@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactFlowInstance } from "reactflow";
+import type { ReactFlowInstance } from "@xyflow/react";
 
 import { ChangeList } from "@/components/canvas/compare/ChangeList";
 import { DiffCanvas } from "@/components/canvas/compare/DiffCanvas";

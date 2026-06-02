@@ -6,14 +6,14 @@
 // field token (the outcome's title isn't resolvable across versions here); other
 // actions use the generic manifest summary. A non-empty custom_label is shown.
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { nodeSummary, nodeTitle } from "@/lib/canvas/manifest";
 import { nodePlateClass } from "@/components/canvas/compare/diffStyles";
-import type { DiffNodeData } from "@/components/canvas/compare/diffData";
+import type { DiffRFNode } from "@/components/canvas/compare/diffData";
 
-function DiffExpressionNodeImpl({ data }: NodeProps<DiffNodeData>) {
+function DiffExpressionNodeImpl({ data }: NodeProps<DiffRFNode>) {
   const { manifest, specByKind } = useNodeTypes();
   const node = data.graphNode;
   const action = node.kind === "expression" ? node.action : { type: "" };

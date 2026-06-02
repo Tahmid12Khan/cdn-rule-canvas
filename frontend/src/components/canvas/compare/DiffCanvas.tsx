@@ -6,7 +6,8 @@
 // dialog can pan/centre it when a change-list item is clicked. Each instance
 // gets its OWN ReactFlowProvider (isolated RF store per canvas).
 import { useCallback, useMemo } from "react";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
@@ -14,7 +15,9 @@ import ReactFlow, {
   type EdgeTypes,
   type NodeTypes,
   type ReactFlowInstance,
-} from "reactflow";
+  type Node as RFLibNode,
+  type Edge as RFLibEdge,
+} from "@xyflow/react";
 
 import { DiffEdge } from "@/components/canvas/compare/DiffEdge";
 import { DiffDecisionNode } from "@/components/canvas/compare/diffNodes/DiffDecisionNode";
@@ -38,7 +41,7 @@ interface DiffCanvasProps {
 }
 
 function DiffCanvasInner({ diff, focusedNodeId, onReady }: DiffCanvasProps) {
-  const rfNodes = useMemo(
+  const rfNodes: RFLibNode[] = useMemo(
     () =>
       diff.nodes.map((nd) => ({
         id: nd.id,
@@ -68,7 +71,7 @@ function DiffCanvasInner({ diff, focusedNodeId, onReady }: DiffCanvasProps) {
     return m;
   }, [diff.nodes]);
 
-  const rfEdges = useMemo(
+  const rfEdges: RFLibEdge[] = useMemo(
     () =>
       diff.edges.map((ed) => ({
         id: ed.key,

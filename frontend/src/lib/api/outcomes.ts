@@ -7,8 +7,8 @@ import { ComponentRead } from "@/lib/api/components";
 // ReorderItem). OutcomeRead nests its components (ordered by order_index ASC).
 
 export const OutcomeRead = z.object({
-  id: z.string().uuid(),
-  version_id: z.string().uuid(),
+  id: z.guid(),
+  version_id: z.guid(),
   title: z.string(),
   description: z.string().nullable(),
   is_builtin: z.boolean(),
@@ -33,7 +33,7 @@ export const OutcomeUpdate = z.object({
 export type OutcomeUpdate = z.infer<typeof OutcomeUpdate>;
 
 export const ReorderItem = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   order_index: z.number().int(),
 });
 export type ReorderItem = z.infer<typeof ReorderItem>;

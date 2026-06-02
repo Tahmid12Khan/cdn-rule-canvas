@@ -6,12 +6,12 @@
 // as an `end` node. Visually mirrors the StartNode (black pill) so the
 // start/end pair reads as the journey's bookends.
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { EndNodeData } from "@/lib/canvas/types";
+import type { RFEndNode } from "@/lib/canvas/types";
 
-function EndNodeImpl({ id, data, selected }: NodeProps<EndNodeData>) {
+function EndNodeImpl({ id, data, selected }: NodeProps<RFEndNode>) {
   const hasError = useRuleBuilderStore((s) => Boolean(s.nodeErrors[id]));
   const onPath = useRuleBuilderStore(
     (s) => s.testHighlight?.nodeIds.has(id) ?? false,

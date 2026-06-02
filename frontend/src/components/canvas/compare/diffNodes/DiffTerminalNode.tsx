@@ -6,12 +6,12 @@
 // "unchanged" (only position can differ) but the union may still surface them as
 // added/removed when a whole canvas appears or disappears between versions.
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { nodePlateClass } from "@/components/canvas/compare/diffStyles";
-import type { DiffNodeData } from "@/components/canvas/compare/diffData";
+import type { DiffRFNode } from "@/components/canvas/compare/diffData";
 
-function DiffTerminalNodeImpl({ data }: NodeProps<DiffNodeData>) {
+function DiffTerminalNodeImpl({ data }: NodeProps<DiffRFNode>) {
   const isStart = data.graphNode.kind === "start";
   const label = isStart ? "Start" : "END";
 

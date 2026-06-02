@@ -6,12 +6,12 @@
 // (start_no_incoming). Auto-injected (one per non-empty canvas), non-deletable,
 // and the graph root. Persisted on the wire as a `start` node.
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { StartNodeData } from "@/lib/canvas/types";
+import type { RFStartNode } from "@/lib/canvas/types";
 
-function StartNodeImpl({ id, data, selected }: NodeProps<StartNodeData>) {
+function StartNodeImpl({ id, data, selected }: NodeProps<RFStartNode>) {
   const hasError = useRuleBuilderStore((s) => Boolean(s.nodeErrors[id]));
   // Dim with the rest of the canvas while a test result is active (the start
   // marker is never "on path" itself).

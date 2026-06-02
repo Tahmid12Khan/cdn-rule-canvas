@@ -23,11 +23,11 @@ import {
   useStore,
   type EdgeProps,
   type ReactFlowState,
-} from "reactflow";
+} from "@xyflow/react";
 
 import { closestSide, type NodeRect } from "@/lib/canvas/floating";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import { START_NODE_ID, type RFEdgeData } from "@/lib/canvas/types";
+import { START_NODE_ID, type RFEdge } from "@/lib/canvas/types";
 
 // Decision-node geometry (mirrors DecisionNode.tsx): the diamond plate is
 // `h-28 w-28` = 112px and sits in a `flex flex-col items-center` column UNDER a
@@ -52,12 +52,14 @@ function LabeledEdgeImpl({
   data,
   markerEnd,
   selected,
-}: EdgeProps<RFEdgeData>) {
+}: EdgeProps<RFEdge>) {
   // Subscribe to ONLY the target node's internal record (re-floats the edge when
   // that node is dragged). useCallback keeps the selector identity stable so it
-  // doesn't churn every render.
+  // doesn't churn every render. v12: nodeLookup -> InternalNode, whose absolute
+  // position lives at `.internals.positionAbsolute` and measured size at
+  // `.measured`.
   const targetNode = useStore(
-    useCallback((s: ReactFlowState) => s.nodeInternals.get(target), [target]),
+    useCallback((s: ReactFlowState) => s.nodeLookup.get(target), [target]),
   );
 
   // Float the target end to the closest border when the node is measured;
@@ -66,15 +68,15 @@ function LabeledEdgeImpl({
   let ty = targetY;
   let tPos = targetPosition;
   if (
-    targetNode?.positionAbsolute &&
-    targetNode.width != null &&
-    targetNode.height != null
+    targetNode?.internals.positionAbsolute &&
+    targetNode.measured.width != null &&
+    targetNode.measured.height != null
   ) {
     let rect: NodeRect = {
-      x: targetNode.positionAbsolute.x,
-      y: targetNode.positionAbsolute.y,
-      w: targetNode.width,
-      h: targetNode.height,
+      x: targetNode.internals.positionAbsolute.x,
+      y: targetNode.internals.positionAbsolute.y,
+      w: targetNode.measured.width,
+      h: targetNode.measured.height,
     };
     // For a decision node, inset the measured box to the 112px diamond region
     // (title pill above + error label below are excluded) so the edge attaches

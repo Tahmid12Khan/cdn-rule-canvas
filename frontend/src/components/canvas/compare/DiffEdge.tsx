@@ -10,11 +10,11 @@ import {
   EdgeLabelRenderer,
   getBezierPath,
   type EdgeProps,
-} from "reactflow";
+} from "@xyflow/react";
 
 import { edgeStroke } from "@/components/canvas/compare/diffStyles";
 import { START_NODE_ID } from "@/lib/canvas/types";
-import type { DiffEdgeData } from "@/components/canvas/compare/diffData";
+import type { DiffRFEdge } from "@/components/canvas/compare/diffData";
 
 function DiffEdgeImpl({
   id,
@@ -27,7 +27,7 @@ function DiffEdgeImpl({
   targetPosition,
   markerEnd,
   data,
-}: EdgeProps<DiffEdgeData>) {
+}: EdgeProps<DiffRFEdge>) {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,

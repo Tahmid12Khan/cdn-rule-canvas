@@ -9,7 +9,7 @@ import { RuleGraph } from "@/lib/api/ruleGraph";
 
 // List rows — lighter, no rule_graph payload (BACKEND VersionSummary).
 export const VersionSummary = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   feature_id: z.string(),
   version_number: z.number().int(),
   description: z.string().nullable(),

@@ -1,4 +1,4 @@
-import type { Edge, Node } from "reactflow";
+import type { Edge, Node } from "@xyflow/react";
 
 export type CanvasKey = "anonymous" | "registered" | "customer";
 
@@ -9,51 +9,57 @@ export type CanvasKey = "anonymous" | "registered" | "customer";
 // is no per-type union, so a new node type needs ZERO frontend change. Round-
 // trips the SAME wire JSON the backend/proxy exchange. REUSED for the expression
 // node `action` (same `{ type, …fields }` shape — expression-nodes-spec §1).
-export interface ProcessorConfig {
+export type ProcessorConfig = {
   type: string;
   [field: string]: unknown;
-}
+};
 
 // ---- node data payloads (what lives in RF node.data — serializable) ----
+// NOTE: these MUST be `type` aliases, not `interface`s — React Flow v12's
+// `Node<Data>` constrains `Data extends Record<string, unknown>`, and only type
+// aliases of object literals satisfy that (interfaces lack an implicit index
+// signature).
 
 // Entry marker. Exactly one per non-empty canvas; PERSISTED on the wire as a
 // `start` node (expression-nodes-spec §1). No incoming edges; one outgoing edge.
-export interface StartNodeData {
+export type StartNodeData = {
   label: string;
-}
+};
 // Branches yes/no via a processor. UNCHANGED.
-export interface DecisionNodeData {
+export type DecisionNodeData = {
   processor: ProcessorConfig;
-}
+};
 // Performs one body action and passes through. `action` is the generic
 // ProcessorConfig (`{ type, …fields }`). For `apply_outcome` the action carries
 // `outcome_id`; `outcomeTitle` is a denormalized display cache (NOT persisted),
 // re-resolved from the outcomes query on deserialize. `custom_label` is an
 // optional snake_case display name persisted on the wire (spec §v2.3); absent /
 // "" = no custom name.
-export interface ExpressionNodeData {
+export type ExpressionNodeData = {
   action: ProcessorConfig;
   outcomeTitle?: string;
   custom_label?: string;
-}
+};
 // Terminal. Stops the flow. Zero outgoing edges. ≥1 per non-empty canvas.
-export interface EndNodeData {
+export type EndNodeData = {
   label: string;
-}
+};
 
 // Fixed ids of the auto-injected start + end nodes (one each per canvas).
 export const START_NODE_ID = "start";
 export const END_NODE_ID = "end";
 
-export type RFNode =
-  | Node<StartNodeData, "startNode">
-  | Node<DecisionNodeData, "decisionNode">
-  | Node<ExpressionNodeData, "expressionNode">
-  | Node<EndNodeData, "endNode">;
+// Typed React Flow nodes (v12 NodeProps takes the Node type, not the data type).
+export type RFStartNode = Node<StartNodeData, "startNode">;
+export type RFDecisionNode = Node<DecisionNodeData, "decisionNode">;
+export type RFExpressionNode = Node<ExpressionNodeData, "expressionNode">;
+export type RFEndNode = Node<EndNodeData, "endNode">;
+
+export type RFNode = RFStartNode | RFDecisionNode | RFExpressionNode | RFEndNode;
 
 // edge.data carries the YES/NO branch for the LabeledEdge renderer
 export type Branch = "yes" | "no";
-export interface RFEdgeData {
+export type RFEdgeData = {
   branch: Branch;
-}
+};
 export type RFEdge = Edge<RFEdgeData> & { sourceHandle: Branch | null };

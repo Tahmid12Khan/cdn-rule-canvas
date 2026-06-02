@@ -63,8 +63,8 @@ export const ComponentType = z.enum([
 export type ComponentType = z.infer<typeof ComponentType>;
 
 export const ComponentRead = z.object({
-  id: z.string().uuid(),
-  outcome_id: z.string().uuid(),
+  id: z.guid(),
+  outcome_id: z.guid(),
   slug: z.string(),
   type: z.string(),
   config: z.unknown(), // serde_json::Value on read

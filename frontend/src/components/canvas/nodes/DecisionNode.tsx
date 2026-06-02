@@ -7,14 +7,14 @@
 // truncation length come from the manifest, the client only renders them. The
 // hover tooltip still lists each field's full (untruncated) value.
 import { memo, useState } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { useNodeTypes } from "@/hooks/useNodeTypes";
 import { fieldDisplayValue, nodeSummary, nodeTitle } from "@/lib/canvas/manifest";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { DecisionNodeData } from "@/lib/canvas/types";
+import type { RFDecisionNode } from "@/lib/canvas/types";
 
-function DecisionNodeImpl({ id, data, selected }: NodeProps<DecisionNodeData>) {
+function DecisionNodeImpl({ id, data, selected }: NodeProps<RFDecisionNode>) {
   const hasError = useRuleBuilderStore((s) => Boolean(s.nodeErrors[id]));
   const errorMsg = useRuleBuilderStore((s) => s.nodeErrors[id]);
   const onPath = useRuleBuilderStore(

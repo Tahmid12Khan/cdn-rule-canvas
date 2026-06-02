@@ -1,9 +1,12 @@
 /* React Flow base styles (canvas rendering). Import must precede other rules. */
-@import "reactflow/dist/style.css";
+@import "@xyflow/react/dist/style.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Tailwind v4 reads the existing JS config (color/token map, darkMode class) so
+   every semantic color token (bg, text, border, accent) keeps resolving with
+   zero churn. */
+@config "../../tailwind.config.ts";
 
 @layer base {
   /* Semantic design tokens (WS6, Zed-like). DARK is the default; `.light` on
@@ -92,7 +95,7 @@
   .dot-grid {
     background-color: var(--bg);
     background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
-    background-size: theme(backgroundSize.dot-grid);
+    background-size: 20px 20px;
   }
 }
 

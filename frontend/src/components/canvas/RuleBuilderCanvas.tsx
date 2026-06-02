@@ -5,7 +5,8 @@
 // setters. Loaded via next/dynamic({ ssr:false }) by RuleBuilderClient to avoid
 // hydration mismatch. Drag-drop from the palette + edge connect land here.
 import { useCallback, useEffect, useRef } from "react";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   BackgroundVariant,
   ConnectionMode,
@@ -18,7 +19,7 @@ import ReactFlow, {
   type NodeChange,
   type NodeTypes,
   type EdgeTypes,
-} from "reactflow";
+} from "@xyflow/react";
 
 import { CanvasFallbackList } from "@/components/canvas/CanvasFallbackList";
 import { FullScreenToggle } from "@/components/canvas/FullScreenToggle";

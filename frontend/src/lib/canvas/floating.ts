@@ -5,7 +5,7 @@
 // This is unit-testable in isolation: the React layer (LabeledEdge) reads the
 // node geometry from the RF store and feeds it here, then passes the result to
 // getBezierPath so the edge meets the nearest side of the destination.
-import { Position } from "reactflow";
+import { Position } from "@xyflow/react";
 
 export interface NodeRect {
   // Top-left origin (React Flow positionAbsolute) + measured size.
