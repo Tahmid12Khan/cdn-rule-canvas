@@ -55,11 +55,33 @@ function endNode(): RFNode {
   };
 }
 
-// A non-empty canvas always carries exactly one start + one end. An EMPTY
-// canvas (zero real nodes) stays empty — the start/end pair appears only once
-// the user adds a real node (mirrors the backend: empty canvas is valid).
+// Every canvas — including one with zero real (non-bookend) nodes — carries
+// exactly one start node, one end node, and the connecting edge (spec §6).
+// Positions and ids are locked by the spec and must match the backend default.
 function emptyCanvas(): CanvasWorkingState {
-  return { nodes: [], edges: [], rootNodeId: null };
+  const s: RFNode = {
+    id: START_NODE_ID,
+    type: "startNode",
+    position: { x: 40, y: 160 },
+    data: { label: "Start" },
+    deletable: false,
+  };
+  const e: RFNode = {
+    id: END_NODE_ID,
+    type: "endNode",
+    position: { x: 940, y: 160 },
+    data: { label: "END" },
+    deletable: false,
+  };
+  const edge: RFEdge = {
+    id: "e_start_end",
+    source: START_NODE_ID,
+    target: END_NODE_ID,
+    sourceHandle: "yes",
+    type: "labeledEdge",
+    data: { branch: "yes" },
+  };
+  return { nodes: [s, e], edges: [edge], rootNodeId: START_NODE_ID };
 }
 
 // Ensure a deserialized canvas with ≥1 node carries a start + an end node.
@@ -297,14 +319,15 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       let edges = canvas.edges.filter(
         (e) => e.source !== nodeId && e.target !== nodeId,
       );
-      // If that was the last REAL node, drop the bookends too so the canvas
-      // returns to the (valid) empty state.
+      // If that was the last REAL node, reset the canvas to the default
+      // start → end state (spec §6: empty canvas always has start + end + edge).
       const realLeft = nodes.filter(
         (n) => n.type !== "startNode" && n.type !== "endNode",
       );
       if (realLeft.length === 0) {
-        nodes = [];
-        edges = [];
+        const def = emptyCanvas();
+        nodes = def.nodes;
+        edges = def.edges;
       }
       const nextErrors = { ...state.nodeErrors };
       delete nextErrors[nodeId];

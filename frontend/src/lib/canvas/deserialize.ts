@@ -6,13 +6,50 @@
 // state) — it is re-resolved here from the outcomes query via outcomeTitleById
 // and cached on the expression node's data.
 import type { CanvasGraph, RuleGraph } from "@/lib/api/ruleGraph";
-import type { CanvasKey, RFEdge, RFNode } from "@/lib/canvas/types";
+import {
+  END_NODE_ID,
+  START_NODE_ID,
+  type CanvasKey,
+  type RFEdge,
+  type RFNode,
+} from "@/lib/canvas/types";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
+
+// Default start → end canvas (spec §6). Returned whenever the backend sends
+// an empty canvas (zero nodes). Positions and ids are locked by the spec.
+function defaultCanvas(): CanvasWorkingState {
+  const s: RFNode = {
+    id: START_NODE_ID,
+    type: "startNode",
+    position: { x: 40, y: 160 },
+    data: { label: "Start" },
+    deletable: false,
+  };
+  const e: RFNode = {
+    id: END_NODE_ID,
+    type: "endNode",
+    position: { x: 940, y: 160 },
+    data: { label: "END" },
+    deletable: false,
+  };
+  const edge: RFEdge = {
+    id: "e_start_end",
+    source: START_NODE_ID,
+    target: END_NODE_ID,
+    sourceHandle: "yes",
+    type: "labeledEdge",
+    data: { branch: "yes" },
+  };
+  return { nodes: [s, e], edges: [edge], rootNodeId: START_NODE_ID };
+}
 
 export function deserializeCanvas(
   g: CanvasGraph,
   outcomeTitleById: (id: string) => string,
 ): CanvasWorkingState {
+  // Empty backend canvas → inject the default start → end graph (spec §6).
+  if (g.nodes.length === 0) return defaultCanvas();
+
   const nodes = g.nodes.map<RFNode>((n) => {
     const position = { x: n.position.x, y: n.position.y };
     if (n.kind === "start") {

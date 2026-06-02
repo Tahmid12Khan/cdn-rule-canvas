@@ -70,12 +70,13 @@ describe("NodeConfigDrawer (edit mode)", () => {
     const user = userEvent.setup();
     renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
     await user.click(screen.getByRole("button", { name: "Delete node" }));
-    // d1 is gone; only the frontend-only start node remains.
+    // d1 is gone. Deleting the last real node resets the canvas to the default
+    // start → end state (spec §6), so only the start + end bookends remain.
+    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
     expect(
-      useRuleBuilderStore
-        .getState()
-        .canvases.anonymous.nodes.filter((n) => n.type !== "startNode"),
+      nodes.filter((n) => n.type !== "startNode" && n.type !== "endNode"),
     ).toHaveLength(0);
+    expect(nodes.find((n) => n.id === "d1")).toBeUndefined();
   });
 });
 

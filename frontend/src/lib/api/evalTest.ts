@@ -65,8 +65,29 @@ export const JourneyStep = z.object({
   label: z.string(),
   branch: z.boolean().nullable(),
   body_after: z.unknown(),
+  // Per-node apply time, ms, formatted "d.dd" (features-matched-spec §3/§5).
+  // Expression steps carry the node's apply time; start/decision/end are
+  // "0.00". Additive — absent on older proxies → defaults to "0.00".
+  time_ms: z.string().default("0.00"),
 });
 export type JourneyStep = z.infer<typeof JourneyStep>;
+
+// Per-feature timing summary for the canvas under test (features-matched-spec
+// §5). Mirrors a single feature's `features_matched` entry. All times are
+// strings formatted "d.dd" so trailing zeros survive (0.10, not 0.1).
+export const EvalSummary = z.object({
+  outcome_ids: z.array(z.string()),
+  outcome_labels: z.array(z.string()),
+  time_took: z.string(),
+  expensive_nodes: z.array(
+    z.object({
+      outcome_id: z.string(),
+      outcome_label: z.string(),
+      outcome_time_in_ms: z.string(),
+    }),
+  ),
+});
+export type EvalSummary = z.infer<typeof EvalSummary>;
 
 export const EvalResponse = z.object({
   matched_node_id: z.string().nullable(),
@@ -76,6 +97,9 @@ export const EvalResponse = z.object({
   // Additive (expression-nodes-spec §5). Absent on older proxies → defaults to
   // an empty array so the journey view simply doesn't render.
   journey: z.array(JourneyStep).default([]),
+  // Additive (features-matched-spec §5). Absent on older proxies → null, so
+  // the timing summary simply doesn't render.
+  summary: EvalSummary.nullish().default(null),
 });
 export type EvalResponse = z.infer<typeof EvalResponse>;
 

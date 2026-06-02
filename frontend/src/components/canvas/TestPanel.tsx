@@ -8,7 +8,7 @@
 // The graph it tests is the LIVE (possibly unsaved) canvas from the store, so
 // edits can be tested before saving. Highlight state is stored on the
 // ruleBuilderStore so the custom nodes/edges can subscribe and glow.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import { TransformationJourney } from "@/components/canvas/TransformationJourney";
@@ -18,10 +18,15 @@ import {
   postEvalTest,
   type DeviceType,
   type EvalContext,
+  type EvalResponse,
 } from "@/lib/api/evalTest";
 import { serializeCanvas } from "@/lib/canvas/serialize";
 import { toUserError } from "@/lib/errors/userError";
-import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
+import {
+  useRuleBuilderStore,
+  type TestHighlight,
+} from "@/state/ruleBuilderStore";
+import type { RFEdge } from "@/lib/canvas/types";
 
 interface TestPanelProps {
   // Title resolver so the matched-outcome banner can show a friendly name.
@@ -38,12 +43,59 @@ interface MetaRow {
 
 const DEVICES: DeviceType[] = ["mobile", "desktop", "tablet"];
 
+// The FULL start→END highlight for a run (features-matched-spec §7). Built from
+// the journey node sequence — every journey node id (incl. start + end), plus,
+// for each consecutive journey pair, the live-canvas edge whose
+// (source,target) matches. Falls back to the proxy's traversed_* sets when the
+// journey is empty (older proxies / no journey).
+function fullPathHighlight(
+  res: EvalResponse,
+  edges: RFEdge[],
+): TestHighlight {
+  const reachedEnd =
+    res.journey.length > 0 &&
+    res.journey[res.journey.length - 1].kind === "end";
+
+  if (res.journey.length === 0) {
+    return {
+      nodeIds: new Set(res.traversed_node_ids),
+      edgeIds: new Set(res.traversed_edge_ids),
+      outcomeNodeId: res.matched_node_id,
+      deadEnd: !reachedEnd,
+    };
+  }
+
+  const nodeIds = new Set(res.journey.map((s) => s.node_id));
+  const edgeIds = new Set<string>();
+  for (let i = 0; i + 1 < res.journey.length; i++) {
+    const source = res.journey[i].node_id;
+    const target = res.journey[i + 1].node_id;
+    const edge = edges.find(
+      (e) => e.source === source && e.target === target,
+    );
+    if (edge) edgeIds.add(edge.id);
+  }
+  return {
+    nodeIds,
+    edgeIds,
+    outcomeNodeId: res.matched_node_id,
+    deadEnd: !reachedEnd,
+  };
+}
+
 export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   const isJson = featureType === "json";
   const selected = useRuleBuilderStore((s) => s.selected);
   const setTestHighlight = useRuleBuilderStore((s) => s.setTestHighlight);
   const clearTestHighlight = useRuleBuilderStore((s) => s.clearTestHighlight);
   const highlight = useRuleBuilderStore((s) => s.testHighlight);
+  // Live (selected) canvas nodes — passed to the journey so each step can look
+  // up its node's config (inputs + plain-English description).
+  const canvasNodes = useRuleBuilderStore((s) => s.canvases[s.selected].nodes);
+
+  // The full start→END highlight for the latest run — restored when the
+  // Transformation Journey is collapsed (features-matched-spec §7).
+  const fullPathRef = useRef<TestHighlight | null>(null);
 
   const [device, setDevice] = useState<DeviceType | "">("");
   const [path, setPath] = useState("");
@@ -114,19 +166,16 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       return postEvalTest({ canvas, context });
     },
     onSuccess: (res) => {
-      // A path is a dead-end only when it never reaches an END node — NOT merely
-      // when no apply_outcome ran. The NO branch straight to END is a complete
-      // path (its terminal body IS the output). The journey's last step is the
-      // END node when the path completed (the proxy appends it).
-      const reachedEnd =
-        res.journey.length > 0 &&
-        res.journey[res.journey.length - 1].kind === "end";
-      setTestHighlight({
-        nodeIds: new Set(res.traversed_node_ids),
-        edgeIds: new Set(res.traversed_edge_ids),
-        outcomeNodeId: res.matched_node_id,
-        deadEnd: !reachedEnd,
-      });
+      // Compute the FULL start→END highlight from the journey node sequence:
+      // every journey node id (incl. start + end) + the live-canvas edges for
+      // each consecutive journey pair. (Fixes the broken highlight that no
+      // longer spanned start→end — features-matched-spec §7.) A path is a
+      // dead-end only when it never reaches an END node — the journey's last
+      // step is the END node when the path completed (the proxy appends it).
+      const { canvases } = useRuleBuilderStore.getState();
+      const hl = fullPathHighlight(res, canvases[selected].edges);
+      fullPathRef.current = hl;
+      setTestHighlight(hl);
     },
   });
 
@@ -172,8 +221,15 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
 
   function handleClear() {
     clearTestHighlight();
+    fullPathRef.current = null;
     mutation.reset();
   }
+
+  // Restore the full start→END highlight (the journey calls this when it
+  // collapses — features-matched-spec §7).
+  const restoreFullPath = useCallback(() => {
+    if (fullPathRef.current) setTestHighlight(fullPathRef.current);
+  }, [setTestHighlight]);
 
   function handleRun() {
     // For JSON features, validate the textarea is parseable BEFORE the request
@@ -386,10 +442,12 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       {mutation.data && mutation.data.journey.length > 0 && (
         <TransformationJourney
           // Remount on each run so the stepper resets to the first node (and
-          // re-glows it) rather than carrying a stale index across runs.
+          // re-collapses) rather than carrying a stale index across runs.
           key={mutation.submittedAt}
           journey={mutation.data.journey}
           featureType={featureType}
+          canvasNodes={canvasNodes}
+          onRestoreFullPath={restoreFullPath}
         />
       )}
     </section>

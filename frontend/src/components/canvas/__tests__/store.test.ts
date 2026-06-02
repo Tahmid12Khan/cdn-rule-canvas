@@ -77,9 +77,40 @@ describe("ruleBuilderStore", () => {
     expect(realNodes("anonymous")).toHaveLength(1);
   });
 
-  it("a seeded EMPTY canvas has no nodes (empty canvas is valid)", () => {
+  it("empty-canvas factory yields start + end + e_start_end with spec positions (spec §6)", () => {
+    // The store initialises each canvas via emptyCanvas() — verify directly.
+    const canvas = useRuleBuilderStore.getState().canvases.anonymous;
+    expect(canvas.rootNodeId).toBe(START_NODE_ID);
+    expect(canvas.nodes.find((n) => n.id === START_NODE_ID)?.position).toEqual({
+      x: 40,
+      y: 160,
+    });
+    expect(canvas.nodes.find((n) => n.id === END_NODE_ID)?.position).toEqual({
+      x: 940,
+      y: 160,
+    });
+    const e = canvas.edges.find((e) => e.id === "e_start_end");
+    expect(e?.source).toBe(START_NODE_ID);
+    expect(e?.target).toBe(END_NODE_ID);
+    expect(e?.data?.branch).toBe("yes");
+  });
+
+  it("a seeded EMPTY canvas has the default start -> end graph (spec §6)", () => {
     for (const k of ["anonymous", "registered", "customer"] as const) {
-      expect(useRuleBuilderStore.getState().canvases[k].nodes).toHaveLength(0);
+      const canvas = useRuleBuilderStore.getState().canvases[k];
+      const starts = canvas.nodes.filter((n) => n.type === "startNode");
+      const ends = canvas.nodes.filter((n) => n.type === "endNode");
+      expect(starts).toHaveLength(1);
+      expect(starts[0].id).toBe(START_NODE_ID);
+      expect(starts[0].position).toEqual({ x: 40, y: 160 });
+      expect(ends).toHaveLength(1);
+      expect(ends[0].id).toBe(END_NODE_ID);
+      expect(ends[0].position).toEqual({ x: 940, y: 160 });
+      expect(canvas.edges).toHaveLength(1);
+      expect(canvas.edges[0].id).toBe("e_start_end");
+      expect(canvas.edges[0].source).toBe(START_NODE_ID);
+      expect(canvas.edges[0].target).toBe(END_NODE_ID);
+      expect(canvas.rootNodeId).toBe(START_NODE_ID);
     }
   });
 
@@ -106,38 +137,46 @@ describe("ruleBuilderStore", () => {
     expect(nodes.filter((n) => n.type === "endNode")).toHaveLength(1);
   });
 
-  it("removing the last real node returns the canvas to empty (bookends dropped)", () => {
+  it("removing the last real node resets the canvas to default start -> end (spec §6)", () => {
     const s = useRuleBuilderStore.getState();
     s.addNode("anonymous", decision("d1"));
     s.removeNode("anonymous", "d1");
-    expect(useRuleBuilderStore.getState().canvases.anonymous.nodes).toHaveLength(
-      0,
-    );
+    const canvas = useRuleBuilderStore.getState().canvases.anonymous;
+    const starts = canvas.nodes.filter((n) => n.type === "startNode");
+    const ends = canvas.nodes.filter((n) => n.type === "endNode");
+    expect(starts).toHaveLength(1);
+    expect(ends).toHaveLength(1);
+    expect(canvas.edges).toHaveLength(1);
+    expect(canvas.edges[0].id).toBe("e_start_end");
   });
 
   it("addEdge rejects an edge sourced from the end node", () => {
     const s = useRuleBuilderStore.getState();
     s.addNode("anonymous", decision("d1"));
+    const edgesBefore = useRuleBuilderStore.getState().canvases.anonymous.edges.length;
     const ok = useRuleBuilderStore
       .getState()
       .addEdge("anonymous", edge("e1", END_NODE_ID, "d1"));
     expect(ok).toBe(false);
+    // No edge added — edge count is unchanged (default e_start_end is present).
     expect(
       useRuleBuilderStore.getState().canvases.anonymous.edges,
-    ).toHaveLength(0);
+    ).toHaveLength(edgesBefore);
   });
 
   it("addEdge accepts an edge sourced from a decision node", () => {
     const s = useRuleBuilderStore.getState();
     s.addNode("anonymous", decision("d1"));
     s.addNode("anonymous", expression("o1"));
+    const edgesBefore = useRuleBuilderStore.getState().canvases.anonymous.edges.length;
     const ok = useRuleBuilderStore
       .getState()
       .addEdge("anonymous", edge("e1", "d1", "o1"));
     expect(ok).toBe(true);
+    // One new edge added on top of any pre-existing edges.
     expect(
       useRuleBuilderStore.getState().canvases.anonymous.edges,
-    ).toHaveLength(1);
+    ).toHaveLength(edgesBefore + 1);
   });
 
   it("removeNode also removes connected edges", () => {
@@ -149,7 +188,10 @@ describe("ruleBuilderStore", () => {
     const canvas = useRuleBuilderStore.getState().canvases.anonymous;
     // o1 remains (start + end nodes also remain, but realNodes excludes them).
     expect(realNodes("anonymous")).toHaveLength(1);
-    expect(canvas.edges).toHaveLength(0);
+    // Only e1 (d1→o1) was removed; e_start_end survives (not connected to d1).
+    const edgeIds = canvas.edges.map((e) => e.id);
+    expect(edgeIds).not.toContain("e1");
+    expect(edgeIds).toContain("e_start_end");
   });
 
   it("switching selected canvas keeps both canvases unchanged", () => {

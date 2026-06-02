@@ -89,6 +89,50 @@ describe("TestPanel", () => {
     expect(useRuleBuilderStore.getState().testHighlight).toBeNull();
   });
 
+  it("highlights the FULL start→END path from the journey (incl. start + end)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${PROXY_BASE}/__rre/eval`, () =>
+        HttpResponse.json({
+          matched_node_id: "o1",
+          // Proxy traversed_* omit start/end — the full path must come from the
+          // journey node sequence instead (features-matched-spec §7).
+          traversed_node_ids: ["d1", "o1"],
+          traversed_edge_ids: ["e1"],
+          steps: [
+            { node_id: "d1", kind: "decision", branch: "yes", result: true },
+          ],
+          journey: [
+            { index: 0, node_id: "start", kind: "start", label: "Start", branch: null, body_after: "<html></html>", time_ms: "0.00" },
+            { index: 1, node_id: "d1", kind: "decision", label: "Device Type", branch: true, body_after: "<html></html>", time_ms: "0.00" },
+            { index: 2, node_id: "o1", kind: "expression", label: "Apply Outcome", branch: null, body_after: "<html>pw</html>", time_ms: "0.42" },
+            { index: 3, node_id: "end", kind: "end", label: "END", branch: null, body_after: "<html>pw</html>", time_ms: "0.00" },
+          ],
+        }),
+      ),
+    );
+
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
+
+    await user.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() =>
+      expect(useRuleBuilderStore.getState().testHighlight).not.toBeNull(),
+    );
+    const hl = useRuleBuilderStore.getState().testHighlight;
+    // Full path includes start + end (NOT just the proxy traversed_* set).
+    expect(hl?.nodeIds.has("start")).toBe(true);
+    expect(hl?.nodeIds.has("d1")).toBe(true);
+    expect(hl?.nodeIds.has("o1")).toBe(true);
+    expect(hl?.nodeIds.has("end")).toBe(true);
+    // Edges for each consecutive journey pair (matched against the live canvas).
+    expect(hl?.edgeIds.has("e0")).toBe(true); // start → d1
+    expect(hl?.edgeIds.has("e1")).toBe(true); // d1 → o1
+    expect(hl?.edgeIds.has("e2")).toBe(true); // o1 → end
+  });
+
   it("treats reaching END with no apply_outcome as success (not a dead end)", async () => {
     const user = userEvent.setup();
     server.use(
