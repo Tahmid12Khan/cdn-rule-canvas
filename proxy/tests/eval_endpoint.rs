@@ -605,3 +605,100 @@ async fn site_match_other_or_absent_site_branches_no() {
         assert_eq!(site_step["branch"].as_str(), Some("no"), "site={site:?}");
     }
 }
+
+/// A single `device_type == mobile` decision: start -> d_dev ; yes -> n_pw ; no ->
+/// end. Used to prove the request-context `headers` `User-Agent` drives the device
+/// classification (mirroring the live path).
+fn device_canvas() -> Value {
+    json!({
+        "root_node_id": "start",
+        "nodes": [
+            { "kind": "start", "id": "start", "position": { "x": 0.0, "y": 0.0 } },
+            { "kind": "decision", "id": "d_dev",
+              "processor": { "type": "device_type", "operator": "equals", "value": "mobile" },
+              "position": { "x": 200.0, "y": 0.0 } },
+            { "kind": "expression", "id": "n_pw",
+              "action": { "type": "apply_outcome", "outcome_id": "22222222-2222-2222-2222-222222222222" },
+              "position": { "x": 400.0, "y": 0.0 } },
+            { "kind": "end", "id": "end", "position": { "x": 600.0, "y": 0.0 } }
+        ],
+        "edges": [
+            { "id": "e0", "source_node_id": "start",  "target_node_id": "d_dev", "branch": "yes" },
+            { "id": "e1", "source_node_id": "d_dev",  "target_node_id": "n_pw",  "branch": "yes" },
+            { "id": "e2", "source_node_id": "d_dev",  "target_node_id": "end",   "branch": "no"  },
+            { "id": "e3", "source_node_id": "n_pw",   "target_node_id": "end",   "branch": "yes" }
+        ]
+    })
+}
+
+/// The `User-Agent` request header drives `device_type` when no `device_type`/
+/// `user_agent` field is set: a mobile UA branches `yes` to the expression node.
+#[tokio::test]
+async fn eval_derives_device_from_user_agent_header() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": device_canvas(),
+        "context": {
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) Mobile/15E148"
+            }
+        }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+
+    // The UA header drove device == mobile -> the `yes` branch -> expression node.
+    assert_eq!(v["matched_node_id"].as_str(), Some("n_pw"));
+    let dev_step = v["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["node_id"] == "d_dev")
+        .unwrap();
+    assert_eq!(dev_step["branch"].as_str(), Some("yes"));
+}
+
+/// Arbitrary request headers (including a `Cookie` header) are accepted and feed
+/// the context without breaking eval, even though no built-in processor branches
+/// on them yet — the response is a well-formed `EvalResponse` with HTTP 200.
+#[tokio::test]
+async fn eval_accepts_request_headers_and_cookies() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": site_match_canvas(),
+        "context": {
+            "device_type": "desktop",
+            "headers": {
+                "X-Test": "1",
+                "Cookie": "a=b; c=d"
+            }
+        }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+
+    // Well-formed EvalResponse: the documented arrays/fields are present.
+    assert!(v["traversed_node_ids"].is_array());
+    assert!(v["traversed_edge_ids"].is_array());
+    assert!(v["steps"].is_array());
+    assert!(v["journey"].is_array());
+    assert!(v.get("matched_node_id").is_some());
+}

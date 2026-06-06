@@ -43,6 +43,16 @@ pub fn strip_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
+/// Header names a configured per-site header may NOT set: the proxy-managed `host`
+/// and `content-length` plus every hop-by-hop header (transfer-encoding,
+/// connection, etc.). Lets a Site config never override the upstream Host or enable
+/// request smuggling. Compared case-insensitively (HTTP header names are ASCII).
+fn is_forbidden_site_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("host")
+        || name.eq_ignore_ascii_case("content-length")
+        || HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
+}
+
 /// axum fallback handler. Returns a fully-built response.
 pub async fn forward(State(state): State<AppState>, req: axum::extract::Request) -> Response {
     let e2e_start = Instant::now();
@@ -579,6 +589,10 @@ pub(crate) struct Route {
     host: Option<String>,
     /// Matched Site slug, threaded into `EvaluationContext.site`. `None` on fallback.
     pub site: Option<String>,
+    /// Per-site custom headers to inject on the upstream request (matched Site
+    /// only). Each configured header OVERRIDES any client-supplied same-named
+    /// header. Empty on the no-match fallback path (apply none).
+    headers: HashMap<String, String>,
 }
 
 /// Resolve the upstream destination from the inbound `Host` header. A matched
@@ -591,10 +605,12 @@ async fn resolve_route(state: &AppState, host: &str, is_https: bool) -> Route {
             base_url: site.dest_base_url(),
             host: Some(site.dest_host.clone()),
             site: Some(site.slug.clone()),
+            headers: site.headers.clone(),
         };
     }
     // Fallback: the static upstream. Derive the Host header from its authority so
-    // a vhosted upstream still receives the expected Host.
+    // a vhosted upstream still receives the expected Host. No custom headers on
+    // the no-match path.
     let base = state.settings.upstream_base_url.clone();
     let host = base
         .parse::<axum::http::Uri>()
@@ -604,6 +620,7 @@ async fn resolve_route(state: &AppState, host: &str, is_https: bool) -> Route {
         base_url: base,
         host,
         site: None,
+        headers: HashMap::new(),
     }
 }
 
@@ -655,7 +672,60 @@ pub(crate) async fn send_upstream(
         builder = builder.body(body_bytes.to_vec());
     }
 
-    let mut resp = builder.send().await.map_err(map_reqwest_error)?;
+    // Build the concrete request so the matched Site's per-site headers can be
+    // applied AFTER the inbound copy + Host set. For each ALLOWED configured header
+    // we FIRST remove the name (drops any client-supplied value), THEN insert the
+    // configured value if it parses. So a configured header OVERRIDES a client value
+    // (a client cannot spoof a header the site sets) AND a malformed config leaves
+    // the header ABSENT rather than leaking the client value (fail-closed). The
+    // no-match fallback carries an empty map, so this is a no-op there. Backend
+    // already validates names/values + rejects forbidden names; the denylist +
+    // parse guards here are defense-in-depth -> skip + warn, never fail the request.
+    let mut request = builder.build().map_err(|_| ProxyError::UpstreamProtocol)?;
+    if !route.headers.is_empty() {
+        let headers_mut = request.headers_mut();
+        for (name, value) in &route.headers {
+            // Denylist: a config may never set the proxy-managed Host /
+            // content-length or any hop-by-hop header (request-smuggling guard).
+            if is_forbidden_site_header(name) {
+                tracing::warn!(
+                    site = route.site.as_deref().unwrap_or(""),
+                    header = %name,
+                    "site_header=skipped (forbidden name)"
+                );
+                continue;
+            }
+            let Ok(n) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) else {
+                tracing::warn!(
+                    site = route.site.as_deref().unwrap_or(""),
+                    header = %name,
+                    "site_header=skipped (unparseable name)"
+                );
+                continue;
+            };
+            // Fail-closed: drop any client-supplied value FIRST, so a parse failure
+            // on the configured value leaves the header absent (no client spoof).
+            headers_mut.remove(&n);
+            match reqwest::header::HeaderValue::from_str(value) {
+                Ok(v) => {
+                    headers_mut.insert(n, v);
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        site = route.site.as_deref().unwrap_or(""),
+                        header = %name,
+                        "site_header=skipped (unparseable value), client value dropped"
+                    );
+                }
+            }
+        }
+    }
+
+    let mut resp = state
+        .http
+        .execute(request)
+        .await
+        .map_err(map_reqwest_error)?;
 
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_encoding = header_string(resp.headers(), reqwest::header::CONTENT_ENCODING);
@@ -768,7 +838,7 @@ fn host(req: &axum::extract::Request) -> Option<String> {
 }
 
 /// Parse all request cookies into a map.
-fn parse_cookies(headers: &HeaderMap) -> HashMap<String, String> {
+pub(crate) fn parse_cookies(headers: &HeaderMap) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for header in headers.get_all(axum::http::header::COOKIE).iter() {
         let Ok(s) = header.to_str() else { continue };
@@ -816,4 +886,158 @@ fn expression_label(canvas: &CanvasGraph, node_id: &str) -> (String, Option<Stri
         }) => (action.kind.clone(), custom_label.clone()),
         _ => (node_id.to_string(), None),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Eval-URL support (`POST /__rre/eval-url`): fetch a REAL upstream response
+// through the proxy so the test panel can run the editor canvas against live
+// content. Reuses `send_upstream` (so a matched Site's headers override the test
+// headers EXACTLY like production traffic) but the caller evaluates the
+// request-body canvas instead of the active saved features.
+// ---------------------------------------------------------------------------
+
+/// A decoded upstream body fetched for `/__rre/eval-url`, plus the request facts
+/// the evaluator needs. The test headers stand in for the simulated client
+/// request (Site headers are upstream-injected and, like production, are NOT part
+/// of the eval context).
+pub(crate) struct EvalFetch {
+    /// Matched Site slug (always `Some` — eval-url requires a configured Site).
+    pub site: Option<String>,
+    /// True when the upstream content-type is JSON (else HTML).
+    pub is_json: bool,
+    /// The decoded (de-gzipped) response body.
+    pub body_string: String,
+    /// The test headers, as the simulated client request headers.
+    pub request_headers: HeaderMap,
+    /// Cookies parsed from the test headers.
+    pub request_cookies: HashMap<String, String>,
+    /// The request path (no query) — the eval context's `request_path`.
+    pub request_path: String,
+}
+
+/// Why a `/__rre/eval-url` upstream fetch could not be turned into an evaluable
+/// body. Each maps to a client-safe JSON error envelope `{ error: { code, message } }`
+/// so the frontend surfaces the message verbatim (status 400, never 422 — a 422
+/// is treated as a field-validation error by the UI and would hide the message).
+pub(crate) enum EvalFetchError {
+    /// The URL was malformed / non-http(s) / hostless.
+    BadUrl(String),
+    /// The URL host matched no configured Site (SSRF guard: configured sites only).
+    NoSite(String),
+    /// The upstream responded with a content-type that is neither HTML nor JSON.
+    NonRenderable(String),
+    /// The upstream fetch itself failed (timeout / unavailable / too large).
+    Upstream(ProxyError),
+}
+
+impl IntoResponse for EvalFetchError {
+    fn into_response(self) -> Response {
+        let (code, message) = match self {
+            EvalFetchError::BadUrl(m) => ("BAD_URL", m),
+            EvalFetchError::NoSite(host) => (
+                "NO_SITE",
+                format!(
+                    "No Site is configured for host \"{host}\". Add a Site whose source host matches this URL, then run the test again."
+                ),
+            ),
+            EvalFetchError::NonRenderable(ct) => (
+                "NON_RENDERABLE",
+                format!(
+                    "The upstream responded with content-type \"{ct}\" — only HTML or JSON responses can be tested."
+                ),
+            ),
+            // Reuse the typed upstream error response (502/504 + its own envelope).
+            EvalFetchError::Upstream(e) => return e.into_response(),
+        };
+        (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": { "code": code, "message": message } })),
+        )
+            .into_response()
+    }
+}
+
+/// Fetch a real upstream response for the test panel. Resolves the Site by the URL
+/// host (REQUIRED — no `upstream_base_url` fallback, so the proxy never fetches an
+/// arbitrary host), builds a synthetic GET carrying the test headers + path, and
+/// runs it through [`send_upstream`] (which applies the Site's configured headers
+/// AFTER the test headers, so a site default always WINS on a name collision).
+/// Returns the decoded body + the request facts the evaluator needs.
+pub(crate) async fn fetch_for_eval(
+    state: &AppState,
+    host_header: &str,
+    is_https: bool,
+    path: &str,
+    path_and_query: &str,
+    test_headers: HeaderMap,
+) -> Result<EvalFetch, EvalFetchError> {
+    // 1. Resolve the Site — configured sites only (no fallback). The fetch target
+    //    is the Site's `dest`, never the user-supplied host (SSRF-safe).
+    let index = state.site_map.index().await;
+    let Some(site) = index.lookup(host_header, is_https) else {
+        return Err(EvalFetchError::NoSite(host_header.to_string()));
+    };
+    let route = Route {
+        base_url: site.dest_base_url(),
+        host: Some(site.dest_host.clone()),
+        site: Some(site.slug.clone()),
+        headers: site.headers.clone(),
+    };
+
+    // 2. Synthetic GET carrying the test headers + the URL path/query. `send_upstream`
+    //    copies these as client headers (minus hop-by-hop + Host), sets the dest Host,
+    //    THEN applies the Site headers (site wins over a test header on collision).
+    let cookies = parse_cookies(&test_headers);
+    let mut req = axum::extract::Request::new(Body::empty());
+    *req.method_mut() = axum::http::Method::GET;
+    *req.uri_mut() = match path_and_query.parse::<axum::http::Uri>() {
+        Ok(u) => u,
+        Err(_) => {
+            return Err(EvalFetchError::BadUrl(
+                "The URL path is invalid.".to_string(),
+            ))
+        }
+    };
+    *req.headers_mut() = test_headers.clone();
+
+    // 3. Fetch through the shared upstream path.
+    let upstream = send_upstream(state, &route, req)
+        .await
+        .map_err(EvalFetchError::Upstream)?;
+
+    let is_html = upstream.is_html();
+    let is_json = upstream.is_json();
+    if !is_html && !is_json {
+        return Err(EvalFetchError::NonRenderable(
+            upstream.content_type.unwrap_or_default(),
+        ));
+    }
+
+    let UpstreamResponse {
+        content_encoding,
+        body,
+        ..
+    } = upstream;
+    let body_string = match encoding::decode_for_modify(
+        content_encoding.as_deref(),
+        body,
+        state.settings.max_decompressed_bytes,
+    ) {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(EvalFetchError::NonRenderable(format!(
+                "content-encoding {}",
+                content_encoding.as_deref().unwrap_or("unknown")
+            )));
+        }
+    };
+
+    Ok(EvalFetch {
+        site: route.site,
+        is_json,
+        body_string,
+        request_headers: test_headers,
+        request_cookies: cookies,
+        request_path: path.to_string(),
+    })
 }

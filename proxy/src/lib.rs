@@ -32,6 +32,7 @@ pub fn build_app(state: AppState) -> Router {
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(observability::metrics_handler))
         .route("/__rre/eval", post(eval::eval_handler))
+        .route("/__rre/eval-url", post(eval::eval_url_handler))
         .layer(dev_cors())
         .with_state(state.clone());
 

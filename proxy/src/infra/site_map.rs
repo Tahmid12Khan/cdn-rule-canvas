@@ -25,6 +25,12 @@ pub struct Site {
     pub dest_protocol: String,
     pub dest_host: String,
     pub dest_port: i32,
+    /// Per-site headers injected on the upstream request (backend `SiteRead.headers`,
+    /// a `{ "Header-Name": "value" }` map). The backend validates names/values, so
+    /// they are safe to forward; absent in the response => empty map (apply none).
+    /// A configured header OVERRIDES any client-supplied same-named header.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
 }
 
 impl Site {
@@ -188,6 +194,7 @@ mod tests {
                 dest_protocol: "http".to_string(),
                 dest_host: "demo-upstream".to_string(),
                 dest_port: 8081,
+                headers: HashMap::new(),
             },
             Site {
                 slug: "secure".to_string(),
@@ -196,6 +203,7 @@ mod tests {
                 dest_protocol: "https".to_string(),
                 dest_host: "origin.example.com".to_string(),
                 dest_port: 8443,
+                headers: HashMap::new(),
             },
         ])
     }
@@ -234,6 +242,7 @@ mod tests {
             dest_protocol: "http".to_string(),
             dest_host: "origin".to_string(),
             dest_port: 8080,
+            headers: HashMap::new(),
         }]);
         // No port in the header + http scheme -> default 80 -> match.
         assert!(idx.lookup("plain.test", false).is_some());
@@ -265,9 +274,48 @@ mod tests {
             dest_protocol: "http".to_string(),
             dest_host: "origin".to_string(),
             dest_port: 8080,
+            headers: HashMap::new(),
         }]);
         assert!(idx.lookup("[::1]:9000", false).is_some());
         assert!(idx.lookup("[::1]", false).is_none()); // defaults to :80, no match
+    }
+
+    #[test]
+    fn headers_default_to_empty_when_absent() {
+        // The backend omits `headers` for a site with none configured; serde
+        // `#[serde(default)]` fills an empty map (apply no custom headers).
+        let site: Site = serde_json::from_value(serde_json::json!({
+            "slug": "no-headers",
+            "source_host": "x.test",
+            "source_port": 80,
+            "dest_protocol": "http",
+            "dest_host": "origin",
+            "dest_port": 8080
+        }))
+        .expect("deserialize");
+        assert!(site.headers.is_empty());
+    }
+
+    #[test]
+    fn headers_deserialize_from_map() {
+        let site: Site = serde_json::from_value(serde_json::json!({
+            "slug": "with-headers",
+            "source_host": "x.test",
+            "source_port": 80,
+            "dest_protocol": "http",
+            "dest_host": "origin",
+            "dest_port": 8080,
+            "headers": { "X-Api-Key": "site-value", "X-Tenant": "acme" }
+        }))
+        .expect("deserialize");
+        assert_eq!(
+            site.headers.get("X-Api-Key").map(String::as_str),
+            Some("site-value")
+        );
+        assert_eq!(
+            site.headers.get("X-Tenant").map(String::as_str),
+            Some("acme")
+        );
     }
 
     /// A transient backend error must NOT be cached: the first request hits a 500

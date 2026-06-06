@@ -20,11 +20,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::applier::json_apply;
-use crate::domain::context::{DeviceType, EvaluationContext};
+use crate::domain::context::{DeviceType, EvaluationContext, EvaluationContextParts};
 use crate::domain::evaluator::{EvalTrace, GraphEvaluator};
 use crate::domain::features_matched::{self, FeatureEntry, NodeTiming};
 use crate::domain::graph::{CanvasGraph, Node};
 use crate::domain::translator::to_decision_content;
+use crate::forwarder;
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,12 @@ pub struct EvalContext {
     /// fallback request (no Site matched).
     #[serde(default)]
     pub site: Option<String>,
+    /// A `{name: value}` request-header map fed into `request_headers` (mirroring
+    /// the live path). Cookies are derived from a `Cookie` header and a
+    /// `User-Agent` header is a device fallback (after `device_type`/`user_agent`).
+    /// Invalid header names/values are dropped by `headers_to_map`.
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
 }
 
 /// The wire `device_type` field on the request (matches frontend enum).
@@ -79,6 +86,20 @@ impl From<DeviceTypeInput> for DeviceType {
             DeviceTypeInput::Tablet => DeviceType::Tablet,
         }
     }
+}
+
+/// Request body for `POST /__rre/eval-url`: evaluate the editor canvas against a
+/// REAL upstream response fetched THROUGH the proxy. The `url`'s host selects a
+/// configured Site (SSRF-safe: the fetch always targets that Site's `dest`, never
+/// the user's host). `headers` are extra test request headers — they are forwarded
+/// to the upstream and feed the eval context, but a Site's configured header always
+/// WINS on a name collision (a test header may not override a site default).
+#[derive(Deserialize)]
+pub struct EvalUrlRequest {
+    pub canvas: CanvasGraph,
+    pub url: String,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -121,6 +142,16 @@ pub struct JourneyEntry {
     pub time_ms: String,
 }
 
+/// The body state at the START of the Transformation Journey + how to interpret
+/// it. Built either from the request context (`/__rre/eval`) or from a real
+/// upstream fetch (`/__rre/eval-url`); `build_journey` folds each expression
+/// node's action onto this running body.
+struct JourneyInputs {
+    is_json: bool,
+    json_body: Value,
+    html_body: String,
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -135,53 +166,215 @@ pub async fn eval_handler(
     let path = req.context.path.clone().unwrap_or_default();
     let response_json = determine_response_json(&req.context);
 
+    // Mirror the live path: request headers feed `request_headers`, and cookies are
+    // derived from a `Cookie` header.
+    let request_headers = req
+        .context
+        .headers
+        .as_ref()
+        .map(headers_to_map)
+        .unwrap_or_default();
+    let request_cookies = crate::forwarder::parse_cookies(&request_headers);
+
     let ctx = EvaluationContext {
-        request_headers: HeaderMap::new(),
+        request_headers,
         request_path: path,
-        request_cookies: HashMap::new(),
+        request_cookies,
         device,
         meta_tags,
         response_json,
         site: req.context.site.clone(),
     };
 
-    // Translate the canvas to JDM DecisionContent (same path as production eval).
-    let content = match std::panic::catch_unwind(|| to_decision_content(&req.canvas)) {
-        Ok(c) => c,
+    let inputs = journey_inputs_from_context(&req.context);
+    eval_to_response(&state, &req.canvas, ctx, &inputs).await
+}
+
+/// `POST /__rre/eval-url` — fetch a REAL upstream response THROUGH the proxy and
+/// run the editor canvas against it. The `url` host must match a configured Site
+/// (SSRF-safe: the fetch targets that Site's `dest`, never the user's host). The
+/// Site's configured headers are applied to the upstream fetch; the request
+/// `headers` are extra test request headers that are forwarded too (and feed the
+/// eval context) but NEVER override a site default on a name collision. Returns the
+/// same `EvalResponse` as `/__rre/eval` (path + Transformation Journey + summary).
+pub async fn eval_url_handler(
+    State(state): State<AppState>,
+    Json(req): Json<EvalUrlRequest>,
+) -> impl IntoResponse {
+    // Parse + validate the URL. Only absolute http/https URLs with a host are accepted.
+    let parsed = match reqwest::Url::parse(req.url.trim()) {
+        Ok(u) => u,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "canvas translation failed"})),
+            return forwarder::EvalFetchError::BadUrl(
+                "Enter a valid absolute URL, e.g. https://www.example.com/article/123.".to_string(),
             )
-                .into_response();
+            .into_response();
         }
     };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return forwarder::EvalFetchError::BadUrl(
+            "The URL scheme must be http or https.".to_string(),
+        )
+        .into_response();
+    }
+    let Some(host) = parsed.host_str() else {
+        return forwarder::EvalFetchError::BadUrl("The URL must include a host.".to_string())
+            .into_response();
+    };
+    let host_header = match parsed.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host.to_string(),
+    };
+    let is_https = parsed.scheme().eq_ignore_ascii_case("https");
+    let path = parsed.path().to_string();
+    let mut path_and_query = path.clone();
+    if let Some(q) = parsed.query() {
+        path_and_query.push('?');
+        path_and_query.push_str(q);
+    }
+
+    let test_headers = headers_to_map(&req.headers);
+
+    // Fetch the real upstream THROUGH the proxy: resolves the Site (REQUIRED — no
+    // fallback), applies the Site headers (site wins over the test headers on a
+    // name collision), and decodes the body.
+    let fetched = match forwarder::fetch_for_eval(
+        &state,
+        &host_header,
+        is_https,
+        &path,
+        &path_and_query,
+        test_headers,
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => return e.into_response(),
+    };
+
+    // Build the rich eval context from the fetch (device from User-Agent, meta tags
+    // from the HTML, response_json for JSON, cookies, the matched Site slug).
+    let ctx = EvaluationContextParts::from_request(
+        &fetched.request_headers,
+        &fetched.request_path,
+        &fetched.request_cookies,
+        fetched.body_string.clone(),
+        fetched.is_json,
+    )
+    .with_site(fetched.site.clone())
+    .into_context();
+
+    let (json_body, html_body) = if fetched.is_json {
+        (
+            serde_json::from_str(&fetched.body_string).unwrap_or(Value::Null),
+            String::new(),
+        )
+    } else {
+        (Value::Null, fetched.body_string)
+    };
+    let inputs = JourneyInputs {
+        is_json: fetched.is_json,
+        json_body,
+        html_body,
+    };
+
+    eval_to_response(&state, &req.canvas, ctx, &inputs).await
+}
+
+/// Convert a `{name: value}` test-header map into a `HeaderMap`, skipping any entry
+/// whose name or value is not a valid HTTP header (defensive — the frontend already
+/// validates header names/values to the same rules as Site headers).
+fn headers_to_map(headers: &HashMap<String, String>) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        if let (Ok(n), Ok(v)) = (
+            http::header::HeaderName::from_bytes(name.as_bytes()),
+            http::header::HeaderValue::from_str(value),
+        ) {
+            map.insert(n, v);
+        }
+    }
+    map
+}
+
+/// Run the shared eval core and serialize the result into an HTTP response. Errors
+/// use the same nested `{ error: { code, message } }` envelope as `ProxyError` /
+/// `EvalFetchError` so the frontend parses every eval failure uniformly.
+async fn eval_to_response(
+    state: &AppState,
+    canvas: &CanvasGraph,
+    ctx: EvaluationContext,
+    inputs: &JourneyInputs,
+) -> axum::response::Response {
+    match run_canvas_eval(state, canvas, ctx, inputs).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(resp).unwrap_or_default()),
+        )
+            .into_response(),
+        Err((status, msg)) => (
+            status,
+            Json(serde_json::json!({ "error": { "code": "EVAL_ERROR", "message": msg } })),
+        )
+            .into_response(),
+    }
+}
+
+/// Shared eval core for both `/__rre/eval` and `/__rre/eval-url`: translate the
+/// canvas, run `evaluate_with_trace`, and build the `EvalResponse` (path, journey,
+/// summary). Returns `Err((status, message))` when the canvas fails to translate
+/// or evaluate.
+async fn run_canvas_eval(
+    state: &AppState,
+    canvas: &CanvasGraph,
+    ctx: EvaluationContext,
+    inputs: &JourneyInputs,
+) -> Result<EvalResponse, (StatusCode, String)> {
+    // Translate the canvas to JDM DecisionContent (same path as production eval).
+    let content =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| to_decision_content(canvas)))
+            .map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "canvas translation failed".to_string(),
+                )
+            })?;
 
     let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
     let eval_start = std::time::Instant::now();
-    let trace_result = evaluator
-        .evaluate_with_trace(&req.canvas, content, Arc::new(ctx))
-        .await;
+    let trace = evaluator
+        .evaluate_with_trace(canvas, content, Arc::new(ctx))
+        .await
+        .map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
     let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
 
-    let trace_result = match trace_result {
-        Ok(t) => t,
-        Err(msg) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": msg})),
-            )
-                .into_response();
-        }
-    };
+    Ok(build_response(state, canvas, inputs, trace, eval_ms))
+}
 
-    // Build response from trace.
-    let response = build_response(&state, &req, trace_result, eval_ms);
-    (
-        StatusCode::OK,
-        Json(serde_json::to_value(response).unwrap_or_default()),
-    )
-        .into_response()
+/// Derive the journey's starting body from a request `EvalContext` (the synthetic
+/// `/__rre/eval` path): JSON when `content_kind == "json"` (or a `response_json`
+/// value is present), else HTML from `response_body`.
+fn journey_inputs_from_context(ctx: &EvalContext) -> JourneyInputs {
+    let is_json = ctx
+        .content_kind
+        .as_deref()
+        .map(|k| k.eq_ignore_ascii_case("json"))
+        .unwrap_or_else(|| ctx.response_json.is_some());
+    let json_body = ctx
+        .response_json
+        .clone()
+        .or_else(|| {
+            ctx.response_body
+                .as_deref()
+                .and_then(|b| serde_json::from_str(b).ok())
+        })
+        .unwrap_or(Value::Null);
+    let html_body = ctx.response_body.clone().unwrap_or_default();
+    JourneyInputs {
+        is_json,
+        json_body,
+        html_body,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,12 +382,23 @@ pub async fn eval_handler(
 // ---------------------------------------------------------------------------
 
 fn determine_device(ctx: &EvalContext) -> DeviceType {
-    // Explicit device_type field wins; fall back to user_agent parsing.
+    // Precedence: explicit `device_type` field > `user_agent` field > a
+    // `User-Agent` request header (case-insensitive) > Desktop. The header path
+    // mirrors the live request, where device comes from the UA header.
     if let Some(dt) = ctx.device_type {
         return dt.into();
     }
     if let Some(ua) = &ctx.user_agent {
         return DeviceType::from_user_agent(ua);
+    }
+    if let Some(headers) = &ctx.headers {
+        if let Some(ua) = headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+            .map(|(_, value)| value)
+        {
+            return DeviceType::from_user_agent(ua);
+        }
     }
     DeviceType::Desktop
 }
@@ -226,11 +430,11 @@ fn determine_response_json(ctx: &EvalContext) -> Option<serde_json::Value> {
 
 fn build_response(
     state: &AppState,
-    req: &EvalRequest,
+    canvas: &CanvasGraph,
+    inputs: &JourneyInputs,
     trace: EvalTrace,
     eval_ms: f64,
 ) -> EvalResponse {
-    let canvas = &req.canvas;
     // trace.steps is ordered by zen's `order` field: each entry has the canvas
     // node id and the branch output.
     let traversed_node_ids: Vec<String> = trace.steps.iter().map(|s| s.node_id.clone()).collect();
@@ -246,7 +450,7 @@ fn build_response(
         .find(|s| s.kind == "expression")
         .map(|s| s.node_id.clone());
 
-    let (journey, timings) = build_journey(state, req, &trace);
+    let (journey, timings) = build_journey(state, canvas, inputs, &trace);
 
     // Summary (spec §5/§8): built exactly like one feature's entry, for the
     // single canvas under test. `None` when no expression node matched.
@@ -289,31 +493,15 @@ fn build_response(
 /// JSON value for JSON features, a string for HTML.
 fn build_journey(
     state: &AppState,
-    req: &EvalRequest,
+    canvas: &CanvasGraph,
+    inputs: &JourneyInputs,
     trace: &EvalTrace,
 ) -> (Vec<JourneyEntry>, Vec<NodeTiming>) {
-    let canvas = &req.canvas;
-    let is_json = req
-        .context
-        .content_kind
-        .as_deref()
-        .map(|k| k.eq_ignore_ascii_case("json"))
-        .unwrap_or_else(|| req.context.response_json.is_some());
-
+    let is_json = inputs.is_json;
     // Running JSON body (only meaningful for JSON features).
-    let mut json_body: Value = req
-        .context
-        .response_json
-        .clone()
-        .or_else(|| {
-            req.context
-                .response_body
-                .as_deref()
-                .and_then(|b| serde_json::from_str(b).ok())
-        })
-        .unwrap_or(Value::Null);
+    let mut json_body: Value = inputs.json_body.clone();
     // Running HTML body (only meaningful for HTML features).
-    let mut html_body: String = req.context.response_body.clone().unwrap_or_default();
+    let mut html_body: String = inputs.html_body.clone();
 
     // Action lookup: expression node_id -> applied action (in trace order).
     let action_for: HashMap<&str, &Value> = trace
