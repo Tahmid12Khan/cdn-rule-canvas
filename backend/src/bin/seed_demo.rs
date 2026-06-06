@@ -1,13 +1,18 @@
-//! Demo seeder (Task 20). Idempotent: creates the `dn-article` demo feature with
-//! a LIVE version 1 whose anonymous canvas mirrors the worked example in the
+//! Demo seeder (Task 20). Idempotent: creates the `demo-article` demo feature
+//! with a LIVE version 1 whose anonymous canvas mirrors the worked example in the
 //! expression-node flow (start → paywall meta-tag → device-type →
 //! apply_outcome(regwall/paywall/show-content) → end), plus an editable DRAFT
 //! version 2 cloned from it for the rule-builder UI. Also seeds the
-//! `dn-json-article` (type `json`) demo feature whose anonymous canvas trims the
-//! body and injects a paywall marker when `$.api == "dn-article"`.
+//! `demo-json-article` (type `json`) demo feature whose anonymous canvas trims
+//! the body and injects a paywall marker when `$.api == "demo-article"`, and a
+//! demo Site (`localhost:9000 → demo-upstream:8081`) the proxy routes through.
 //!
 //! Run with:  `cargo run -p rre-backend --bin seed_demo`
 //! (reads `DATABASE_URL` from the environment / `.env`).
+//!
+//! The demo Site's destination host/port are overridable via the env vars
+//! `DEMO_UPSTREAM_HOST` / `DEMO_UPSTREAM_PORT` (for native dev where
+//! `demo-upstream` does not resolve).
 //!
 //! Idempotency: keyed on the fixed feature id + UUIDs below. Re-running performs
 //! `ON CONFLICT DO NOTHING` inserts / `INSERT ... WHERE NOT EXISTS`, so the demo
@@ -25,10 +30,18 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 // --- Stable demo identifiers (fixed so re-seeding is idempotent) ---------------
-const FEATURE_ID: &str = "dn-article";
-const JSON_FEATURE_ID: &str = "dn-json-article";
+const FEATURE_ID: &str = "demo-article";
+const JSON_FEATURE_ID: &str = "demo-json-article";
 
-// dn-json-article version 1 (LIVE) and its builtin Show Content outcome.
+// Demo Site: routes the proxy's inbound `localhost:9000` to the demo upstream.
+const SITE_SLUG: &str = "demo-localhost";
+const SITE_NAME: &str = "Demo (localhost:9000)";
+const SITE_SOURCE_HOST: &str = "localhost";
+const SITE_SOURCE_PORT: i32 = 9000;
+const DEFAULT_DEST_HOST: &str = "demo-upstream";
+const DEFAULT_DEST_PORT: i32 = 8081;
+
+// demo-json-article version 1 (LIVE) and its builtin Show Content outcome.
 const JSON_V1_ID: Uuid = Uuid::from_u128(0xB0000000_0000_0000_0000_000000000001);
 const JSON_O_BUILTIN: Uuid = Uuid::from_u128(0xB1111111_1111_1111_1111_111111111111);
 
@@ -63,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!(
         "demo seed complete: feature `{FEATURE_ID}` (LIVE v1 + DRAFT v2), \
-         feature `{JSON_FEATURE_ID}` (LIVE v1)"
+         feature `{JSON_FEATURE_ID}` (LIVE v1), site `{SITE_SLUG}`"
     );
     Ok(())
 }
@@ -81,7 +94,7 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
         "#,
     )
     .bind(FEATURE_ID)
-    .bind("DN Article Paywall")
+    .bind("Demo Article Paywall")
     .execute(&mut *tx)
     .await?;
 
@@ -239,14 +252,49 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     .await?;
 
     seed_json_feature(&mut tx).await?;
+    seed_site(&mut tx).await?;
 
     tx.commit().await?;
     Ok(())
 }
 
-/// Idempotently seed the `dn-json-article` JSON feature with one LIVE version
+/// Idempotently seed the demo Site (`localhost:9000 → demo-upstream:8081`). The
+/// destination host/port are overridable via the env vars `DEMO_UPSTREAM_HOST` /
+/// `DEMO_UPSTREAM_PORT` (native dev cannot resolve the `demo-upstream` hostname).
+/// Existing rows are left untouched (`ON CONFLICT DO NOTHING`) so a user-edited
+/// Site is never clobbered by a re-seed.
+async fn seed_site(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
+    let dest_host =
+        std::env::var("DEMO_UPSTREAM_HOST").unwrap_or_else(|_| DEFAULT_DEST_HOST.into());
+    let dest_port = std::env::var("DEMO_UPSTREAM_PORT")
+        .ok()
+        .and_then(|p| p.parse::<i32>().ok())
+        .unwrap_or(DEFAULT_DEST_PORT);
+
+    sqlx::query(
+        r#"
+        INSERT INTO rre.sites
+            (slug, name, source_protocol, source_host, source_port,
+             dest_protocol, dest_host, dest_port)
+        VALUES ($1, $2, 'http', $3, $4, 'http', $5, $6)
+        ON CONFLICT (slug) DO NOTHING
+        "#,
+    )
+    .bind(SITE_SLUG)
+    .bind(SITE_NAME)
+    .bind(SITE_SOURCE_HOST)
+    .bind(SITE_SOURCE_PORT)
+    .bind(&dest_host)
+    .bind(dest_port)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Idempotently seed the `demo-json-article` JSON feature with one LIVE version
 /// whose anonymous canvas trims `$.body` and injects `$.paywall_show` when
-/// `$.api == "dn-article"`. The version row is UPSERTED on its rule_graph so a
+/// `$.api == "demo-article"`. The version row is UPSERTED on its rule_graph so a
 /// pre-existing row converges to this canvas rather than duplicating.
 async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
     sqlx::query(
@@ -257,17 +305,17 @@ async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> an
         "#,
     )
     .bind(JSON_FEATURE_ID)
-    .bind("DN JSON Article Paywall")
+    .bind("Demo JSON Article Paywall")
     .execute(&mut **tx)
     .await?;
 
     // Orphan-proofing: a prior partial seed (predating the stable-id scheme) may
-    // have left a version row at (dn-json-article, 1) under a NON-canonical id.
+    // have left a version row at (demo-json-article, 1) under a NON-canonical id.
     // That collides with JSON_V1_ID on the (feature_id, version_number) unique
     // constraint, which the `ON CONFLICT (id)` upsert below does NOT catch — the
     // insert would error and abort the whole seed. Clear this feature's versions
     // first (outcomes/components cascade) so the canonical insert is always clean.
-    // Scoped to JSON_FEATURE_ID only — never touches dn-article.
+    // Scoped to JSON_FEATURE_ID only — never touches demo-article.
     sqlx::query(
         "UPDATE rre.features SET live_version_id = NULL, staging_version_id = NULL WHERE id = $1",
     )
@@ -373,8 +421,8 @@ fn anonymous_rule_graph() -> serde_json::Value {
     })
 }
 
-/// The anonymous canvas for the `dn-json-article` JSON feature:
-/// `start → json_expression($.api == "dn-article") → [yes] trim_json($.body, 0)
+/// The anonymous canvas for the `demo-json-article` JSON feature:
+/// `start → json_expression($.api == "demo-article") → [yes] trim_json($.body, 0)
 /// → add_attribute($.paywall_show, "<html>paywall_showed</html>") → end ;
 /// [no] → end`.
 fn json_anonymous_rule_graph() -> serde_json::Value {
@@ -384,7 +432,7 @@ fn json_anonymous_rule_graph() -> serde_json::Value {
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": 40, "y": 160 } },
                 { "kind": "decision", "id": "d_api",
-                  "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+                  "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "demo-article" },
                   "position": { "x": 220, "y": 160 } },
                 { "kind": "expression", "id": "t_body",
                   "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
@@ -474,10 +522,10 @@ mod tests {
     use rre_backend::services::rule_graph_service;
     use std::collections::HashSet;
 
-    /// The seeded `dn-article` anonymous canvas parses and passes ALL validation
-    /// rules, including `all_paths_reach_end`: `root_node_id` is the start node
-    /// and every reachable node reaches an end. Guards against a seed the API
-    /// would reject.
+    /// The seeded `demo-article` anonymous canvas parses and passes ALL
+    /// validation rules, including `all_paths_reach_end`: `root_node_id` is the
+    /// start node and every reachable node reaches an end. Guards against a seed
+    /// the API would reject.
     #[test]
     fn seed_graph_validates() {
         let graph: RuleGraph =
@@ -498,7 +546,7 @@ mod tests {
         );
     }
 
-    /// The seeded `dn-json-article` anonymous canvas parses and passes ALL
+    /// The seeded `demo-json-article` anonymous canvas parses and passes ALL
     /// validation rules. It references no outcomes (JSON actions are
     /// self-contained), so an empty valid-outcome set suffices.
     #[test]

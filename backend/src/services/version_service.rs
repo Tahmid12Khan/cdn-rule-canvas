@@ -767,7 +767,7 @@ mod tests {
     fn to_read_parses_empty_rule_graph_and_applicability() {
         let v = Version {
             id: Uuid::new_v4(),
-            feature_id: "dn-article".to_string(),
+            feature_id: "demo-article".to_string(),
             version_number: 1,
             description: Some("first".to_string()),
             status: VersionStatus::Draft,
@@ -794,7 +794,7 @@ mod tests {
         // A null/missing applicability JSONB parses to the default `{}`.
         let v = Version {
             id: Uuid::new_v4(),
-            feature_id: "dn-article".to_string(),
+            feature_id: "demo-article".to_string(),
             version_number: 1,
             description: None,
             status: VersionStatus::Draft,
@@ -813,7 +813,7 @@ mod tests {
     fn to_read_rejects_corrupt_rule_graph() {
         let v = Version {
             id: Uuid::new_v4(),
-            feature_id: "dn-article".to_string(),
+            feature_id: "demo-article".to_string(),
             version_number: 1,
             description: None,
             status: VersionStatus::Draft,
@@ -832,7 +832,7 @@ mod tests {
     fn to_summary_drops_rule_graph() {
         let v = Version {
             id: Uuid::new_v4(),
-            feature_id: "dn-article".to_string(),
+            feature_id: "demo-article".to_string(),
             version_number: 3,
             description: None,
             status: VersionStatus::Live,

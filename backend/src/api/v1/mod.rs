@@ -15,6 +15,7 @@ pub mod components;
 pub mod features;
 pub mod node_types;
 pub mod outcomes;
+pub mod sites;
 pub mod versions;
 
 /// Root-level health routes (mounted outside the `/api/v1` prefix).
@@ -32,4 +33,5 @@ pub fn router() -> Router<AppState> {
         .merge(versions::router())
         .merge(outcomes::router())
         .merge(components::router())
+        .merge(sites::router())
 }

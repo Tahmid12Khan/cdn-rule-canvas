@@ -24,16 +24,19 @@ async fn seed_demo_is_idempotent() {
 
     // Exactly one demo feature.
     let feature_count: i64 =
-        sqlx::query("SELECT count(*) FROM rre.features WHERE id = 'dn-article'")
+        sqlx::query("SELECT count(*) FROM rre.features WHERE id = 'demo-article'")
             .fetch_one(&pool)
             .await
             .expect("count features")
             .get(0);
-    assert_eq!(feature_count, 1, "exactly one dn-article feature expected");
+    assert_eq!(
+        feature_count, 1,
+        "exactly one demo-article feature expected"
+    );
 
     // Two versions: LIVE v1 + DRAFT v2.
     let version_count: i64 =
-        sqlx::query("SELECT count(*) FROM rre.versions WHERE feature_id = 'dn-article'")
+        sqlx::query("SELECT count(*) FROM rre.versions WHERE feature_id = 'demo-article'")
             .fetch_one(&pool)
             .await
             .expect("count versions")
@@ -41,7 +44,7 @@ async fn seed_demo_is_idempotent() {
     assert_eq!(version_count, 2, "two versions after re-seeding");
 
     let live_count: i64 = sqlx::query(
-        "SELECT count(*) FROM rre.versions WHERE feature_id = 'dn-article' AND status = 'live'",
+        "SELECT count(*) FROM rre.versions WHERE feature_id = 'demo-article' AND status = 'live'",
     )
     .fetch_one(&pool)
     .await
@@ -53,7 +56,7 @@ async fn seed_demo_is_idempotent() {
     let v1_outcomes: i64 = sqlx::query(
         "SELECT count(*) FROM rre.outcomes o \
          JOIN rre.versions v ON v.id = o.version_id \
-         WHERE v.feature_id = 'dn-article' AND v.status = 'live'",
+         WHERE v.feature_id = 'demo-article' AND v.status = 'live'",
     )
     .fetch_one(&pool)
     .await
@@ -66,7 +69,7 @@ async fn seed_demo_is_idempotent() {
         "SELECT count(*) FROM rre.components c \
          JOIN rre.outcomes o ON o.id = c.outcome_id \
          JOIN rre.versions v ON v.id = o.version_id \
-         WHERE v.feature_id = 'dn-article' AND v.status = 'live'",
+         WHERE v.feature_id = 'demo-article' AND v.status = 'live'",
     )
     .fetch_one(&pool)
     .await
@@ -79,7 +82,7 @@ async fn seed_demo_is_idempotent() {
         "SELECT f.live_version_id = v.id \
          FROM rre.features f \
          JOIN rre.versions v ON v.feature_id = f.id AND v.status = 'live' \
-         WHERE f.id = 'dn-article'",
+         WHERE f.id = 'demo-article'",
     )
     .fetch_one(&pool)
     .await
@@ -89,6 +92,15 @@ async fn seed_demo_is_idempotent() {
         live_id_matches,
         "features.live_version_id points at the LIVE version"
     );
+
+    // Exactly one demo Site after re-seeding (ON CONFLICT DO NOTHING).
+    let site_count: i64 =
+        sqlx::query("SELECT count(*) FROM rre.sites WHERE slug = 'demo-localhost'")
+            .fetch_one(&pool)
+            .await
+            .expect("count sites")
+            .get(0);
+    assert_eq!(site_count, 1, "exactly one demo-localhost site expected");
 }
 
 fn run_seed(database_url: &str) {

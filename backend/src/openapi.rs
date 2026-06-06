@@ -7,7 +7,7 @@
 use utoipa::OpenApi;
 
 use crate::{
-    api::v1::{components, features, health, node_types, outcomes, versions},
+    api::v1::{components, features, health, node_types, outcomes, sites, versions},
     error::{ErrorBody, ErrorEnvelope, ValidationDetail},
     models::enums::{FeatureType, Placement, VersionStatus},
     schemas::{
@@ -24,6 +24,7 @@ use crate::{
         },
         outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem},
         rule_graph::{Branch, CanvasGraph, Edge, Node, Position, ProcessorConfig, RuleGraph},
+        site::{SiteCreate, SiteRead, SiteUpdate},
         version::{
             PublishEnvironment, PublishRequest, VersionCreate, VersionRead, VersionSummary,
             VersionUpdate,
@@ -66,6 +67,11 @@ use crate::{
         outcomes::add_component,
         components::update,
         components::delete,
+        sites::create,
+        sites::list,
+        sites::get,
+        sites::update,
+        sites::delete,
     ),
     components(schemas(
         // Infra / error envelope
@@ -81,6 +87,10 @@ use crate::{
         FeatureCreate,
         FeatureUpdate,
         FeatureRead,
+        // Site
+        SiteCreate,
+        SiteUpdate,
+        SiteRead,
         // Version
         VersionCreate,
         VersionUpdate,
@@ -127,6 +137,7 @@ use crate::{
         (name = "health", description = "Liveness and readiness"),
         (name = "node-types", description = "Node-type manifest"),
         (name = "features", description = "Feature CRUD + active version"),
+        (name = "sites", description = "Site (host config) CRUD"),
         (name = "versions", description = "Version lifecycle"),
         (name = "outcomes", description = "Outcomes and their components"),
         (name = "components", description = "Flat component operations"),

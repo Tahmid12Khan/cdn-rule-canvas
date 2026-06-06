@@ -5,4 +5,5 @@
 pub mod feature_service;
 pub mod outcome_service;
 pub mod rule_graph_service;
+pub mod site_service;
 pub mod version_service;

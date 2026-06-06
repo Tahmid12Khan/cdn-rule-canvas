@@ -53,12 +53,12 @@ async fn create_feature_returns_201() {
         db.state.clone(),
         "POST",
         "/api/v1/features",
-        Some(json!({ "id": "dn-article", "name": "DN Article", "type": "html" })),
+        Some(json!({ "id": "demo-article", "name": "DN Article", "type": "html" })),
     )
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(body["id"], "dn-article");
+    assert_eq!(body["id"], "demo-article");
     assert_eq!(body["type"], "html");
     assert!(body["live_version_id"].is_null());
 }
@@ -66,7 +66,7 @@ async fn create_feature_returns_201() {
 #[tokio::test]
 async fn create_duplicate_slug_returns_409() {
     let db = common::setup().await;
-    let payload = json!({ "id": "dn-article", "name": "DN Article", "type": "html" });
+    let payload = json!({ "id": "demo-article", "name": "DN Article", "type": "html" });
 
     let (first, _) = send(
         db.state.clone(),
@@ -114,7 +114,7 @@ async fn list_features_returns_envelope() {
         db.state.clone(),
         "POST",
         "/api/v1/features",
-        Some(json!({ "id": "dn-article", "name": "DN Article", "type": "html" })),
+        Some(json!({ "id": "demo-article", "name": "DN Article", "type": "html" })),
     )
     .await;
 
@@ -139,14 +139,14 @@ async fn patch_feature_updates_name() {
         db.state.clone(),
         "POST",
         "/api/v1/features",
-        Some(json!({ "id": "dn-article", "name": "Old", "type": "html" })),
+        Some(json!({ "id": "demo-article", "name": "Old", "type": "html" })),
     )
     .await;
 
     let (status, body) = send(
         db.state.clone(),
         "PATCH",
-        "/api/v1/features/dn-article",
+        "/api/v1/features/demo-article",
         Some(json!({ "name": "New" })),
     )
     .await;
@@ -161,20 +161,26 @@ async fn delete_feature_returns_204() {
         db.state.clone(),
         "POST",
         "/api/v1/features",
-        Some(json!({ "id": "dn-article", "name": "Doomed", "type": "html" })),
+        Some(json!({ "id": "demo-article", "name": "Doomed", "type": "html" })),
     )
     .await;
 
     let (status, _) = send(
         db.state.clone(),
         "DELETE",
-        "/api/v1/features/dn-article",
+        "/api/v1/features/demo-article",
         None,
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (after, _) = send(db.state.clone(), "GET", "/api/v1/features/dn-article", None).await;
+    let (after, _) = send(
+        db.state.clone(),
+        "GET",
+        "/api/v1/features/demo-article",
+        None,
+    )
+    .await;
     assert_eq!(after, StatusCode::NOT_FOUND);
 }
 

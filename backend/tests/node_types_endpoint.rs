@@ -55,7 +55,8 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
             "json_expression",
             "trim_json",
             "add_attribute",
-            "apply_outcome"
+            "apply_outcome",
+            "site_match"
         ]
     );
 

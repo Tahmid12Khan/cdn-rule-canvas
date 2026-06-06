@@ -21,7 +21,7 @@ use rre_backend::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-const FID: &str = "dn-article";
+const FID: &str = "demo-article";
 
 /// Insert a feature row directly (the features API is owned by another module).
 async fn seed_feature(pool: &PgPool, id: &str) {

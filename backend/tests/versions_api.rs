@@ -39,12 +39,12 @@ async fn body_json(res: axum::response::Response) -> Value {
 #[tokio::test]
 async fn create_version_returns_201() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     let res = app
         .oneshot(post(
-            "/api/v1/features/dn-article/versions",
+            "/api/v1/features/demo-article/versions",
             json!({ "description": "hello" }),
         ))
         .await
@@ -75,13 +75,13 @@ async fn create_on_missing_feature_returns_404() {
 #[tokio::test]
 async fn list_versions_returns_paginated_envelope() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     // Create two versions.
     for _ in 0..2 {
         app.clone()
-            .oneshot(post("/api/v1/features/dn-article/versions", json!({})))
+            .oneshot(post("/api/v1/features/demo-article/versions", json!({})))
             .await
             .unwrap();
     }
@@ -89,7 +89,7 @@ async fn list_versions_returns_paginated_envelope() {
     let res = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/features/dn-article/versions?page=1&page_size=20")
+                .uri("/api/v1/features/demo-article/versions?page=1&page_size=20")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -105,18 +105,18 @@ async fn list_versions_returns_paginated_envelope() {
 #[tokio::test]
 async fn get_version_returns_full_read() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     app.clone()
-        .oneshot(post("/api/v1/features/dn-article/versions", json!({})))
+        .oneshot(post("/api/v1/features/demo-article/versions", json!({})))
         .await
         .unwrap();
 
     let res = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/features/dn-article/versions/1")
+                .uri("/api/v1/features/demo-article/versions/1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -132,13 +132,13 @@ async fn get_version_returns_full_read() {
 #[tokio::test]
 async fn get_unknown_version_returns_404() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     let res = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/features/dn-article/versions/42")
+                .uri("/api/v1/features/demo-article/versions/42")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -153,18 +153,18 @@ async fn get_unknown_version_returns_404() {
 #[tokio::test]
 async fn publish_then_unpublish_via_http() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     app.clone()
-        .oneshot(post("/api/v1/features/dn-article/versions", json!({})))
+        .oneshot(post("/api/v1/features/demo-article/versions", json!({})))
         .await
         .unwrap();
 
     let res = app
         .clone()
         .oneshot(post(
-            "/api/v1/features/dn-article/versions/1/publish",
+            "/api/v1/features/demo-article/versions/1/publish",
             json!({ "environment": "live" }),
         ))
         .await
@@ -175,7 +175,7 @@ async fn publish_then_unpublish_via_http() {
 
     let res = app
         .oneshot(post(
-            "/api/v1/features/dn-article/versions/1/unpublish",
+            "/api/v1/features/demo-article/versions/1/unpublish",
             json!({ "environment": "live" }),
         ))
         .await
@@ -188,16 +188,16 @@ async fn publish_then_unpublish_via_http() {
 #[tokio::test]
 async fn delete_live_version_returns_409() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     app.clone()
-        .oneshot(post("/api/v1/features/dn-article/versions", json!({})))
+        .oneshot(post("/api/v1/features/demo-article/versions", json!({})))
         .await
         .unwrap();
     app.clone()
         .oneshot(post(
-            "/api/v1/features/dn-article/versions/1/publish",
+            "/api/v1/features/demo-article/versions/1/publish",
             json!({ "environment": "live" }),
         ))
         .await
@@ -207,7 +207,7 @@ async fn delete_live_version_returns_409() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri("/api/v1/features/dn-article/versions/1")
+                .uri("/api/v1/features/demo-article/versions/1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -222,11 +222,11 @@ async fn delete_live_version_returns_409() {
 #[tokio::test]
 async fn delete_draft_version_returns_204() {
     let db = common::setup().await;
-    seed_feature(&db.state.pool, "dn-article").await;
+    seed_feature(&db.state.pool, "demo-article").await;
     let app = build_app(db.state.clone());
 
     app.clone()
-        .oneshot(post("/api/v1/features/dn-article/versions", json!({})))
+        .oneshot(post("/api/v1/features/demo-article/versions", json!({})))
         .await
         .unwrap();
 
@@ -234,7 +234,7 @@ async fn delete_draft_version_returns_204() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri("/api/v1/features/dn-article/versions/1")
+                .uri("/api/v1/features/demo-article/versions/1")
                 .body(Body::empty())
                 .unwrap(),
         )

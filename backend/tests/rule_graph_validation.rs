@@ -573,7 +573,7 @@ fn json_action_pipeline_validates() {
             Node::Decision {
                 id: "d".to_string(),
                 processor: processor(
-                    json!({"type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article"}),
+                    json!({"type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "demo-article"}),
                 ),
                 position: pos(),
             },

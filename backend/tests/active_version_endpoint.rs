@@ -25,7 +25,7 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const FID: &str = "dn-article";
+const FID: &str = "demo-article";
 
 async fn seed_feature(pool: &PgPool, id: &str) {
     sqlx::query("INSERT INTO rre.features (id, name, type) VALUES ($1, $2, 'html')")
@@ -158,7 +158,7 @@ async fn active_version_http_endpoint_returns_payload() {
     let res = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/features/dn-article/active-version?env=live")
+                .uri("/api/v1/features/demo-article/active-version?env=live")
                 .body(Body::empty())
                 .unwrap(),
         )

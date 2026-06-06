@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn create_input_accepts_valid() {
-        let input = create_input("dn-article", "DN Article");
+        let input = create_input("demo-article", "DN Article");
         assert!(input.validate().is_ok());
     }
 
@@ -139,7 +139,7 @@ mod tests {
         // Synthesize a pg unique-violation by name; the helper only inspects the
         // SQLSTATE code path, so a non-database error must fall through to Internal.
         let err = sqlx::Error::RowNotFound;
-        let mapped = map_insert_error(err, "dn-article");
+        let mapped = map_insert_error(err, "demo-article");
         assert!(matches!(mapped, AppError::Internal(_)));
     }
 }

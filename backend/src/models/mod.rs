@@ -7,6 +7,7 @@ pub mod enums;
 pub mod component;
 pub mod feature;
 pub mod outcome;
+pub mod site;
 pub mod version;
 
 pub use enums::{FeatureType, Placement, VersionStatus};

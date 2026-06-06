@@ -204,6 +204,10 @@ pub enum Control {
     /// manifest; they are supplied by the client/validator (the
     /// `apply_outcome_ref_exists` rule covers membership).
     OutcomeSelect,
+    /// Dynamic searchable single-select of configured sites. Options are NOT in
+    /// the manifest; the client queries `GET /api/v1/sites?q=` and stores the
+    /// selected site's slug on the processor config.
+    SiteSelect,
 }
 
 /// Conditional-requirement clause: required unless a sibling field equals a value.
@@ -270,7 +274,8 @@ mod tests {
                 "json_expression",
                 "trim_json",
                 "add_attribute",
-                "apply_outcome"
+                "apply_outcome",
+                "site_match"
             ]
         );
 
@@ -286,8 +291,14 @@ mod tests {
         let outcome_field = &by_kind["apply_outcome"].fields[0];
         assert_eq!(outcome_field.control, Control::OutcomeSelect);
 
-        // 14 palette categories, with `user` flagged coming_soon and `json` not.
-        assert_eq!(loaded.typed.categories.len(), 14);
+        // `site_match` is a decision node in the `request` category whose `site`
+        // field uses the dynamic `site_select` control.
+        assert_eq!(by_kind["site_match"].node_kind, NodeKind::Decision);
+        assert_eq!(by_kind["site_match"].category, "request");
+        assert_eq!(by_kind["site_match"].fields[0].control, Control::SiteSelect);
+
+        // 15 palette categories, with `user` flagged coming_soon and `json` not.
+        assert_eq!(loaded.typed.categories.len(), 15);
         let user = loaded
             .typed
             .categories

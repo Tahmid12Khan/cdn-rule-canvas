@@ -1,6 +1,7 @@
 {
   "categories": [
     { "id": "session", "label": "Session" },
+    { "id": "request", "label": "Request" },
     { "id": "user", "label": "User", "coming_soon": true },
     { "id": "content", "label": "Content" },
     { "id": "json", "label": "JSON" },
@@ -240,6 +241,25 @@
         }
       ],
       "output": { "branches": [ { "id": "out", "label": "Next" } ] }
+    },
+    {
+      "kind": "site_match",
+      "label": "Site Match",
+      "category": "request",
+      "applies_to": "all",
+      "summary": "Branch on whether the request's site matches a chosen site.",
+      "fields": [
+        {
+          "name": "site",
+          "label": "Site",
+          "control": "site_select",
+          "required": true,
+          "default": "",
+          "placeholder": "Search sites by name…",
+          "required_message": "Pick a site to match"
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
     }
   ],
   "display": { "value_max_chars": 10 }

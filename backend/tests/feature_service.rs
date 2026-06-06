@@ -26,16 +26,18 @@ async fn create_then_get_roundtrips() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
-    let created = feature_service::create(pool, create_input("dn-article", "DN Article"))
+    let created = feature_service::create(pool, create_input("demo-article", "DN Article"))
         .await
         .expect("create");
-    assert_eq!(created.id, "dn-article");
+    assert_eq!(created.id, "demo-article");
     assert_eq!(created.name, "DN Article");
     assert_eq!(created.r#type, FeatureType::Html);
     assert!(created.live_version_id.is_none());
     assert!(created.staging_version_id.is_none());
 
-    let fetched = feature_service::get(pool, "dn-article").await.expect("get");
+    let fetched = feature_service::get(pool, "demo-article")
+        .await
+        .expect("get");
     assert_eq!(fetched.id, created.id);
     assert_eq!(fetched.created_at, created.created_at);
 }
@@ -45,11 +47,11 @@ async fn create_duplicate_slug_conflicts() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
-    feature_service::create(pool, create_input("dn-article", "First"))
+    feature_service::create(pool, create_input("demo-article", "First"))
         .await
         .expect("first create");
 
-    let err = feature_service::create(pool, create_input("dn-article", "Second"))
+    let err = feature_service::create(pool, create_input("demo-article", "Second"))
         .await
         .expect_err("expected slug conflict");
     assert!(matches!(err, AppError::SlugConflict(_)), "got {err:?}");
@@ -82,13 +84,13 @@ async fn update_name_persists() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
-    feature_service::create(pool, create_input("dn-article", "Old"))
+    feature_service::create(pool, create_input("demo-article", "Old"))
         .await
         .expect("create");
 
     let updated = feature_service::update(
         pool,
-        "dn-article",
+        "demo-article",
         FeatureUpdate {
             name: Some("New Name".to_string()),
         },
@@ -97,7 +99,9 @@ async fn update_name_persists() {
     .expect("update");
     assert_eq!(updated.name, "New Name");
 
-    let fetched = feature_service::get(pool, "dn-article").await.expect("get");
+    let fetched = feature_service::get(pool, "demo-article")
+        .await
+        .expect("get");
     assert_eq!(fetched.name, "New Name");
 }
 
@@ -106,11 +110,11 @@ async fn update_with_none_name_is_noop() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
-    feature_service::create(pool, create_input("dn-article", "Keep"))
+    feature_service::create(pool, create_input("demo-article", "Keep"))
         .await
         .expect("create");
 
-    let updated = feature_service::update(pool, "dn-article", FeatureUpdate { name: None })
+    let updated = feature_service::update(pool, "demo-article", FeatureUpdate { name: None })
         .await
         .expect("update");
     assert_eq!(updated.name, "Keep");
@@ -138,15 +142,15 @@ async fn delete_removes_feature() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
-    feature_service::create(pool, create_input("dn-article", "Doomed"))
+    feature_service::create(pool, create_input("demo-article", "Doomed"))
         .await
         .expect("create");
 
-    feature_service::delete(pool, "dn-article")
+    feature_service::delete(pool, "demo-article")
         .await
         .expect("delete");
 
-    let err = feature_service::get(pool, "dn-article")
+    let err = feature_service::get(pool, "demo-article")
         .await
         .expect_err("expected not found after delete");
     assert!(matches!(err, AppError::FeatureNotFound(_)), "got {err:?}");
