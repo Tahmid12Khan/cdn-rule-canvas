@@ -135,6 +135,16 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
   Indexes: `sites_source_unique UNIQUE (source_host, source_port)`; `sites_created_at_idx (created_at DESC, slug ASC)`.
   CHECKs: source/dest protocol IN (`http`,`https`); source/dest port 1..65535. Down drops the table.
+- `0011_test_presets`: creates `rre.test_presets` table — a GLOBAL library of reusable inputs for the
+  rule-builder Test panels (not feature/version-scoped). Columns: `slug VARCHAR(64) PK`,
+  `name VARCHAR(200) UNIQUE NOT NULL`, `kind VARCHAR(8) NOT NULL`, `payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
+  `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+  Index: `test_presets_created_at_idx (created_at DESC, slug ASC)`. CHECK: `kind IN ('rule','url')`
+  (`rule` = synthetic "Test a rule" inputs; `url` = "Test with a live URL" inputs). `payload` is an opaque
+  JSON object OWNED by the frontend test panels — for `rule`: `{ feature_type, device_type?, user_agent?,
+  path?, meta_tags?, headers?, response_body?, content_kind?, site? }`; for `url`: `{ url, headers? }`. The
+  service validates ONLY that `payload` is a JSON object within a 16 KB serialized cap (the frontend zod
+  schema + the proxy's `headers_to_map` are the per-field guards). Down drops the table.
 
 Migration order is load-bearing (0002 features WITHOUT versions FK; 0003 ALTERs in the deferrable FK
 after creating versions). Never reorder.
@@ -437,6 +447,16 @@ GET    /api/v1/sites/{slug}                   -> sites::get              -> site
 PATCH  /api/v1/sites/{slug}                   -> sites::update           -> site_service::update
 DELETE /api/v1/sites/{slug}                   -> sites::delete           -> site_service::delete
 
+# Test presets (global library of reusable Test-panel inputs; ?q name filter + ?kind=rule|url + pagination)
+POST   /api/v1/test-presets                   -> test_presets::create    -> test_preset_service::create
+GET    /api/v1/test-presets                   -> test_presets::list      -> test_preset_service::list
+GET    /api/v1/test-presets/{slug}            -> test_presets::get       -> test_preset_service::get
+PATCH  /api/v1/test-presets/{slug}            -> test_presets::update     -> test_preset_service::update
+DELETE /api/v1/test-presets/{slug}            -> test_presets::delete     -> test_preset_service::delete
+# DTOs: TestPresetCreate { slug (3..=64 kebab), name, kind (rule|url), payload (JSON object) };
+#       TestPresetUpdate { name?, payload? } (slug + kind IMMUTABLE); TestPresetRead { slug, name, kind,
+#       payload, created_at, updated_at }. 404 TEST_PRESET_NOT_FOUND; 409 SLUG_CONFLICT (dup slug/name).
+
 # Versions (nested under feature; {vnum} = version_number i32)
 POST   /api/v1/features/{fid}/versions                -> versions::create    -> version_service::create_version
 GET    /api/v1/features/{fid}/versions                -> versions::list      -> version_service::list
@@ -570,6 +590,29 @@ Client -> [axum fallback] -> forwarder::forward
  10. encoding::reencode(body, content_encoding)   gzip via flate2; br/deflate -> pass-through + warn
  11. rebuild Response: modified body, recalc Content-Length, X-RRE-Apply-Status, X-RRE-Trace-Id
 ```
+
+#### Internal test-eval endpoints (rule-builder Test panels; not on the hot path)
+
+```
+POST /__rre/eval      -> eval::eval_handler      synthetic: build EvaluationContext from the request body,
+                                                  NO upstream fetch. Used by the "Test a rule" panel.
+POST /__rre/eval-url  -> eval::eval_url_handler   live: resolve url host -> Site, fetch the REAL upstream
+                                                  (Site headers applied; SSRF-safe), eval the posted canvas.
+```
+Both return the same `EvalResponse { matched_node_id?, traversed_node_ids[], traversed_edge_ids[], steps[],
+journey[], summary? }`. Errors use the nested envelope `{ error: { code, message } }` (matches `EvalFetchError`
+and the backend) so the frontend parses every eval failure uniformly.
+
+`POST /__rre/eval` request: `{ canvas: CanvasGraph, context: EvalContext }` where `EvalContext` (all fields
+optional, `#[serde(default)]`) =
+`{ device_type?, user_agent?, meta_tags?{}, path?, url?, response_json?, response_body?, content_kind?, site?, headers?{} }`.
+`headers` (additive) is a `{name: value}` map fed into `request_headers`; cookies are derived from a `Cookie`
+header (matching the live path) and a `User-Agent` header is a device fallback (after `device_type`/`user_agent`).
+Invalid header names/values are dropped by `headers_to_map` (defensive; the frontend validates to the Site
+header rules first). `site` simulates a matched-Site slug for `site_match` nodes.
+
+`POST /__rre/eval-url` request: `{ canvas: CanvasGraph, url: String, headers?{} }`. A Site's configured header
+ALWAYS WINS over a colliding test `header` on the upstream fetch (a test header may not override a site default).
 
 ### 2. Hot-Path Budget (p99)
 
