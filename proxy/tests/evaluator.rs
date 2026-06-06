@@ -85,7 +85,7 @@ async fn paywall_plus_mobile_routes_to_regwall() {
     let ctx = parts(html, Some("iPhone Mobile"));
 
     let actions = evaluator
-        .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
         .await;
 
     assert_eq!(node_ids(&actions), vec!["n_regwall"]);
@@ -106,7 +106,7 @@ async fn paywall_plus_desktop_routes_to_paywall() {
     let ctx = parts(html, Some("Macintosh Desktop"));
 
     let actions = evaluator
-        .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
         .await;
 
     assert_eq!(node_ids(&actions), vec!["n_paywall"]);
@@ -127,7 +127,7 @@ async fn no_paywall_routes_to_content() {
     let ctx = parts(html, Some("iPhone Mobile"));
 
     let actions = evaluator
-        .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
         .await;
 
     assert_eq!(node_ids(&actions), vec!["n_content"]);
@@ -147,7 +147,7 @@ async fn empty_canvas_yields_no_actions() {
     let ctx = parts("<html></html>", None);
 
     let actions = evaluator
-        .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
         .await;
 
     assert!(actions.is_empty());
@@ -168,7 +168,7 @@ async fn latency_smoke_100_concurrent() {
         let evaluator = GraphEvaluator::new(registry.clone(), &cache);
         let ctx = parts(html, Some("iPhone Mobile"));
         let _ = evaluator
-            .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+            .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
             .await;
     }
 
@@ -182,7 +182,7 @@ async fn latency_smoke_100_concurrent() {
             let ctx = parts(html, Some("iPhone Mobile"));
             let start = Instant::now();
             let _ = evaluator
-                .evaluate(&canvas, ctx, "dn-article", 1, Canvas::Anonymous)
+                .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
                 .await;
             start.elapsed().as_secs_f64() * 1000.0
         }));

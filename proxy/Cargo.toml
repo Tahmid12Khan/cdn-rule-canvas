@@ -61,9 +61,6 @@ ammonia = "4"
 # encoding
 flate2 = "1"
 
-# glob matching for feature_map
-globset = "0.4"
-
 # regex matching for the article-url processor (linear-time engine, no ReDoS)
 regex = "1"
 

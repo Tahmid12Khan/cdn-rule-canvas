@@ -2,7 +2,7 @@
 //! worked example): a fake upstream serves an `application/json` body, a fake
 //! backend serves an active-version whose anonymous canvas is
 //! `start -> json_expression -> trim_json -> add_attribute -> end`. When
-//! `$.api == "dn-article"`, the proxy empties `$.body` and sets `$.paywall_show`.
+//! `$.api == "demo-article"`, the proxy empties `$.body` and sets `$.paywall_show`.
 
 use std::sync::Arc;
 
@@ -11,16 +11,29 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use serde_json::{json, Value};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FEATURE: &str = "dn-json-article";
+const FEATURE: &str = "demo-json-article";
 const HOST: &str = "rre.test";
 
-/// Active-version: start -> d_api (json_expression $.api == dn-article) ;
+/// Mount `GET /api/v1/features?page_size=100` returning the single demo feature so
+/// the proxy's per-feature pipeline runs it for every request (no feature_map).
+async fn mount_feature_list(backend: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/features"))
+        .and(query_param("page_size", "100"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
+        )
+        .mount(backend)
+        .await;
+}
+
+/// Active-version: start -> d_api (json_expression $.api == demo-article) ;
 /// yes -> trim_json($.body, 0) -> add_attribute($.paywall_show) -> end ;
 /// no  -> end (pass-through).
 fn active_version_body() -> Value {
@@ -32,7 +45,7 @@ fn active_version_body() -> Value {
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
                     { "kind": "decision", "id": "d_api",
-                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "demo-article" },
                       "position": { "x": 0.0, "y": 0.0 } },
                     { "kind": "expression", "id": "t_body",
                       "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
@@ -70,16 +83,10 @@ async fn spawn(upstream: &str, backend: &str) -> String {
         upstream_read_timeout_secs: 10,
         max_upstream_body_bytes: 16 * 1024 * 1024,
         max_decompressed_bytes: 16 * 1024 * 1024,
-        feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };
     let http = reqwest::Client::new();
-    let feature_map = FeatureMap::from_entries(vec![FeatureMapEntry {
-        host: HOST.to_string(),
-        path_glob: "/article*".to_string(),
-        feature_id: FEATURE.to_string(),
-    }])
-    .unwrap();
+    let site_map = SiteMap::new(http.clone(), backend.to_string(), 30);
     let backend_client = BackendClient::new(http.clone(), backend.to_string(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
@@ -88,7 +95,7 @@ async fn spawn(upstream: &str, backend: &str) -> String {
     let state = AppState {
         settings: Arc::new(settings),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend_client),
         compiled: Arc::new(CompiledCache::new(256)),
         registry: Arc::new(default_registry()),
@@ -122,6 +129,7 @@ async fn run(upstream_json: &str, upstream_path: &str) -> (String, String) {
         .mount(&backend)
         .await;
 
+    mount_feature_list(&backend).await;
     let base = spawn(&upstream.uri(), &backend.uri()).await;
     let res = reqwest::Client::new()
         .get(format!("{base}{upstream_path}"))
@@ -143,7 +151,7 @@ async fn run(upstream_json: &str, upstream_path: &str) -> (String, String) {
 #[tokio::test]
 async fn matching_api_trims_body_and_adds_paywall() {
     let (status, body) = run(
-        r#"{"api":"dn-article","body":["p1","p2","p3"]}"#,
+        r#"{"api":"demo-article","body":["p1","p2","p3"]}"#,
         "/article/1",
     )
     .await;
@@ -151,7 +159,7 @@ async fn matching_api_trims_body_and_adds_paywall() {
     let v: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["body"], json!([]), "body should be emptied");
     assert_eq!(v["paywall_show"], json!("<html>paywall_showed</html>"));
-    assert_eq!(v["api"], json!("dn-article"));
+    assert_eq!(v["api"], json!("demo-article"));
 }
 
 #[tokio::test]
@@ -184,6 +192,7 @@ async fn run_full(upstream_json: &str, upstream_path: &str) -> reqwest::Response
         .mount(&backend)
         .await;
 
+    mount_feature_list(&backend).await;
     let base = spawn(&upstream.uri(), &backend.uri()).await;
     reqwest::Client::new()
         .get(format!("{base}{upstream_path}"))
@@ -200,7 +209,7 @@ async fn run_full(upstream_json: &str, upstream_path: &str) -> reqwest::Response
 #[tokio::test]
 async fn matched_feature_injects_header_and_feature_expressions() {
     let res = run_full(
-        r#"{"api":"dn-article","body":["p1","p2","p3"]}"#,
+        r#"{"api":"demo-article","body":["p1","p2","p3"]}"#,
         "/article/3",
     )
     .await;
@@ -297,7 +306,7 @@ fn html_only_active_version_body() -> Value {
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
                     { "kind": "decision", "id": "d_api",
-                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+                      "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "demo-article" },
                       "position": { "x": 0.0, "y": 0.0 } },
                     { "kind": "expression", "id": "n_html",
                       "action": { "type": "apply_outcome", "outcome_id": HTML_OUTCOME },
@@ -341,13 +350,14 @@ async fn no_op_expression_is_not_marked_applied_gate() {
     Mock::given(method("GET"))
         .and(path("/article/5"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"api":"dn-article","body":["p1","p2","p3"]}"#.as_bytes(),
+            r#"{"api":"demo-article","body":["p1","p2","p3"]}"#.as_bytes(),
             "application/json; charset=utf-8",
         ))
         .mount(&upstream)
         .await;
 
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(200).set_body_json(html_only_active_version_body()))

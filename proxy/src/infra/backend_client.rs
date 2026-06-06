@@ -101,10 +101,26 @@ impl Env {
     }
 }
 
+/// The `Page<FeatureRead>` envelope (BACKEND CONTRACT §5). The proxy only needs
+/// each feature's `id`; the rest of the DTO is ignored.
+#[derive(Deserialize)]
+struct FeaturePage {
+    items: Vec<FeatureRef>,
+}
+
+#[derive(Deserialize)]
+struct FeatureRef {
+    id: String,
+}
+
 pub struct BackendClient {
     http: reqwest::Client,
     base: String,
     cache: Cache<(String, Env), Arc<ActiveVersionRead>>,
+    /// TTL-cached list of ALL feature ids (single keyless entry). Mirrors the
+    /// active-version cache TTL. Every request runs the per-feature pipeline for
+    /// each id; an active-version 404 skips that feature (as today).
+    feature_ids: Cache<(), Arc<Vec<String>>>,
 }
 
 impl BackendClient {
@@ -113,7 +129,65 @@ impl BackendClient {
             .time_to_live(Duration::from_secs(ttl_secs))
             .max_capacity(1024)
             .build();
-        Self { http, base, cache }
+        let feature_ids = Cache::builder()
+            .time_to_live(Duration::from_secs(ttl_secs))
+            .max_capacity(1)
+            .build();
+        Self {
+            http,
+            base,
+            cache,
+            feature_ids,
+        }
+    }
+
+    /// `GET {base}/api/v1/features?page_size=100`, TTL-cached. Returns ALL feature
+    /// ids. A successful fetch (including a genuinely empty 200) is cached for the
+    /// TTL. Any transport / non-2xx / decode error yields a FRESH empty list that
+    /// is NOT cached — the forwarder still passes through, but the next request
+    /// re-fetches once the backend recovers instead of serving a sticky empty list
+    /// for the full TTL. Never panics.
+    pub async fn feature_ids(&self) -> Arc<Vec<String>> {
+        if let Some(hit) = self.feature_ids.get(&()).await {
+            return hit;
+        }
+        match self.fetch_feature_ids().await {
+            Ok(ids) => {
+                let ids = Arc::new(ids);
+                self.feature_ids.insert((), ids.clone()).await;
+                ids
+            }
+            // Do NOT cache transient failures: return an uncached empty list so a
+            // subsequent request retries the backend immediately on recovery.
+            Err(()) => Arc::new(Vec::new()),
+        }
+    }
+
+    /// `Ok(ids)` on a successful 2xx (cacheable). `Err(())` on a transport /
+    /// non-2xx / decode error (fail-open, but must NOT be cached).
+    async fn fetch_feature_ids(&self) -> Result<Vec<String>, ()> {
+        let url = format!(
+            "{}/api/v1/features?page_size=100",
+            self.base.trim_end_matches('/')
+        );
+        let resp = match self.http.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "feature_list=miss (transport error)");
+                return Err(());
+            }
+        };
+        if !resp.status().is_success() {
+            tracing::warn!(status = %resp.status(), "feature_list=miss (non-2xx)");
+            return Err(());
+        }
+        match resp.json::<FeaturePage>().await {
+            Ok(page) => Ok(page.items.into_iter().map(|f| f.id).collect()),
+            Err(e) => {
+                tracing::warn!(error = %e, "feature_list=miss (decode error)");
+                Err(())
+            }
+        }
     }
 
     /// `GET {base}/api/v1/features/{id}/active-version?env=...`, TTL-cached.
@@ -160,5 +234,60 @@ impl BackendClient {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A transient backend error on the feature-list fetch must NOT be cached: the
+    /// first request hits a 500 (fail-open => empty list, uncached), and the very
+    /// next request — still within the TTL — re-fetches and sees the now-healthy
+    /// backend's data, without waiting for the TTL to expire.
+    #[tokio::test]
+    async fn feature_ids_error_response_is_not_cached() {
+        let server = MockServer::start().await;
+
+        // First call: backend is down (500). `expect(1)` pins it to one hit.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/features"))
+            .respond_with(ResponseTemplate::new(500))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // A long TTL proves recovery is NOT gated on TTL expiry: a cached empty
+        // result would prevent the second call from ever reaching the backend.
+        let client = BackendClient::new(reqwest::Client::new(), server.uri(), 3600);
+
+        let first = client.feature_ids().await;
+        assert!(first.is_empty(), "error fails open to an empty list");
+
+        // Backend recovers (200 with one feature). Mounted after the 500 mock is
+        // exhausted, so the next fetch sees it.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/features"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{ "id": "demo-article" }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let second = client.feature_ids().await;
+        assert_eq!(
+            second.as_slice(),
+            ["demo-article".to_string()],
+            "the error result was not cached, so the recovered data is served immediately"
+        );
+
+        // Successful result IS cached: a third call within the TTL serves from cache
+        // (the 200 mock's `expect(1)` would fail on a second backend hit).
+        let third = client.feature_ids().await;
+        assert_eq!(third.as_slice(), ["demo-article".to_string()]);
     }
 }

@@ -1,5 +1,5 @@
 //! RRE proxy entrypoint. Loads config, initializes telemetry + metrics, builds
-//! the shared `AppState` (reqwest client, feature map, caches, registry,
+//! the shared `AppState` (reqwest client, site map, caches, registry,
 //! sanitizer), and serves the app on the configured bind address (`:9000`).
 
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::FeatureMap;
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use rre_proxy::{build_app, observability, telemetry};
 
@@ -34,8 +34,11 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .context("building reqwest client")?;
 
-    let feature_map = FeatureMap::load(&settings.feature_map_path)
-        .with_context(|| format!("loading feature map from {}", settings.feature_map_path))?;
+    let site_map = SiteMap::new(
+        http.clone(),
+        settings.backend_base_url.clone(),
+        settings.active_version_ttl_secs,
+    );
 
     let backend = BackendClient::new(
         http.clone(),
@@ -58,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         settings: Arc::new(settings),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend),
         compiled: Arc::new(compiled),
         registry: Arc::new(registry),

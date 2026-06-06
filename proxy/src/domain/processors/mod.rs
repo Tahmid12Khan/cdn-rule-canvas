@@ -6,6 +6,7 @@ pub mod article_url;
 pub mod device_type;
 pub mod json_expression;
 pub mod meta_tags;
+pub mod site_match;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ impl Branch {
 
 /// A processor's output. Converted into the zen `NodeResponse.output` Variable
 /// `{ "branch": "yes" | "no" }`, consumed by the downstream SwitchNode (`$.branch`).
+#[derive(Debug)]
 pub struct ProcessorOutcome {
     pub branch: Branch,
 }
@@ -105,5 +107,6 @@ pub fn default_registry() -> ProcessorRegistry {
     registry.register(Arc::new(device_type::DeviceTypeProcessor));
     registry.register(Arc::new(article_url::ArticleUrlProcessor));
     registry.register(Arc::new(json_expression::JsonExpressionProcessor));
+    registry.register(Arc::new(site_match::SiteMatchProcessor));
     registry
 }

@@ -9,15 +9,28 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FEATURE: &str = "dn-article";
+const FEATURE: &str = "demo-article";
 const HOST: &str = "rre.test";
 const PAYWALL_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
+
+/// Mount `GET /api/v1/features?page_size=100` returning the single demo feature so
+/// the proxy's per-feature pipeline runs it for every request (no feature_map).
+async fn mount_feature_list(backend: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/features"))
+        .and(query_param("page_size", "100"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
+        )
+        .mount(backend)
+        .await;
+}
 
 fn active_version_body() -> serde_json::Value {
     // start -> n_meta (paywall?) ; yes -> apply_outcome(paywall) -> end ; no -> end.
@@ -79,16 +92,10 @@ async fn spawn_with_cap(upstream: &str, backend: &str, max_upstream_body_bytes: 
         upstream_read_timeout_secs: 10,
         max_upstream_body_bytes,
         max_decompressed_bytes: 16 * 1024 * 1024,
-        feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };
     let http = reqwest::Client::new();
-    let feature_map = FeatureMap::from_entries(vec![FeatureMapEntry {
-        host: HOST.to_string(),
-        path_glob: "/article*".to_string(),
-        feature_id: FEATURE.to_string(),
-    }])
-    .unwrap();
+    let site_map = SiteMap::new(http.clone(), backend.to_string(), 30);
     let backend_client = BackendClient::new(http.clone(), backend.to_string(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
@@ -97,7 +104,7 @@ async fn spawn_with_cap(upstream: &str, backend: &str, max_upstream_body_bytes: 
     let state = AppState {
         settings: Arc::new(settings),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend_client),
         compiled: Arc::new(CompiledCache::new(256)),
         registry: Arc::new(default_registry()),
@@ -133,6 +140,7 @@ async fn injects_paywall_for_paywalled_article() {
         .await;
 
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
@@ -178,6 +186,7 @@ async fn matched_html_feature_injects_script_before_body_close() {
         .await;
 
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
@@ -238,8 +247,11 @@ async fn matched_html_feature_injects_script_before_body_close() {
     );
 }
 
+/// No host/path gating any more: the feature runs on every request and
+/// self-gates. `/other` has no `paywall` meta, so the meta_tags decision branches
+/// `no` -> no actions -> the response is served untouched (`skipped`).
 #[tokio::test]
-async fn passes_through_unmapped_path() {
+async fn passes_through_when_feature_self_gates() {
     let upstream = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/other"))
@@ -252,6 +264,12 @@ async fn passes_through_unmapped_path() {
         .await;
 
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
     let base = spawn(&upstream.uri(), &backend.uri()).await;
 
     let res = reqwest::Client::new()
@@ -288,6 +306,7 @@ async fn fails_open_when_backend_unavailable() {
 
     // Backend returns 404 for active-version -> proxy fails open (pass-through).
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(404))
@@ -329,6 +348,7 @@ async fn rejects_oversized_upstream_body() {
         .await;
 
     let backend = MockServer::start().await;
+    mount_feature_list(&backend).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))

@@ -56,6 +56,10 @@ pub struct EvalContext {
     /// `"html"` (default) or `"json"`. Selects how `response_body` is interpreted.
     #[serde(default)]
     pub content_kind: Option<String>,
+    /// Simulated matched Site slug for `site_match` nodes. `None` mirrors a
+    /// fallback request (no Site matched).
+    #[serde(default)]
+    pub site: Option<String>,
 }
 
 /// The wire `device_type` field on the request (matches frontend enum).
@@ -138,6 +142,7 @@ pub async fn eval_handler(
         device,
         meta_tags,
         response_json,
+        site: req.context.site.clone(),
     };
 
     // Translate the canvas to JDM DecisionContent (same path as production eval).

@@ -27,7 +27,6 @@ pub struct Settings {
     /// past this falls back to pass-through (serving the original compressed
     /// bytes), bounding decompression-bomb memory.
     pub max_decompressed_bytes: usize,
-    pub feature_map_path: String,
     pub sanitizer_config_path: String,
 }
 

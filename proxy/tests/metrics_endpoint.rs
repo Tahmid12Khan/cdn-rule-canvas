@@ -5,7 +5,7 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 
 fn settings() -> Settings {
@@ -20,7 +20,6 @@ fn settings() -> Settings {
         upstream_read_timeout_secs: 10,
         max_upstream_body_bytes: 16 * 1024 * 1024,
         max_decompressed_bytes: 16 * 1024 * 1024,
-        feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     }
 }
@@ -29,12 +28,7 @@ fn settings() -> Settings {
 async fn metrics_endpoint_responds() {
     rre_proxy::observability::init();
     let http = reqwest::Client::new();
-    let feature_map = FeatureMap::from_entries(vec![FeatureMapEntry {
-        host: "ignored".to_string(),
-        path_glob: "/never".to_string(),
-        feature_id: "x".to_string(),
-    }])
-    .unwrap();
+    let site_map = SiteMap::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
     let backend = BackendClient::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
@@ -43,7 +37,7 @@ async fn metrics_endpoint_responds() {
     let state = AppState {
         settings: Arc::new(settings()),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend),
         compiled: Arc::new(CompiledCache::new(256)),
         registry: Arc::new(default_registry()),

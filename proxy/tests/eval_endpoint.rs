@@ -12,7 +12,7 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use serde_json::{json, Value};
 
@@ -64,16 +64,10 @@ async fn spawn_app() -> String {
         upstream_read_timeout_secs: 10,
         max_upstream_body_bytes: 16 * 1024 * 1024,
         max_decompressed_bytes: 16 * 1024 * 1024,
-        feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };
     let http = reqwest::Client::new();
-    let feature_map = FeatureMap::from_entries(vec![FeatureMapEntry {
-        host: "rre.test".to_string(),
-        path_glob: "/article*".to_string(),
-        feature_id: "dn-article".to_string(),
-    }])
-    .unwrap();
+    let site_map = SiteMap::new(http.clone(), settings.backend_base_url.clone(), 30);
     let backend = BackendClient::new(http.clone(), settings.backend_base_url.clone(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
@@ -82,7 +76,7 @@ async fn spawn_app() -> String {
     let state = AppState {
         settings: Arc::new(settings),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend),
         compiled: Arc::new(CompiledCache::new(256)),
         registry: Arc::new(default_registry()),
@@ -266,7 +260,7 @@ fn json_canvas() -> Value {
         "nodes": [
             { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
             { "kind": "decision", "id": "d_api",
-              "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "dn-article" },
+              "processor": { "type": "json_expression", "json_path": "$.api", "operator": "equals", "value": "demo-article" },
               "position": { "x": 0.0, "y": 0.0 } },
             { "kind": "expression", "id": "t_body",
               "action": { "type": "trim_json", "json_path": "$.body", "length": 0 },
@@ -296,7 +290,7 @@ async fn json_journey_replays_body_mutations() {
         "canvas": json_canvas(),
         "context": {
             "content_kind": "json",
-            "response_json": { "api": "dn-article", "body": [1, 2, 3] }
+            "response_json": { "api": "demo-article", "body": [1, 2, 3] }
         }
     });
 
@@ -349,7 +343,7 @@ async fn json_eval_has_summary_and_per_step_time() {
         "canvas": json_canvas(),
         "context": {
             "content_kind": "json",
-            "response_json": { "api": "dn-article", "body": [1, 2, 3] }
+            "response_json": { "api": "demo-article", "body": [1, 2, 3] }
         }
     });
 
@@ -523,4 +517,91 @@ async fn cors_preflight_returns_allow_origin() {
         allow_origin, "http://localhost:3000",
         "CORS allow-origin header"
     );
+}
+
+/// A canvas with a single `site_match` decision: start -> s_site ; yes -> n_pw ;
+/// no -> end. Used to prove `/__rre/eval` threads the request-context `site` into
+/// `EvaluationContext.site` for the `site_match` processor (spec §6).
+fn site_match_canvas() -> Value {
+    json!({
+        "root_node_id": "start",
+        "nodes": [
+            { "kind": "start", "id": "start", "position": { "x": 0.0, "y": 0.0 } },
+            { "kind": "decision", "id": "s_site",
+              "processor": { "type": "site_match", "site": "demo-localhost" },
+              "position": { "x": 200.0, "y": 0.0 } },
+            { "kind": "expression", "id": "n_pw",
+              "action": { "type": "apply_outcome", "outcome_id": "22222222-2222-2222-2222-222222222222" },
+              "position": { "x": 400.0, "y": 0.0 } },
+            { "kind": "end", "id": "end", "position": { "x": 600.0, "y": 0.0 } }
+        ],
+        "edges": [
+            { "id": "e0", "source_node_id": "start",  "target_node_id": "s_site", "branch": "yes" },
+            { "id": "e1", "source_node_id": "s_site", "target_node_id": "n_pw",   "branch": "yes" },
+            { "id": "e2", "source_node_id": "s_site", "target_node_id": "end",    "branch": "no"  },
+            { "id": "e3", "source_node_id": "n_pw",   "target_node_id": "end",    "branch": "yes" }
+        ]
+    })
+}
+
+/// §6: a request whose context `site` equals the node's configured site branches
+/// `yes` -> reaches the expression node.
+#[tokio::test]
+async fn site_match_matching_site_branches_yes() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = json!({
+        "canvas": site_match_canvas(),
+        "context": { "device_type": "desktop", "site": "demo-localhost" }
+    });
+
+    let resp = client
+        .post(format!("{base}/__rre/eval"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: Value = resp.json().await.unwrap();
+
+    assert_eq!(v["matched_node_id"].as_str(), Some("n_pw"));
+    let site_step = v["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["node_id"] == "s_site")
+        .unwrap();
+    assert_eq!(site_step["branch"].as_str(), Some("yes"));
+}
+
+/// §6: a request with a different (or absent) `site` branches `no` -> straight to
+/// `end` with no matched expression.
+#[tokio::test]
+async fn site_match_other_or_absent_site_branches_no() {
+    let base = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    for site in [json!("other-site"), Value::Null] {
+        let body = json!({
+            "canvas": site_match_canvas(),
+            "context": { "device_type": "desktop", "site": site }
+        });
+        let resp = client
+            .post(format!("{base}/__rre/eval"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let v: Value = resp.json().await.unwrap();
+        assert_eq!(v["matched_node_id"].as_str(), None, "site={site:?}");
+        let site_step = v["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["node_id"] == "s_site")
+            .unwrap();
+        assert_eq!(site_step["branch"].as_str(), Some("no"), "site={site:?}");
+    }
 }

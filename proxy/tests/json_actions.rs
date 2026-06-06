@@ -118,7 +118,7 @@ fn add_attribute_is_idempotent() {
 #[test]
 fn apply_action_json_dispatches_trim_and_add() {
     // trim_json action.
-    let mut body = json!({ "body": [1, 2, 3], "api": "dn-article" });
+    let mut body = json!({ "body": [1, 2, 3], "api": "demo-article" });
     let trim = json!({ "type": "trim_json", "json_path": "$.body", "length": 0 });
     assert!(apply_action_json(&mut body, &trim, &[]));
     assert_eq!(body["body"], json!([]));
@@ -244,7 +244,7 @@ fn folding_chain_is_idempotent() {
     let trim = json!({ "type": "trim_json", "json_path": "$.body", "length": 0 });
     let add = json!({ "type": "add_attribute", "json_path": "$.paywall_show", "value": "<html>p</html>" });
 
-    let mut body: Value = json!({ "api": "dn-article", "body": [1, 2, 3] });
+    let mut body: Value = json!({ "api": "demo-article", "body": [1, 2, 3] });
     let mut applied = false;
     applied |= apply_action_json(&mut body, &trim, &[]);
     applied |= apply_action_json(&mut body, &add, &[]);

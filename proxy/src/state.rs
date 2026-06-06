@@ -6,14 +6,16 @@ use crate::config::Settings;
 use crate::domain::processors::ProcessorRegistry;
 use crate::infra::backend_client::BackendClient;
 use crate::infra::compiled_cache::CompiledCache;
-use crate::infra::feature_map::FeatureMap;
+use crate::infra::site_map::SiteMap;
 
 #[derive(Clone)]
 pub struct AppState {
     pub settings: Arc<Settings>,
     /// One reqwest client per process — holds the connection pool.
     pub http: reqwest::Client,
-    pub feature_map: Arc<FeatureMap>,
+    /// Dynamic source-host -> destination routing table (TTL-cached from the
+    /// backend). Replaces the static `feature_map.yaml`.
+    pub site_map: Arc<SiteMap>,
     pub backend: Arc<BackendClient>,
     pub compiled: Arc<CompiledCache>,
     pub registry: Arc<ProcessorRegistry>,

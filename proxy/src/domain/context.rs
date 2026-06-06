@@ -58,6 +58,10 @@ pub struct EvaluationContext {
     /// `Send + Sync` (unlike `scraper::Html`), so the adapter stays shareable.
     /// `None` for HTML responses or when the JSON body fails to parse.
     pub response_json: Option<Value>,
+    /// The matched Site's slug (the routing source). `None` when the request fell
+    /// back to `upstream_base_url` (no Site matched). Read by the `site_match`
+    /// decision processor.
+    pub site: Option<String>,
 }
 
 /// `Send` carrier: everything in `EvaluationContext` except the `!Send`
@@ -77,6 +81,9 @@ pub struct EvaluationContextParts {
     /// evaluated actually contains a `meta_tags` node. `false` skips the full
     /// `scraper::Html` parse and leaves `meta_tags` empty. Ignored for JSON.
     pub needs_meta_tags: bool,
+    /// The matched Site's slug (the routing source). `None` on fallback. Set by
+    /// the forwarder via [`EvaluationContextParts::with_site`].
+    pub site: Option<String>,
 }
 
 impl EvaluationContextParts {
@@ -106,7 +113,16 @@ impl EvaluationContextParts {
             // `needs_meta_tags` once it knows whether the canvas has a meta_tags
             // node. Direct callers (tests) keep the previous always-parse behavior.
             needs_meta_tags: true,
+            // No Site by default; the forwarder sets it via `with_site`.
+            site: None,
         }
+    }
+
+    /// Builder: tag the matched Site's slug (`None` on fallback). Threaded into
+    /// the built `EvaluationContext` for the `site_match` processor.
+    pub fn with_site(mut self, site: Option<String>) -> Self {
+        self.site = site;
+        self
     }
 
     /// Reconstruct the full context. For JSON, parse the body into
@@ -123,6 +139,7 @@ impl EvaluationContextParts {
                 device: self.device,
                 meta_tags: HashMap::new(),
                 response_json,
+                site: self.site,
             };
         }
         // Skip the full DOM parse when the canvas has no meta_tags node.
@@ -138,6 +155,7 @@ impl EvaluationContextParts {
             device: self.device,
             meta_tags,
             response_json: None,
+            site: self.site,
         }
     }
 
@@ -158,6 +176,7 @@ impl EvaluationContextParts {
             "headers": headers,
             "device": self.device.as_str(),
             "cookies": self.request_cookies,
+            "site": self.site,
         })
     }
 }
@@ -196,6 +215,7 @@ impl EvaluationContext {
             "headers": headers,
             "device": self.device.as_str(),
             "cookies": self.request_cookies,
+            "site": self.site,
         })
     }
 }

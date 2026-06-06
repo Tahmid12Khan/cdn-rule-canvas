@@ -11,13 +11,13 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
-use rre_proxy::infra::feature_map::{FeatureMap, FeatureMapEntry};
+use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use serde_json::{json, Value};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FEATURE: &str = "dn-article";
+const FEATURE: &str = "demo-article";
 const HOST: &str = "rre.test";
 const LOCK_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
 const SHOW_OUTCOME: &str = "33333333-3333-3333-3333-333333333333";
@@ -79,16 +79,10 @@ async fn spawn(upstream: &str, backend: &str) -> String {
         upstream_read_timeout_secs: 10,
         max_upstream_body_bytes: 16 * 1024 * 1024,
         max_decompressed_bytes: 16 * 1024 * 1024,
-        feature_map_path: "config/feature_map.yaml".to_string(),
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
     };
     let http = reqwest::Client::new();
-    let feature_map = FeatureMap::from_entries(vec![FeatureMapEntry {
-        host: HOST.to_string(),
-        path_glob: "/article*".to_string(),
-        feature_id: FEATURE.to_string(),
-    }])
-    .unwrap();
+    let site_map = SiteMap::new(http.clone(), backend.to_string(), 30);
     let backend_client = BackendClient::new(http.clone(), backend.to_string(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
@@ -97,7 +91,7 @@ async fn spawn(upstream: &str, backend: &str) -> String {
     let state = AppState {
         settings: Arc::new(settings),
         http,
-        feature_map: Arc::new(feature_map),
+        site_map: Arc::new(site_map),
         backend: Arc::new(backend_client),
         compiled: Arc::new(CompiledCache::new(256)),
         registry: Arc::new(default_registry()),
@@ -125,6 +119,14 @@ async fn run(upstream_json: &str, upstream_path: &str, applicability: Value) -> 
         .await;
 
     let backend = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/features"))
+        .and(query_param("page_size", "100"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
+        )
+        .mount(&backend)
+        .await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
         .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body(applicability)))

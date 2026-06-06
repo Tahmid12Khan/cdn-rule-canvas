@@ -48,15 +48,28 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     let e2e_start = Instant::now();
     let path = req.uri().path().to_string();
     let host = host(&req).unwrap_or_default();
+    // Source scheme: the proxy terminates plain HTTP; an inbound `x-forwarded-proto`
+    // (set by a TLS terminator in front) selects the https default port (443).
+    let is_https = req
+        .headers()
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.eq_ignore_ascii_case("https"))
+        .unwrap_or(false);
 
-    // 1. Resolve EVERY matching feature (map order, de-duplicated). None -> pass-through.
-    //    A request can fan out to several features; we apply each in turn,
-    //    chaining the body so one feature's output feeds the next.
-    let feature_ids = state.feature_map.resolve_all(&host, &path);
+    // 0. Resolve the upstream destination from the matched Site (by Host header).
+    //    No match -> fall back to `upstream_base_url` (dev + tests); `site = None`.
+    let route = resolve_route(&state, &host, is_https).await;
+
+    // 1. Run the per-feature pipeline for EVERY feature id (TTL-cached list).
+    //    Empty list -> pass-through. Each feature self-gates by response
+    //    content-kind / applicability / eval, so a non-applicable feature is a
+    //    no-op; the matched Site decides upstream + the `site_match` node scopes.
+    let feature_ids = state.backend.feature_ids().await;
     if feature_ids.is_empty() {
-        return passthrough(&state, req).await;
+        return passthrough(&state, &route, req).await;
     }
-    for feature_id in &feature_ids {
+    for feature_id in feature_ids.iter() {
         metrics::counter!("proxy_requests_total", "feature" => feature_id.clone()).increment(1);
     }
 
@@ -69,7 +82,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     let cookies = parse_cookies(&headers);
 
     // 3. Upstream fetch (once). On error -> typed ProxyError response.
-    let upstream = match send_upstream(&state, req).await {
+    let upstream = match send_upstream(&state, &route, req).await {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
@@ -123,6 +136,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
             &headers,
             &path,
             &cookies,
+            route.site.as_deref(),
             body_string,
         )
         .await
@@ -138,6 +152,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
                     &headers,
                     &path,
                     &cookies,
+                    route.site.as_deref(),
                     parsed,
                     &body_string,
                 )
@@ -192,6 +207,7 @@ async fn apply_features_html(
     headers: &HeaderMap,
     path: &str,
     cookies: &HashMap<String, String>,
+    site: Option<&str>,
     mut current: String,
 ) -> ApplyResult {
     let mut any_applied = false;
@@ -217,7 +233,8 @@ async fn apply_features_html(
             String::new()
         };
         let mut ctx =
-            EvaluationContextParts::from_request(headers, path, cookies, body_for_ctx, false);
+            EvaluationContextParts::from_request(headers, path, cookies, body_for_ctx, false)
+                .with_site(site.map(str::to_string));
         ctx.needs_meta_tags = needs_meta_tags;
         let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
         if actions.is_empty() {
@@ -317,6 +334,7 @@ async fn apply_features_json(
     headers: &HeaderMap,
     path: &str,
     cookies: &HashMap<String, String>,
+    site: Option<&str>,
     mut current: serde_json::Value,
     original: &str,
 ) -> ApplyResult {
@@ -336,7 +354,8 @@ async fn apply_features_json(
         // Eval reads response_json from the body string, so feed it the CURRENT
         // (already-chained) body — not the original — for correct chaining.
         let ctx_body = serde_json::to_string(&current).unwrap_or_default();
-        let ctx = EvaluationContextParts::from_request(headers, path, cookies, ctx_body, true);
+        let ctx = EvaluationContextParts::from_request(headers, path, cookies, ctx_body, true)
+            .with_site(site.map(str::to_string));
         let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
         if actions.is_empty() {
             log_skipped(feature_id, canvas_label, eval_ms);
@@ -548,9 +567,51 @@ impl UpstreamResponse {
     }
 }
 
+/// The resolved upstream destination for a request: the upstream base URL
+/// (`scheme://host:port`), the destination Host header to set, and the matched
+/// Site slug (`None` on fallback to `settings.upstream_base_url`).
+pub(crate) struct Route {
+    /// Upstream base URL: `dest_protocol://dest_host:dest_port` (matched Site) or
+    /// `settings.upstream_base_url` (fallback).
+    base_url: String,
+    /// Host header to forward upstream: the destination host (matched Site) or
+    /// the fallback base URL's authority host.
+    host: Option<String>,
+    /// Matched Site slug, threaded into `EvaluationContext.site`. `None` on fallback.
+    pub site: Option<String>,
+}
+
+/// Resolve the upstream destination from the inbound `Host` header. A matched
+/// Site drives the upstream scheme+authority + the `site` tag; no match falls
+/// back to `settings.upstream_base_url` with `site = None` (preserves dev/tests).
+async fn resolve_route(state: &AppState, host: &str, is_https: bool) -> Route {
+    let index = state.site_map.index().await;
+    if let Some(site) = index.lookup(host, is_https) {
+        return Route {
+            base_url: site.dest_base_url(),
+            host: Some(site.dest_host.clone()),
+            site: Some(site.slug.clone()),
+        };
+    }
+    // Fallback: the static upstream. Derive the Host header from its authority so
+    // a vhosted upstream still receives the expected Host.
+    let base = state.settings.upstream_base_url.clone();
+    let host = base
+        .parse::<axum::http::Uri>()
+        .ok()
+        .and_then(|u| u.host().map(str::to_string));
+    Route {
+        base_url: base,
+        host,
+        site: None,
+    }
+}
+
 /// Fetch the upstream response and capture it fully (HTML buffered in memory).
+/// The upstream authority+scheme comes from the resolved [`Route`].
 pub(crate) async fn send_upstream(
     state: &AppState,
+    route: &Route,
     req: axum::extract::Request,
 ) -> Result<UpstreamResponse, ProxyError> {
     let (parts, body) = req.into_parts();
@@ -561,7 +622,7 @@ pub(crate) async fn send_upstream(
 
     let url = format!(
         "{}{}",
-        state.settings.upstream_base_url.trim_end_matches('/'),
+        route.base_url.trim_end_matches('/'),
         parts
             .uri
             .path_and_query()
@@ -581,6 +642,13 @@ pub(crate) async fn send_upstream(
             if let Ok(n) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
                 builder = builder.header(n, v);
             }
+        }
+    }
+    // Set the upstream Host header to the destination host (the inbound `host`
+    // header was stripped above). A vhosted upstream routes by this Host.
+    if let Some(dest_host) = &route.host {
+        if let Ok(v) = reqwest::header::HeaderValue::from_str(dest_host) {
+            builder = builder.header(reqwest::header::HOST, v);
         }
     }
     if !body_bytes.is_empty() {
@@ -629,8 +697,8 @@ pub(crate) async fn send_upstream(
 }
 
 /// Forward a request upstream and return the untouched response (skipped).
-async fn passthrough(state: &AppState, req: axum::extract::Request) -> Response {
-    match send_upstream(state, req).await {
+async fn passthrough(state: &AppState, route: &Route, req: axum::extract::Request) -> Response {
+    match send_upstream(state, route, req).await {
         Ok(u) => u.into_response(APPLY_STATUS_HEADER, "skipped"),
         Err(e) => e.into_response(),
     }
@@ -688,7 +756,9 @@ fn set_content_length(headers: &mut HeaderMap, len: usize) {
     }
 }
 
-/// Resolve the request host (Host header or URI authority), lowercased.
+/// Resolve the request host (Host header or URI authority), as received.
+/// Returned verbatim — case-insensitive lookups happen downstream
+/// (`parse_host_header` lowercases the host before indexing).
 fn host(req: &axum::extract::Request) -> Option<String> {
     req.headers()
         .get(axum::http::header::HOST)
