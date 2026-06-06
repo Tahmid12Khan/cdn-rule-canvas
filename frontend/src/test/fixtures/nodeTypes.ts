@@ -11,6 +11,7 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
     { id: "session", label: "Session" },
     { id: "user", label: "User", coming_soon: true },
     { id: "content", label: "Content" },
+    { id: "request", label: "Request" },
     { id: "json", label: "JSON" },
     { id: "advanced", label: "Advanced", coming_soon: true },
   ],
@@ -131,6 +132,31 @@ export const NODE_TYPES_FIXTURE: NodeManifest = {
           default: "",
           placeholder: "e.g. /article",
           required_message: "Enter a value to compare against the URL",
+        },
+      ],
+      output: {
+        branches: [
+          { id: "yes", label: "Yes" },
+          { id: "no", label: "No" },
+        ],
+      },
+    },
+    {
+      kind: "site_match",
+      label: "Site Match",
+      category: "request",
+      applies_to: "all",
+      summary:
+        "Branch on whether the request's site matches a chosen site.",
+      fields: [
+        {
+          name: "site",
+          label: "Site",
+          control: "site_select",
+          required: true,
+          default: "",
+          placeholder: "Search sites by name…",
+          required_message: "Pick a site to match",
         },
       ],
       output: {

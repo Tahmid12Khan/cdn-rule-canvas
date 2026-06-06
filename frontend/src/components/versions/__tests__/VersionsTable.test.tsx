@@ -18,7 +18,7 @@ function wrapper({ children }: { children: ReactNode }) {
 function makeVersion(overrides: Partial<VersionSummary>): VersionSummary {
   return {
     id: "11111111-1111-1111-1111-111111111111",
-    feature_id: "dn-article",
+    feature_id: "demo-article",
     version_number: 1,
     description: "Initial rollout",
     status: "live",
@@ -49,7 +49,7 @@ describe("VersionsTable", () => {
 
     render(
       <VersionsTable
-        featureId="dn-article"
+        featureId="demo-article"
         featureType="html"
         versions={versions}
       />,
@@ -68,7 +68,7 @@ describe("VersionsTable", () => {
   it("links the version number to the version detail route", () => {
     render(
       <VersionsTable
-        featureId="dn-article"
+        featureId="demo-article"
         featureType="html"
         versions={[makeVersion({ version_number: 7 })]}
       />,
@@ -78,13 +78,13 @@ describe("VersionsTable", () => {
     const link = screen.getByRole("link", { name: "V7" });
     expect(link).toHaveAttribute(
       "href",
-      "/products/features/html/dn-article/7",
+      "/products/features/html/demo-article/7",
     );
   });
 
   it("shows an empty state when there are no versions", () => {
     render(
-      <VersionsTable featureId="dn-article" featureType="html" versions={[]} />,
+      <VersionsTable featureId="demo-article" featureType="html" versions={[]} />,
       { wrapper },
     );
     expect(

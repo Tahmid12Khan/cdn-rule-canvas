@@ -8,6 +8,7 @@
 // drawer can drive the Save button + dirty state.
 import { useEffect, useState } from "react";
 
+import { SiteSelectControl } from "@/components/canvas/config/SiteSelectControl";
 import type { NodeFieldSpec, NodeTypeSpec } from "@/lib/api/nodeTypes";
 import {
   isFieldRequired,
@@ -86,7 +87,15 @@ export function GenericNodeForm({
               {required && <span className="ml-0.5 text-danger">*</span>}
             </label>
 
-            {field.control === "outcome_select" ? (
+            {field.control === "site_select" ? (
+              <SiteSelectControl
+                id={inputId}
+                value={asInputValue(draft[field.name])}
+                onChange={(slug) => setField(field, slug)}
+                disabled={disabled}
+                placeholder={field.placeholder}
+              />
+            ) : field.control === "outcome_select" ? (
               <select
                 id={inputId}
                 value={asInputValue(draft[field.name])}

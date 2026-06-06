@@ -24,7 +24,7 @@ function featurePage(items: unknown[], total = items.length) {
 }
 
 const sampleFeature = {
-  id: "dn-article",
+  id: "demo-article",
   name: "Article Paywall",
   type: "html",
   staging_version_id: null,
@@ -62,7 +62,7 @@ describe("FeaturesListClient", () => {
     const link = screen.getByRole("link", { name: /article paywall/i });
     expect(link).toHaveAttribute(
       "href",
-      "/products/features/html/dn-article",
+      "/products/features/html/demo-article",
     );
     // live badge present since live_version_id is set.
     expect(screen.getByText(/^live$/i)).toBeInTheDocument();

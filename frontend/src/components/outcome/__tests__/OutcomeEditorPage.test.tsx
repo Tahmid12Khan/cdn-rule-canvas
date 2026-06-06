@@ -58,7 +58,7 @@ const emptyCanvas = { nodes: [], edges: [], root_node_id: null };
 function versionPayload(status: string) {
   return {
     id: VERSION_ID,
-    feature_id: "dn-article",
+    feature_id: "demo-article",
     version_number: 3,
     description: null,
     status,
@@ -84,7 +84,7 @@ function renderPage() {
   return render(
     <OutcomeEditorPage
       featureType="html"
-      featureSlug="dn-article"
+      featureSlug="demo-article"
       vnum="3"
       outcomeId={OUTCOME_ID}
     />,
@@ -99,7 +99,7 @@ beforeEach(() => {
       HttpResponse.json(outcomePayload()),
     ),
     // Default: a DRAFT version so the editor is editable.
-    http.get(`${API_BASE}/api/v1/features/dn-article/versions/3`, () =>
+    http.get(`${API_BASE}/api/v1/features/demo-article/versions/3`, () =>
       HttpResponse.json(versionPayload("draft")),
     ),
   );
@@ -153,7 +153,7 @@ describe("OutcomeEditorPage", () => {
 
     await user.click(screen.getByRole("button", { name: /^discard$/i }));
     expect(push).toHaveBeenCalledWith(
-      "/products/features/html/dn-article/3",
+      "/products/features/html/demo-article/3",
     );
   });
 
@@ -164,7 +164,7 @@ describe("OutcomeEditorPage", () => {
 
     await user.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(screen.queryByText(/discard changes\?/i)).not.toBeInTheDocument();
-    expect(push).toHaveBeenCalledWith("/products/features/html/dn-article/3");
+    expect(push).toHaveBeenCalledWith("/products/features/html/demo-article/3");
   });
 
   it("deletes a persisted component and fires DELETE on Save", async () => {
@@ -279,7 +279,7 @@ describe("OutcomeEditorPage", () => {
 
   it("renders read-only with no Save button on a non-draft (locked) version", async () => {
     server.use(
-      http.get(`${API_BASE}/api/v1/features/dn-article/versions/3`, () =>
+      http.get(`${API_BASE}/api/v1/features/demo-article/versions/3`, () =>
         HttpResponse.json(versionPayload("live")),
       ),
     );

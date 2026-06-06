@@ -11,11 +11,15 @@ import { apiGet } from "@/lib/api/client";
 // `outcome_select` (expression-nodes-spec §2) is a dynamic dropdown of the
 // version's outcomes; its options are supplied by the client/validator, NOT the
 // manifest.
+// `site_select` (sites-host-config-spec §6) is a searchable combobox of the
+// configured Sites; it stores the selected site's SLUG. Options are fetched at
+// render time (searchSites), NOT supplied by the manifest.
 export const NodeFieldControl = z.enum([
   "select",
   "text",
   "number",
   "outcome_select",
+  "site_select",
 ]);
 export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 

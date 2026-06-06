@@ -14,6 +14,9 @@ const META = NODE_TYPES_FIXTURE.node_types.find((s) => s.kind === "meta_tags")!;
 const DEVICE = NODE_TYPES_FIXTURE.node_types.find(
   (s) => s.kind === "device_type",
 )!;
+const SITE_MATCH = NODE_TYPES_FIXTURE.node_types.find(
+  (s) => s.kind === "site_match",
+)!;
 
 describe("defaultProcessor", () => {
   it("builds the dropped-node config from field defaults", () => {
@@ -131,5 +134,16 @@ describe("display helpers", () => {
       fieldDisplayValue(op, { type: "meta_tags", operator: "contains" }),
     ).toBe("contains");
     expect(fieldDisplayValue(op, { type: "meta_tags" })).toBe("—");
+  });
+
+  it("fieldDisplayValue shows a site_select's stored slug verbatim", () => {
+    const siteField = SITE_MATCH.fields[0];
+    expect(
+      fieldDisplayValue(siteField, {
+        type: "site_match",
+        site: "demo-localhost",
+      }),
+    ).toBe("demo-localhost");
+    expect(fieldDisplayValue(siteField, { type: "site_match" })).toBe("—");
   });
 });

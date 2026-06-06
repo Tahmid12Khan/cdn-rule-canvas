@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // Full end-to-end demo (Task 20). Exercises the whole RRE stack against the
-// running docker-compose services + seeded `dn-article` feature:
+// running docker-compose services + seeded `demo-article` feature:
 //
 //   1. admin frontend renders the seeded feature in the features list,
 //   2. the version list shows a LIVE version (v1) and a DRAFT version (v2),
@@ -12,12 +12,16 @@ import { expect, test } from "@playwright/test";
 //
 // Prereqs (provided by the e2e job / `make up`):
 //   - frontend  on http://localhost:3000 (Playwright baseURL)
-//   - backend   on http://localhost:8000 (seeded: dn-article LIVE v1 + DRAFT v2)
-//   - proxy     on http://localhost:9000 (feature_map host localhost:9000)
+//   - backend   on http://localhost:8000 (seeded: demo-article LIVE v1 + DRAFT v2,
+//     plus the demo Site source localhost:9000 -> demo-upstream:8081)
+//   - proxy     on http://localhost:9000
 //   - demo-upstream serving /article.html (paywall meta) + /free.html
 //
-// The proxy host port is 9000 so the browser Host header `localhost:9000`
-// matches the feature_map entry and resolves the dn-article feature.
+// Routing is Site-based: the browser Host header `localhost:9000` matches the
+// demo Site's source, so the proxy reverse-proxies to that Site's destination
+// (demo-upstream). There is NO host/path gating of features — ALL rule features
+// are evaluated for every request (per-site scoping is only via a site-match
+// node), so the demo-article feature applies on any matched path.
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const PROXY_BASE = process.env.RRE_PROXY_BASE ?? "http://localhost:9000";
@@ -27,10 +31,10 @@ test.describe("RRE full-stack demo", () => {
     const health = await request.get(`${API_BASE}/health`);
     expect(health.ok()).toBeTruthy();
 
-    const feature = await request.get(`${API_BASE}/api/v1/features/dn-article`);
+    const feature = await request.get(`${API_BASE}/api/v1/features/demo-article`);
     expect(feature.ok()).toBeTruthy();
     const body = await feature.json();
-    expect(body.id).toBe("dn-article");
+    expect(body.id).toBe("demo-article");
     expect(body.type).toBe("html");
     // The live slot points at the seeded LIVE v1.
     expect(body.live_version_id).not.toBeNull();
@@ -50,7 +54,7 @@ test.describe("RRE full-stack demo", () => {
 
   test("active-version endpoint returns the seeded outcomes", async ({ request }) => {
     const res = await request.get(
-      `${API_BASE}/api/v1/features/dn-article/active-version?env=live`,
+      `${API_BASE}/api/v1/features/demo-article/active-version?env=live`,
     );
     expect(res.ok()).toBeTruthy();
     const av = await res.json();
@@ -101,13 +105,15 @@ test.describe("RRE full-stack demo", () => {
   });
 
   test("non-matching path passes through untouched", async ({ request }) => {
-    // /free.html does not match the feature_map glob `/article*`.
+    // Features aren't path-gated — /free.html is still evaluated, but it carries
+    // no paywall meta tag, so the demo-article rule yields no outcome and the
+    // body is forwarded unchanged.
     const res = await request.get(`${PROXY_BASE}/free.html`, {
       headers: { Host: "localhost:9000" },
     });
     expect(res.ok()).toBeTruthy();
     const status = res.headers()["x-rre-apply-status"];
-    // Pass-through (no feature matched) -> skipped (or header absent).
+    // Pass-through (no rule outcome applied) -> skipped (or header absent).
     if (status !== undefined) {
       expect(status).toBe("skipped");
     }

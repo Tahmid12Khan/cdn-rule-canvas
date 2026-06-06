@@ -106,6 +106,8 @@ export function fieldDisplayValue(
     const opt = (field.options ?? []).find((o) => o.value === value);
     if (opt) return opt.label;
   }
+  // site_select stores the selected site's slug; display it verbatim (the
+  // searchable name→slug resolution lives in the config form, not here).
   return String(value);
 }
 

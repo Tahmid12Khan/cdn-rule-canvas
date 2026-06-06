@@ -2,13 +2,13 @@ import { expect, test } from "@playwright/test";
 
 // Canvas round-trip (Task 14): drop nodes → configure → connect → save →
 // reload → graph persists. Requires the full docker-compose stack (backend +
-// seeded demo feature dn-article version 1 in DRAFT) running on the configured
+// seeded demo feature demo-article version 1 in DRAFT) running on the configured
 // baseURL. In CI the stack is started by the e2e job script before this runs.
 //
-// The seed (Task 20) creates feature `dn-article` with a DRAFT version 1 and a
+// The seed (Task 20) creates feature `demo-article` with a DRAFT version 1 and a
 // builtin "Show Content" outcome.
 
-const VERSION_URL = "/products/features/html/dn-article/1";
+const VERSION_URL = "/products/features/html/demo-article/1";
 
 test.describe("rule builder canvas round-trip", () => {
   test("builds, saves and reloads a graph", async ({ page }) => {

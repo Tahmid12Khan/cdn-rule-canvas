@@ -25,7 +25,7 @@ function renderMenu(status: VersionStatus) {
   const onDelete = vi.fn();
   render(
     <RowActionsMenu
-      featureId="dn-article"
+      featureId="demo-article"
       versionNumber={1}
       status={status}
       onMakeLive={onMakeLive}
@@ -127,7 +127,7 @@ describe("RowActionsMenu", () => {
     const user = userEvent.setup();
     server.use(
       http.post(
-        `${API_BASE}/api/v1/features/dn-article/versions/1/unpublish`,
+        `${API_BASE}/api/v1/features/demo-article/versions/1/unpublish`,
         () =>
           HttpResponse.json(
             { error: { code: "INTERNAL_ERROR", message: "boom" } },

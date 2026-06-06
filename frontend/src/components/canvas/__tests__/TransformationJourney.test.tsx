@@ -14,7 +14,7 @@ const journey: JourneyStep[] = [
     kind: "start",
     label: "Start",
     branch: null,
-    body_after: { api: "dn-article", body: ["a", "b", "c"] },
+    body_after: { api: "demo-article", body: ["a", "b", "c"] },
     time_ms: "0.00",
   },
   {
@@ -23,7 +23,7 @@ const journey: JourneyStep[] = [
     kind: "decision",
     label: "JSON Expression",
     branch: true,
-    body_after: { api: "dn-article", body: ["a", "b", "c"] },
+    body_after: { api: "demo-article", body: ["a", "b", "c"] },
     time_ms: "0.00",
   },
   {
@@ -32,7 +32,7 @@ const journey: JourneyStep[] = [
     kind: "expression",
     label: "Trim JSON",
     branch: null,
-    body_after: { api: "dn-article", body: [] },
+    body_after: { api: "demo-article", body: [] },
     time_ms: "0.41",
   },
   {
@@ -42,7 +42,7 @@ const journey: JourneyStep[] = [
     label: "END",
     branch: null,
     body_after: {
-      api: "dn-article",
+      api: "demo-article",
       body: [],
       paywall_show: "<html>paywall_showed</html>",
     },
@@ -58,7 +58,7 @@ const canvasNodes: RFNode[] = [
     id: "d_api",
     type: "decisionNode",
     position: { x: 0, y: 100 },
-    data: { processor: { type: "json_expression", json_path: "$.api", operator: "equals", value: "dn-article" } },
+    data: { processor: { type: "json_expression", json_path: "$.api", operator: "equals", value: "demo-article" } },
   },
   {
     id: "t_body",
@@ -132,7 +132,7 @@ describe("TransformationJourney", () => {
     expect(screen.getByText("Start")).toBeInTheDocument();
     expect(screen.getByTestId("journey-time")).toHaveTextContent("0.00 ms");
     // 2-space-indented pretty JSON.
-    expect(body()).toContain('"api": "dn-article"');
+    expect(body()).toContain('"api": "demo-article"');
     expect(body()).toContain('"body": [');
   });
 
@@ -178,7 +178,7 @@ describe("TransformationJourney", () => {
     // Decision: subject/op/value + matched (yes).
     await user.click(screen.getByRole("button", { name: "Next node" }));
     expect(screen.getByTestId("journey-description")).toHaveTextContent(
-      /Checked .*\$\.api.* equals .*dn-article.* matched \(yes\)/,
+      /Checked .*\$\.api.* equals .*demo-article.* matched \(yes\)/,
     );
 
     // Expression: trim_json with actual path + length.

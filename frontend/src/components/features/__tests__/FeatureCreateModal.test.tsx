@@ -62,7 +62,7 @@ describe("FeatureCreateModal", () => {
         receivedBody = await request.json();
         return HttpResponse.json(
           {
-            id: "dn-article",
+            id: "demo-article",
             name: "Article Paywall",
             type: "html",
             staging_version_id: null,
@@ -78,7 +78,7 @@ describe("FeatureCreateModal", () => {
     render(<FeatureCreateModal />, { wrapper });
     await openModal(user);
 
-    await user.type(screen.getByLabelText(/slug/i), "dn-article");
+    await user.type(screen.getByLabelText(/slug/i), "demo-article");
     await user.type(screen.getByLabelText(/name/i), "Article Paywall");
     await user.click(
       screen.getByRole("button", { name: /create feature/i }),
@@ -88,7 +88,7 @@ describe("FeatureCreateModal", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(receivedBody).toEqual({
-      id: "dn-article",
+      id: "demo-article",
       name: "Article Paywall",
       type: "html",
     });
@@ -110,7 +110,7 @@ describe("FeatureCreateModal", () => {
     render(<FeatureCreateModal />, { wrapper });
     await openModal(user);
 
-    await user.type(screen.getByLabelText(/slug/i), "dn-article");
+    await user.type(screen.getByLabelText(/slug/i), "demo-article");
     await user.type(screen.getByLabelText(/name/i), "Article Paywall");
     await user.click(
       screen.getByRole("button", { name: /create feature/i }),

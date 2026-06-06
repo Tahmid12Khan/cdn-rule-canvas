@@ -29,13 +29,13 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-const CREATE_URL = `${API_BASE}/api/v1/features/dn-article/versions`;
-const PUBLISH_URL = `${API_BASE}/api/v1/features/dn-article/versions/5/publish`;
+const CREATE_URL = `${API_BASE}/api/v1/features/demo-article/versions`;
+const PUBLISH_URL = `${API_BASE}/api/v1/features/demo-article/versions/5/publish`;
 
 function versionRead(status: string) {
   return {
     id: "55555555-5555-5555-5555-555555555555",
-    feature_id: "dn-article",
+    feature_id: "demo-article",
     version_number: 5,
     description: "new",
     status,
@@ -49,7 +49,7 @@ function versionRead(status: string) {
 
 function renderSaveBar() {
   return render(
-    <SaveBar fid="dn-article" vnum={3} featureBase="/products/features/html/dn-article" />,
+    <SaveBar fid="demo-article" vnum={3} featureBase="/products/features/html/demo-article" />,
     { wrapper },
   );
 }
@@ -83,7 +83,7 @@ describe("SaveBar — Save as New Version", () => {
     await user.click(screen.getByRole("button", { name: /^create version$/i }));
 
     await waitFor(() =>
-      expect(push).toHaveBeenCalledWith("/products/features/html/dn-article/5"),
+      expect(push).toHaveBeenCalledWith("/products/features/html/demo-article/5"),
     );
     expect(createCalls).toBe(1);
     expect(published).toBe(false);
@@ -108,7 +108,7 @@ describe("SaveBar — Save as New Version", () => {
 
     await waitFor(() => expect(published).toBe(true));
     await waitFor(() =>
-      expect(push).toHaveBeenCalledWith("/products/features/html/dn-article/5"),
+      expect(push).toHaveBeenCalledWith("/products/features/html/demo-article/5"),
     );
   });
 
@@ -134,7 +134,7 @@ describe("SaveBar — Save as New Version", () => {
     );
     // The created draft is not lost — we still navigate to it.
     await waitFor(() =>
-      expect(push).toHaveBeenCalledWith("/products/features/html/dn-article/5"),
+      expect(push).toHaveBeenCalledWith("/products/features/html/demo-article/5"),
     );
   });
 

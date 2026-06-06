@@ -17,8 +17,16 @@ describe("buildPalette (manifest-driven)", () => {
     const palette = buildPalette(NODE_TYPES_FIXTURE, OUTCOMES, "json");
     const ids = palette.map((c) => c.id);
     // Apply Outcome is now a manifest expression node — no dynamic Outcomes
-    // category. With a JSON feature, html-only categories are dropped.
-    expect(ids).toEqual(["session", "user", "content", "json", "advanced"]);
+    // category. With a JSON feature, html-only categories are dropped; the
+    // request category (site_match, applies_to "all") stays.
+    expect(ids).toEqual([
+      "session",
+      "user",
+      "content",
+      "request",
+      "json",
+      "advanced",
+    ]);
   });
 
   it("places enabled decision chips with a default processor", () => {

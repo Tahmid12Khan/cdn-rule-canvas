@@ -53,7 +53,7 @@ describe("OutcomeListSection", () => {
     render(
       <OutcomeListSection
         versionId={VERSION_ID}
-        routeBase="/products/features/html/dn-article/1"
+        routeBase="/products/features/html/demo-article/1"
         editable
       />,
       { wrapper },
@@ -77,7 +77,7 @@ describe("OutcomeListSection", () => {
     render(
       <OutcomeListSection
         versionId={VERSION_ID}
-        routeBase="/products/features/html/dn-article/1"
+        routeBase="/products/features/html/demo-article/1"
         editable={false}
       />,
       { wrapper },
@@ -101,7 +101,7 @@ describe("OutcomeListSection", () => {
     render(
       <OutcomeListSection
         versionId={VERSION_ID}
-        routeBase="/products/features/html/dn-article/1"
+        routeBase="/products/features/html/demo-article/1"
         editable
       />,
       { wrapper },
@@ -127,7 +127,7 @@ describe("OutcomeListSection", () => {
     render(
       <OutcomeListSection
         versionId={VERSION_ID}
-        routeBase="/products/features/html/dn-article/1"
+        routeBase="/products/features/html/demo-article/1"
         editable
       />,
       { wrapper },

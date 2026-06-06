@@ -21,11 +21,11 @@ function makeWrapper() {
   return { client, Wrapper };
 }
 
-const PUBLISH_URL = `${API_BASE}/api/v1/features/dn-article/versions/2/publish`;
+const PUBLISH_URL = `${API_BASE}/api/v1/features/demo-article/versions/2/publish`;
 
 const publishedResponse = {
   id: "22222222-2222-2222-2222-222222222222",
-  feature_id: "dn-article",
+  feature_id: "demo-article",
   version_number: 2,
   description: null,
   status: "live",
@@ -57,7 +57,7 @@ describe("MakeLiveDialog", () => {
 
     render(
       <MakeLiveDialog
-        featureId="dn-article"
+        featureId="demo-article"
         versionNumber={2}
         open
         onOpenChange={onOpenChange}
@@ -70,7 +70,7 @@ describe("MakeLiveDialog", () => {
     await waitFor(() => expect(body).toEqual({ environment: "live" }));
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ["feature", "dn-article"],
+        queryKey: ["feature", "demo-article"],
       }),
     );
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
@@ -97,7 +97,7 @@ describe("MakeLiveDialog", () => {
     const onOpenChange = vi.fn();
     render(
       <MakeLiveDialog
-        featureId="dn-article"
+        featureId="demo-article"
         versionNumber={2}
         open
         onOpenChange={onOpenChange}
@@ -138,7 +138,7 @@ describe("MakeLiveDialog", () => {
     const { Wrapper } = makeWrapper();
     render(
       <MakeLiveDialog
-        featureId="dn-article"
+        featureId="demo-article"
         versionNumber={2}
         open
         onOpenChange={() => {}}

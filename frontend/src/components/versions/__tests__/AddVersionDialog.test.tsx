@@ -23,7 +23,7 @@ function makeWrapper() {
 
 const versionResponse = {
   id: "11111111-1111-1111-1111-111111111111",
-  feature_id: "dn-article",
+  feature_id: "demo-article",
   version_number: 4,
   description: "New rules",
   status: "draft",
@@ -45,7 +45,7 @@ describe("AddVersionDialog", () => {
 
     server.use(
       http.post(
-        `${API_BASE}/api/v1/features/dn-article/versions`,
+        `${API_BASE}/api/v1/features/demo-article/versions`,
         async ({ request }) => {
           receivedBody = await request.json();
           return HttpResponse.json(versionResponse, { status: 201 });
@@ -56,7 +56,7 @@ describe("AddVersionDialog", () => {
     const { client, Wrapper } = makeWrapper();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
 
-    render(<AddVersionDialog featureId="dn-article" />, { wrapper: Wrapper });
+    render(<AddVersionDialog featureId="demo-article" />, { wrapper: Wrapper });
 
     await user.click(
       screen.getByRole("button", { name: /add a new version/i }),
@@ -72,7 +72,7 @@ describe("AddVersionDialog", () => {
 
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ["versions", "dn-article"],
+        queryKey: ["versions", "demo-article"],
       }),
     );
 
@@ -86,7 +86,7 @@ describe("AddVersionDialog", () => {
   it("surfaces a server error and keeps the dialog open", async () => {
     const user = userEvent.setup();
     server.use(
-      http.post(`${API_BASE}/api/v1/features/dn-article/versions`, () =>
+      http.post(`${API_BASE}/api/v1/features/demo-article/versions`, () =>
         HttpResponse.json(
           { error: { code: "INTERNAL_ERROR", message: "boom" } },
           { status: 500 },
@@ -95,7 +95,7 @@ describe("AddVersionDialog", () => {
     );
 
     const { Wrapper } = makeWrapper();
-    render(<AddVersionDialog featureId="dn-article" />, { wrapper: Wrapper });
+    render(<AddVersionDialog featureId="demo-article" />, { wrapper: Wrapper });
 
     await user.click(
       screen.getByRole("button", { name: /add a new version/i }),

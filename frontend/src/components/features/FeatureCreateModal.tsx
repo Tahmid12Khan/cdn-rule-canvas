@@ -115,7 +115,7 @@ export function FeatureCreateModal() {
                 name="id"
                 value={id}
                 onChange={(e) => setId(e.target.value)}
-                placeholder="dn-article"
+                placeholder="demo-article"
                 aria-invalid={errors.id ? true : undefined}
                 className={inputClass}
               />

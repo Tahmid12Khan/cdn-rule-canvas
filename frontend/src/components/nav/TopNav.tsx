@@ -19,6 +19,21 @@ export function TopNav() {
           /
         </span>
         <span className="text-sm text-nav-muted">Response Rule Engine</span>
+        <span className="text-nav-border" aria-hidden>
+          /
+        </span>
+        <Link
+          href="/products/features"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          Features
+        </Link>
+        <Link
+          href="/products/sites"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          Sites
+        </Link>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />
