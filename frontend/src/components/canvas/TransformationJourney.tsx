@@ -52,6 +52,78 @@ function formatBody(value: unknown, isJson: boolean): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+// One line of a git-style diff: `ctx` = unchanged context, `add`/`del` = a line
+// present only in the new/old body.
+type DiffLine = { type: "add" | "del" | "ctx"; text: string };
+// A collapsed run of `hidden` unchanged lines (git's "@@ … @@" gap).
+type DiffRow = DiffLine | { type: "gap"; hidden: number };
+
+// LCS line diff of two strings — no external dep, mirroring the canvas graph
+// diff's pure-JS approach (lib/canvas/diff.ts).
+function diffLines(before: string, after: string): DiffLine[] {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  const m = a.length;
+  const k = b.length;
+  const lcs: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array<number>(k + 1).fill(0),
+  );
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = k - 1; j >= 0; j--) {
+      lcs[i][j] =
+        a[i] === b[j]
+          ? lcs[i + 1][j + 1] + 1
+          : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < k) {
+    if (a[i] === b[j]) {
+      out.push({ type: "ctx", text: a[i] });
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      out.push({ type: "del", text: a[i] });
+      i++;
+    } else {
+      out.push({ type: "add", text: b[j] });
+      j++;
+    }
+  }
+  while (i < m) out.push({ type: "del", text: a[i++] });
+  while (j < k) out.push({ type: "add", text: b[j++] });
+  return out;
+}
+
+// Collapse runs of unchanged context to `pad` lines around each change, so a
+// one-line edit in a big body reads like a git hunk, not a wall of text.
+function collapseContext(lines: DiffLine[], pad = 3): DiffRow[] {
+  const keep = new Array<boolean>(lines.length).fill(false);
+  lines.forEach((line, idx) => {
+    if (line.type === "ctx") return;
+    const lo = Math.max(0, idx - pad);
+    const hi = Math.min(lines.length - 1, idx + pad);
+    for (let p = lo; p <= hi; p++) keep[p] = true;
+  });
+  const rows: DiffRow[] = [];
+  let hidden = 0;
+  lines.forEach((line, idx) => {
+    if (keep[idx]) {
+      if (hidden > 0) {
+        rows.push({ type: "gap", hidden });
+        hidden = 0;
+      }
+      rows.push(line);
+    } else {
+      hidden++;
+    }
+  });
+  if (hidden > 0) rows.push({ type: "gap", hidden });
+  return rows;
+}
+
 // The live canvas node's config for a step: a decision's processor or an
 // expression's action (both ProcessorConfig); undefined for start/end or an
 // unknown node id.
@@ -139,6 +211,19 @@ export function TransformationJourney({
     step.branch,
     outcomeTitle ?? step.label,
   );
+
+  // Git-style diff of the body vs the previous step (skipped on the first step,
+  // which has no predecessor). Decisions/start/end don't mutate the body, so
+  // their diff is all context → we show a "no change" note instead.
+  const prevStep = clamped > 0 ? journey[clamped - 1] : undefined;
+  const bodyDiff = prevStep
+    ? diffLines(
+        formatBody(prevStep.body_after, isJson),
+        formatBody(step.body_after, isJson),
+      )
+    : null;
+  const bodyChanged = bodyDiff?.some((l) => l.type !== "ctx") ?? false;
+  const diffRows = bodyDiff ? collapseContext(bodyDiff) : [];
 
   return (
     <section
@@ -253,6 +338,59 @@ export function TransformationJourney({
                   </div>
                 ))}
               </dl>
+            </div>
+          )}
+
+          {prevStep && (
+            <div className="mt-3">
+              <p className="mb-1 text-xs font-medium text-nav">
+                Changes from previous step
+              </p>
+              {bodyChanged ? (
+                <div
+                  data-testid="journey-diff"
+                  className="max-h-64 overflow-auto rounded-md border border-status-prevBg bg-bg font-mono text-[11px] leading-relaxed"
+                >
+                  {diffRows.map((row, i) =>
+                    row.type === "gap" ? (
+                      <div
+                        key={i}
+                        className="select-none bg-bg-elevated px-3 py-0.5 text-center text-fg-muted"
+                      >
+                        ⋯ {row.hidden} unchanged{" "}
+                        {row.hidden === 1 ? "line" : "lines"}
+                      </div>
+                    ) : (
+                      <div
+                        key={i}
+                        className={
+                          row.type === "add"
+                            ? "whitespace-pre-wrap break-words bg-status-liveBg px-3 text-status-liveFg"
+                            : row.type === "del"
+                              ? "whitespace-pre-wrap break-words bg-danger-bg px-3 text-danger"
+                              : "whitespace-pre-wrap break-words px-3 text-fg-muted"
+                        }
+                      >
+                        <span className="select-none">
+                          {row.type === "add"
+                            ? "+ "
+                            : row.type === "del"
+                              ? "− "
+                              : "  "}
+                        </span>
+                        {row.text}
+                      </div>
+                    ),
+                  )}
+                </div>
+              ) : (
+                <p
+                  data-testid="journey-diff"
+                  className="rounded-md border border-status-prevBg bg-bg p-3 text-[11px] text-status-prevFg"
+                >
+                  This node didn&apos;t change the body.
+                </p>
+              )}
             </div>
           )}
 
