@@ -107,10 +107,12 @@ services:
       UPSTREAM_CONNECT_TIMEOUT_SECS: ${UPSTREAM_CONNECT_TIMEOUT_SECS:-2}
       UPSTREAM_READ_TIMEOUT_SECS: ${UPSTREAM_READ_TIMEOUT_SECS:-10}
       # Config paths are relative to the image WORKDIR (/app).
-      FEATURE_MAP_PATH: proxy/config/feature_map.yaml
       SANITIZER_CONFIG_PATH: proxy/config/sanitizer.yaml
-    # Host port 9000 matches the feature_map host `localhost:9000`, so the
-    # browser's Host header resolves the dn-article feature. Hit the demo at
+    # Routing is Site-based: the seeded demo Site (source localhost:9000 ->
+    # dest demo-upstream:8081) matches the browser's Host header and selects the
+    # upstream. ALL features are evaluated per request (no host/path gating;
+    # per-site scoping comes from the site-match decision node). Host port 9000
+    # matches the demo Site's source. Hit the demo at
     # http://localhost:9000/article.html
     ports:
       - "9000:9000"
