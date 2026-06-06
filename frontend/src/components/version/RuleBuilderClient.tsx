@@ -15,7 +15,7 @@ import { NodeConfigDrawer } from "@/components/canvas/config/NodeConfigDrawer";
 import { NodePalette } from "@/components/canvas/palette/NodePalette";
 import { ReadOnlyBanner } from "@/components/canvas/ReadOnlyBanner";
 import { SaveBar } from "@/components/canvas/SaveBar";
-import { TestPanel } from "@/components/canvas/TestPanel";
+import { TestingPanel } from "@/components/canvas/TestingPanel";
 import { UnsavedChangesGuard } from "@/components/canvas/UnsavedChangesGuard";
 import { ApplicabilityForm } from "@/components/version/ApplicabilityForm";
 import { DescriptionEditable } from "@/components/version/DescriptionEditable";
@@ -261,7 +261,7 @@ export function RuleBuilderClient({
 
         <NodeConfigDrawer canvasKey={selected} outcomes={paletteOutcomes} />
 
-        <TestPanel
+        <TestingPanel
           outcomeTitleById={outcomeTitleById}
           featureType={featureType}
         />

@@ -32,6 +32,7 @@ const existingSite: SiteRead = {
   dest_protocol: "http",
   dest_host: "demo-upstream",
   dest_port: 8081,
+  headers: {},
   created_at: "2026-06-06T00:00:00Z",
   updated_at: "2026-06-06T00:00:00Z",
 };
@@ -115,6 +116,7 @@ describe("SiteFormModal", () => {
       dest_protocol: "http",
       dest_host: "demo-upstream",
       dest_port: 8081,
+      headers: {},
     });
   });
 
@@ -201,5 +203,120 @@ describe("SiteFormModal", () => {
     expect(patchBody).toMatchObject({ name: "Renamed Demo" });
     // The modal asks the parent to close on success.
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  // Fill the required base fields so a submit only hinges on the header rows.
+  async function fillBaseFields(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText(/slug/i), "demo-localhost");
+    await user.type(screen.getByLabelText(/^name$/i), "Demo");
+    const hosts = screen.getAllByLabelText(/^host$/i);
+    await user.type(hosts[0], "localhost");
+    await user.type(hosts[1], "demo-upstream");
+    const ports = screen.getAllByLabelText(/^port$/i);
+    await user.type(ports[0], "9000");
+    await user.type(ports[1], "8081");
+  }
+
+  it("serializes two header rows into the headers map on submit", async () => {
+    const user = userEvent.setup();
+    let body: { headers?: Record<string, string> } | null = null;
+    server.use(
+      http.post(SITES_URL, async ({ request }) => {
+        body = (await request.json()) as { headers?: Record<string, string> };
+        return HttpResponse.json({ ...existingSite }, { status: 201 });
+      }),
+    );
+
+    render(<SiteFormModal trigger={trigger} />, { wrapper });
+    await openModal(user);
+    await fillBaseFields(user);
+
+    const addHeader = screen.getByRole("button", { name: /add header/i });
+    await user.click(addHeader);
+    await user.click(addHeader);
+
+    await user.type(screen.getByLabelText(/header name 1/i), "X-One");
+    await user.type(screen.getByLabelText(/header value 1/i), "val1");
+    await user.type(screen.getByLabelText(/header name 2/i), "X-Two");
+    await user.type(screen.getByLabelText(/header value 2/i), "val2");
+
+    await user.click(screen.getByRole("button", { name: /create site/i }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.headers).toEqual({ "X-One": "val1", "X-Two": "val2" });
+  });
+
+  it("blocks submit with an inline error on an invalid header name", async () => {
+    const user = userEvent.setup();
+    const onPost = vi.fn();
+    server.use(
+      http.post(SITES_URL, () => {
+        onPost();
+        return HttpResponse.json({}, { status: 201 });
+      }),
+    );
+
+    render(<SiteFormModal trigger={trigger} />, { wrapper });
+    await openModal(user);
+    await fillBaseFields(user);
+
+    await user.click(screen.getByRole("button", { name: /add header/i }));
+    // Space is not a valid HTTP token character.
+    await user.type(screen.getByLabelText(/header name 1/i), "Bad Header");
+    await user.type(screen.getByLabelText(/header value 1/i), "x");
+
+    await user.click(screen.getByRole("button", { name: /create site/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/invalid header name/i)).toBeInTheDocument(),
+    );
+    expect(onPost).not.toHaveBeenCalled();
+  });
+
+  it("removing a header row drops it from the submitted map", async () => {
+    const user = userEvent.setup();
+    let body: { headers?: Record<string, string> } | null = null;
+    server.use(
+      http.post(SITES_URL, async ({ request }) => {
+        body = (await request.json()) as { headers?: Record<string, string> };
+        return HttpResponse.json({ ...existingSite }, { status: 201 });
+      }),
+    );
+
+    render(<SiteFormModal trigger={trigger} />, { wrapper });
+    await openModal(user);
+    await fillBaseFields(user);
+
+    const addHeader = screen.getByRole("button", { name: /add header/i });
+    await user.click(addHeader);
+    await user.click(addHeader);
+
+    await user.type(screen.getByLabelText(/header name 1/i), "X-Keep");
+    await user.type(screen.getByLabelText(/header value 1/i), "keep");
+    await user.type(screen.getByLabelText(/header name 2/i), "X-Drop");
+    await user.type(screen.getByLabelText(/header value 2/i), "drop");
+
+    // Remove the second row.
+    await user.click(screen.getByRole("button", { name: /remove header 2/i }));
+
+    await user.click(screen.getByRole("button", { name: /create site/i }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.headers).toEqual({ "X-Keep": "keep" });
+  });
+
+  it("seeds header rows from an existing site in edit mode", async () => {
+    render(
+      <SiteFormModal
+        site={{ ...existingSite, headers: { "X-Seed": "seeded" } }}
+        open
+        onOpenChange={vi.fn()}
+      />,
+      { wrapper },
+    );
+    await screen.findByRole("dialog");
+
+    expect(screen.getByLabelText(/header name 1/i)).toHaveValue("X-Seed");
+    expect(screen.getByLabelText(/header value 1/i)).toHaveValue("seeded");
   });
 });

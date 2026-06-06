@@ -168,6 +168,74 @@ describe("TestPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("feeds Advanced inputs (User-Agent, headers, raw body) into the eval context", async () => {
+    const user = userEvent.setup();
+    let captured: { context?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`${PROXY_BASE}/__rre/eval`, async ({ request }) => {
+        captured = (await request.json()) as typeof captured;
+        return HttpResponse.json({
+          matched_node_id: null,
+          traversed_node_ids: [],
+          traversed_edge_ids: [],
+          steps: [],
+        });
+      }),
+    );
+
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
+
+    // Advanced is collapsed by default; expand it.
+    await user.click(screen.getByRole("button", { name: /^advanced$/i }));
+
+    await user.type(screen.getByLabelText("User-Agent"), "iPhone-UA");
+    await user.type(screen.getByLabelText("Test header name 1"), "X-Test");
+    await user.type(screen.getByLabelText("Test header value 1"), "yes");
+    await user.type(
+      screen.getByLabelText("Raw response body"),
+      "<html>raw</html>",
+    );
+
+    await user.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(captured.context).toBeDefined());
+    expect(captured.context).toMatchObject({
+      user_agent: "iPhone-UA",
+      headers: { "X-Test": "yes" },
+      response_body: "<html>raw</html>",
+      content_kind: "html",
+    });
+  });
+
+  it("blocks Run when an Advanced header name is invalid", async () => {
+    const user = userEvent.setup();
+    let posted = false;
+    server.use(
+      http.post(`${PROXY_BASE}/__rre/eval`, () => {
+        posted = true;
+        return HttpResponse.json({
+          matched_node_id: null,
+          traversed_node_ids: [],
+          traversed_edge_ids: [],
+          steps: [],
+        });
+      }),
+    );
+
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
+
+    await user.click(screen.getByRole("button", { name: /^advanced$/i }));
+    await user.type(screen.getByLabelText("Test header name 1"), "Bad Header");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/valid HTTP token/i);
+    expect(screen.getByRole("button", { name: /run test/i })).toBeDisabled();
+    expect(posted).toBe(false);
+  });
+
   it("shows a friendly message when the proxy is unreachable", async () => {
     const user = userEvent.setup();
     server.use(

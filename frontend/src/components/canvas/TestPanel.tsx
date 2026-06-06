@@ -1,16 +1,28 @@
 "use client";
 
 // TestPanel (WS4). A small side panel under the canvas that lets the user enter
-// a synthetic request context (device + meta tags + optional path) for the
-// currently-selected canvas, run it through the proxy's real JDM evaluator, and
-// highlight the traversed node/edge path on the canvas.
+// a synthetic request context (device + meta tags + optional path, plus an
+// Advanced section for request headers, User-Agent, a matched Site, and a raw
+// response body) for the currently-selected canvas, run it through the proxy's
+// real JDM evaluator, and highlight the traversed node/edge path on the canvas.
 //
 // The graph it tests is the LIVE (possibly unsaved) canvas from the store, so
 // edits can be tested before saving. Highlight state is stored on the
 // ruleBuilderStore so the custom nodes/edges can subscribe and glow.
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
+import { SiteSelectControl } from "@/components/canvas/config/SiteSelectControl";
+import {
+  useEvalHighlight,
+  useMatchedOutcome,
+} from "@/components/canvas/evalHighlight";
+import {
+  HeaderRowsEditor,
+  validateHeaderRows,
+  type HeaderRow,
+} from "@/components/canvas/HeaderRowsEditor";
+import { TestPresetBar } from "@/components/canvas/TestPresetBar";
 import { TransformationJourney } from "@/components/canvas/TransformationJourney";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ApiError } from "@/lib/api/client";
@@ -18,15 +30,10 @@ import {
   postEvalTest,
   type DeviceType,
   type EvalContext,
-  type EvalResponse,
 } from "@/lib/api/evalTest";
 import { serializeCanvas } from "@/lib/canvas/serialize";
 import { toUserError } from "@/lib/errors/userError";
-import {
-  useRuleBuilderStore,
-  type TestHighlight,
-} from "@/state/ruleBuilderStore";
-import type { RFEdge } from "@/lib/canvas/types";
+import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 
 interface TestPanelProps {
   // Title resolver so the matched-outcome banner can show a friendly name.
@@ -43,59 +50,28 @@ interface MetaRow {
 
 const DEVICES: DeviceType[] = ["mobile", "desktop", "tablet"];
 
-// The FULL start→END highlight for a run (features-matched-spec §7). Built from
-// the journey node sequence — every journey node id (incl. start + end), plus,
-// for each consecutive journey pair, the live-canvas edge whose
-// (source,target) matches. Falls back to the proxy's traversed_* sets when the
-// journey is empty (older proxies / no journey).
-function fullPathHighlight(
-  res: EvalResponse,
-  edges: RFEdge[],
-): TestHighlight {
-  const reachedEnd =
-    res.journey.length > 0 &&
-    res.journey[res.journey.length - 1].kind === "end";
+// Turn a saved header map back into editable rows (always keep one blank row).
+function rowsFromHeaders(headers: Record<string, string>): HeaderRow[] {
+  const rows = Object.entries(headers).map(([key, value]) => ({ key, value }));
+  return rows.length > 0 ? rows : [{ key: "", value: "" }];
+}
 
-  if (res.journey.length === 0) {
-    return {
-      nodeIds: new Set(res.traversed_node_ids),
-      edgeIds: new Set(res.traversed_edge_ids),
-      outcomeNodeId: res.matched_node_id,
-      deadEnd: !reachedEnd,
-    };
-  }
-
-  const nodeIds = new Set(res.journey.map((s) => s.node_id));
-  const edgeIds = new Set<string>();
-  for (let i = 0; i + 1 < res.journey.length; i++) {
-    const source = res.journey[i].node_id;
-    const target = res.journey[i + 1].node_id;
-    const edge = edges.find(
-      (e) => e.source === source && e.target === target,
-    );
-    if (edge) edgeIds.add(edge.id);
-  }
-  return {
-    nodeIds,
-    edgeIds,
-    outcomeNodeId: res.matched_node_id,
-    deadEnd: !reachedEnd,
-  };
+function metaRowsFromMap(meta: Record<string, string>): MetaRow[] {
+  const rows = Object.entries(meta).map(([key, value]) => ({ key, value }));
+  return rows.length > 0 ? rows : [{ key: "", value: "" }];
 }
 
 export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   const isJson = featureType === "json";
   const selected = useRuleBuilderStore((s) => s.selected);
-  const setTestHighlight = useRuleBuilderStore((s) => s.setTestHighlight);
-  const clearTestHighlight = useRuleBuilderStore((s) => s.clearTestHighlight);
   const highlight = useRuleBuilderStore((s) => s.testHighlight);
   // Live (selected) canvas nodes — passed to the journey so each step can look
   // up its node's config (inputs + plain-English description).
   const canvasNodes = useRuleBuilderStore((s) => s.canvases[s.selected].nodes);
 
-  // The full start→END highlight for the latest run — restored when the
-  // Transformation Journey is collapsed (features-matched-spec §7).
-  const fullPathRef = useRef<TestHighlight | null>(null);
+  // Per-run highlight lifecycle (apply on success / restore on journey collapse /
+  // clear), shared with UrlTestPanel so both highlight identically.
+  const { applyResult, restoreFullPath, clear } = useEvalHighlight();
 
   const [device, setDevice] = useState<DeviceType | "">("");
   const [path, setPath] = useState("");
@@ -104,6 +80,17 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   // value on Run; a parse error is shown inline and blocks the request.
   const [jsonBody, setJsonBody] = useState("");
   const [jsonParseError, setJsonParseError] = useState<string | null>(null);
+
+  // Advanced section: collapsed by default so the panel isn't overwhelming.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [userAgent, setUserAgent] = useState("");
+  const [site, setSite] = useState("");
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([
+    { key: "", value: "" },
+  ]);
+  // Raw response body (content_kind aware). For json this is the JSON body;
+  // for html it's a raw HTML string passed straight to the evaluator.
+  const [rawBody, setRawBody] = useState("");
 
   // Introspect the selected canvas's decision processors so we can hint which
   // inputs actually matter (meta_tags vs device_type).
@@ -118,6 +105,9 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       (n) => n.type === "decisionNode" && n.data.processor.type === "meta_tags",
     ),
   );
+
+  const { headers: headerMap, valid: headersValid } =
+    validateHeaderRows(headerRows);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -163,47 +153,32 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         };
       }
 
+      // Advanced inputs (apply to both content kinds). Only attach defined ones.
+      if (userAgent.trim()) context.user_agent = userAgent.trim();
+      if (site) context.site = site;
+      if (Object.keys(headerMap).length > 0) context.headers = headerMap;
+      if (rawBody.trim()) {
+        context.response_body = rawBody;
+        context.content_kind = isJson ? "json" : "html";
+      }
+
       return postEvalTest({ canvas, context });
     },
     onSuccess: (res) => {
-      // Compute the FULL start→END highlight from the journey node sequence:
-      // every journey node id (incl. start + end) + the live-canvas edges for
-      // each consecutive journey pair. (Fixes the broken highlight that no
-      // longer spanned start→end — features-matched-spec §7.) A path is a
-      // dead-end only when it never reaches an END node — the journey's last
-      // step is the END node when the path completed (the proxy appends it).
+      // Highlight the FULL start→END path for this run (the hook remembers it so
+      // stepping the journey can restore it). A path is a dead-end only when it
+      // never reaches an END node — the proxy appends the END step when it does.
       const { canvases } = useRuleBuilderStore.getState();
-      const hl = fullPathHighlight(res, canvases[selected].edges);
-      fullPathRef.current = hl;
-      setTestHighlight(hl);
+      applyResult(res, canvases[selected].edges);
     },
   });
 
-  // Whether the matched path reached an END node (the path completed). Drives the
-  // result banner: reaching END is success — that terminal body IS the output
-  // (expression-nodes-spec §0/§5), even when no apply_outcome ran on the path.
-  const reachedEnd = useMemo(() => {
-    const j = mutation.data?.journey;
-    return Boolean(j && j.length > 0 && j[j.length - 1].kind === "end");
-  }, [mutation.data]);
-
-  // The matched node is the terminal expression node on the path. The proxy no
-  // longer returns a single outcome id (the canvas now applies an ordered action
-  // pipeline, expression-nodes-spec §0/§5); recover the applied outcome's id from
-  // that node's apply_outcome action in the live canvas so the banner can name it.
-  const matchedTitle = useMemo(() => {
-    const matchedNodeId = mutation.data?.matched_node_id;
-    if (!matchedNodeId) return null;
-    const { canvases } = useRuleBuilderStore.getState();
-    const node = canvases[selected].nodes.find((n) => n.id === matchedNodeId);
-    if (node?.type !== "expressionNode") return null;
-    const { action, outcomeTitle } = node.data;
-    if (action.type !== "apply_outcome") return null;
-    if (outcomeTitle) return outcomeTitle;
-    const outcomeId = action.outcome_id;
-    if (typeof outcomeId !== "string" || !outcomeId) return null;
-    return outcomeTitleById(outcomeId);
-  }, [mutation.data, selected, outcomeTitleById]);
+  // Result-banner facts (reached-END + applied-outcome name), shared with
+  // UrlTestPanel so both panels report the result identically.
+  const { matchedTitle, reachedEnd } = useMatchedOutcome(
+    mutation.data,
+    outcomeTitleById,
+  );
 
   function updateRow(index: number, patch: Partial<MetaRow>) {
     setMetaRows((rows) =>
@@ -220,16 +195,9 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   }
 
   function handleClear() {
-    clearTestHighlight();
-    fullPathRef.current = null;
+    clear();
     mutation.reset();
   }
-
-  // Restore the full start→END highlight (the journey calls this when it
-  // collapses — features-matched-spec §7).
-  const restoreFullPath = useCallback(() => {
-    if (fullPathRef.current) setTestHighlight(fullPathRef.current);
-  }, [setTestHighlight]);
 
   function handleRun() {
     // For JSON features, validate the textarea is parseable BEFORE the request
@@ -249,11 +217,73 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
     mutation.mutate();
   }
 
+  // Test-preset payload (rule kind): only defined fields are included so a
+  // loaded preset round-trips cleanly. Blocked from saving when headers are
+  // invalid.
+  const presetPayload: Record<string, unknown> = { feature_type: featureType };
+  if (device) presetPayload.device_type = device;
+  if (userAgent.trim()) presetPayload.user_agent = userAgent.trim();
+  if (path.trim()) presetPayload.path = path.trim();
+  if (!isJson) {
+    const meta = metaRows.reduce<Record<string, string>>((acc, row) => {
+      const k = row.key.trim();
+      if (k) acc[k] = row.value;
+      return acc;
+    }, {});
+    if (Object.keys(meta).length > 0) presetPayload.meta_tags = meta;
+  }
+  if (Object.keys(headerMap).length > 0) presetPayload.headers = headerMap;
+  if (isJson && jsonBody.trim()) {
+    presetPayload.response_body = jsonBody;
+    presetPayload.content_kind = "json";
+  } else if (rawBody.trim()) {
+    presetPayload.response_body = rawBody;
+    presetPayload.content_kind = isJson ? "json" : "html";
+  }
+  if (site) presetPayload.site = site;
+
+  function handleLoadPreset(payload: unknown) {
+    const p = (payload ?? {}) as Record<string, unknown>;
+    setDevice(
+      typeof p.device_type === "string"
+        ? (p.device_type as DeviceType)
+        : "",
+    );
+    setUserAgent(typeof p.user_agent === "string" ? p.user_agent : "");
+    setPath(typeof p.path === "string" ? p.path : "");
+    setSite(typeof p.site === "string" ? p.site : "");
+    setMetaRows(
+      p.meta_tags && typeof p.meta_tags === "object"
+        ? metaRowsFromMap(p.meta_tags as Record<string, string>)
+        : [{ key: "", value: "" }],
+    );
+    setHeaderRows(
+      p.headers && typeof p.headers === "object"
+        ? rowsFromHeaders(p.headers as Record<string, string>)
+        : [{ key: "", value: "" }],
+    );
+    const body = typeof p.response_body === "string" ? p.response_body : "";
+    if (isJson) {
+      setJsonBody(body);
+      setRawBody("");
+    } else {
+      setRawBody(body);
+      setJsonBody("");
+    }
+    // Open Advanced if the preset uses any advanced field so the user sees it.
+    if (p.user_agent || p.site || p.headers || (p.response_body && !isJson)) {
+      setAdvancedOpen(true);
+    }
+  }
+
   const evalError = mutation.error
     ? toUserError(mutation.error, { surface: "eval" })
     : null;
   const evalRawBody =
     mutation.error instanceof ApiError ? mutation.error.rawBody : undefined;
+
+  const inputClass =
+    "rounded-md border border-status-prevBg px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none";
 
   return (
     <section
@@ -277,6 +307,15 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         <span className="font-semibold">{selected}</span> canvas and run it
         through the evaluator to highlight the path.
       </p>
+
+      <div className="mt-3">
+        <TestPresetBar
+          kind="rule"
+          currentPayload={presetPayload}
+          payloadValid={headersValid}
+          onLoad={handleLoadPreset}
+        />
+      </div>
 
       {isJson ? (
         <div className="mt-3 space-y-3">
@@ -398,11 +437,75 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         </>
       )}
 
+      {/* Advanced — request headers, User-Agent, matched Site, raw body.
+          Collapsed by default so the panel stays simple. */}
+      <div className="mt-3 rounded-md border border-status-prevBg">
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+          className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-nav"
+        >
+          Advanced
+          <span aria-hidden className="text-status-prevFg">
+            {advancedOpen ? "▲" : "▼"}
+          </span>
+        </button>
+        {advancedOpen && (
+          <div className="space-y-3 border-t border-status-prevBg px-3 py-3">
+            <label className="flex flex-col gap-1 text-xs font-medium text-nav">
+              User-Agent
+              <input
+                type="text"
+                value={userAgent}
+                onChange={(e) => setUserAgent(e.target.value)}
+                placeholder="Mozilla/5.0 (iPhone; …)"
+                aria-label="User-Agent"
+                className={inputClass}
+              />
+            </label>
+
+            <div className="flex flex-col gap-1 text-xs font-medium text-nav">
+              Site (for Site Match)
+              <SiteSelectControl
+                id="test-panel-site"
+                value={site}
+                onChange={setSite}
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-nav">
+                Request headers
+              </div>
+              <HeaderRowsEditor rows={headerRows} onChange={setHeaderRows} />
+            </div>
+
+            {/* Raw response body only applies to HTML features — for JSON the
+                "Response JSON" textarea above IS the body (sent as response_json,
+                which the proxy gives precedence over response_body anyway). */}
+            {!isJson && (
+              <label className="flex flex-col gap-1 text-xs font-medium text-nav">
+                Raw HTML body
+                <textarea
+                  value={rawBody}
+                  onChange={(e) => setRawBody(e.target.value)}
+                  placeholder="<html>…</html>"
+                  rows={5}
+                  aria-label="Raw response body"
+                  className="rounded-md border border-status-prevBg px-2 py-1.5 font-mono text-xs focus:border-brand-500 focus:outline-none"
+                />
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mt-4 flex items-center gap-3">
         <button
           type="button"
           onClick={handleRun}
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || !headersValid}
           className="rounded-md bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {mutation.isPending ? "Running…" : "Run test"}

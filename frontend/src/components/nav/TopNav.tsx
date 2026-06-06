@@ -34,6 +34,12 @@ export function TopNav() {
         >
           Sites
         </Link>
+        <Link
+          href="/products/test-presets"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          Test Presets
+        </Link>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />

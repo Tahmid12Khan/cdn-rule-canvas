@@ -29,6 +29,7 @@ const sampleSite: SiteRead = {
   dest_protocol: "http",
   dest_host: "demo-upstream",
   dest_port: 8081,
+  headers: {},
   created_at: "2026-06-06T00:00:00Z",
   updated_at: "2026-06-06T00:00:00Z",
 };
@@ -61,6 +62,23 @@ describe("SitesListClient", () => {
     expect(screen.getByText("http://localhost:9000")).toBeInTheDocument();
     expect(screen.getByText("http://demo-upstream:8081")).toBeInTheDocument();
     expect(screen.getByText("demo-localhost")).toBeInTheDocument();
+    // No custom-headers indicator when the map is empty.
+    expect(screen.queryByText(/header/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a custom-headers count when the site has headers", async () => {
+    const withHeaders: SiteRead = {
+      ...sampleSite,
+      headers: { "X-A": "1", "X-B": "2" },
+    };
+    server.use(
+      http.get(SITES_URL, () => HttpResponse.json(sitesPage([withHeaders]))),
+    );
+    render(<SitesListClient />, { wrapper });
+
+    await waitFor(() =>
+      expect(screen.getByText("2 headers")).toBeInTheDocument(),
+    );
   });
 
   it("renders an error banner with retry when the request fails", async () => {

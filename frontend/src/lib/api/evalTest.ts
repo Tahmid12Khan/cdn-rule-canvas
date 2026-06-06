@@ -36,6 +36,11 @@ export const EvalContext = z.object({
   response_json: z.unknown().optional(),
   response_body: z.string().optional(),
   content_kind: ContentKind.optional(),
+  // Extra synthetic request headers fed into `request_headers` (proxy EvalContext
+  // additive field). A `Cookie` header derives cookies; a `User-Agent` header is
+  // a device fallback. Invalid names/values are dropped defensively by the proxy.
+  site: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 export type EvalContext = z.infer<typeof EvalContext>;
 
@@ -44,6 +49,19 @@ export const EvalRequest = z.object({
   context: EvalContext,
 });
 export type EvalRequest = z.infer<typeof EvalRequest>;
+
+// "Test with a live URL" request. The proxy resolves the URL's host to a
+// configured Site, fetches the REAL upstream (applying the Site's headers),
+// then runs the posted canvas against the response. `headers` are extra test
+// request headers — forwarded to the upstream and fed to the evaluator, but a
+// Site's configured header WINS on a name collision (a test header may not
+// override a site default — enforced by the proxy).
+export const EvalUrlRequest = z.object({
+  canvas: CanvasGraph,
+  url: z.string(),
+  headers: z.record(z.string(), z.string()).default({}),
+});
+export type EvalUrlRequest = z.infer<typeof EvalUrlRequest>;
 
 export const EvalStep = z.object({
   node_id: z.string(),
@@ -110,6 +128,25 @@ export type EvalResponse = z.infer<typeof EvalResponse>;
 // POST to the proxy. Mirrors lib/api/client.request but targets PROXY_BASE.
 export async function postEvalTest(body: EvalRequest): Promise<EvalResponse> {
   const res = await fetch(`${PROXY_BASE}/__rre/eval`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw parseApiError(res.status, res.statusText, text);
+  }
+
+  return EvalResponse.parse(await res.json());
+}
+
+// POST to the proxy's live-URL eval endpoint. Same response shape as postEvalTest
+// (path + Transformation Journey + summary), so the result renders identically.
+export async function postEvalUrlTest(
+  body: EvalUrlRequest,
+): Promise<EvalResponse> {
+  const res = await fetch(`${PROXY_BASE}/__rre/eval-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

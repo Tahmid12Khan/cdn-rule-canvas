@@ -16,6 +16,7 @@ interface SiteCardProps {
 }
 
 export function SiteCard({ site, onEdit, onDelete }: SiteCardProps) {
+  const headerCount = Object.keys(site.headers).length;
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-bg-elevated p-5">
       <div className="flex items-start justify-between gap-3">
@@ -36,6 +37,12 @@ export function SiteCard({ site, onEdit, onDelete }: SiteCardProps) {
           {authority(site.dest_protocol, site.dest_host, site.dest_port)}
         </code>
       </div>
+
+      {headerCount > 0 && (
+        <span className="self-start rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-accent-onMuted">
+          {headerCount} {headerCount === 1 ? "header" : "headers"}
+        </span>
+      )}
 
       <div className="mt-1 flex items-center gap-2">
         <button

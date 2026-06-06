@@ -15,6 +15,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import {
   createSite,
+  MAX_HEADER_NAME_LEN,
+  MAX_HEADER_VALUE_LEN,
+  MAX_HEADERS,
   SiteCreate,
   SiteProtocol,
   type SiteRead,
@@ -32,9 +35,66 @@ type FieldKey =
   | "dest_protocol"
   | "dest_host"
   | "dest_port";
-type FieldErrors = Partial<Record<FieldKey | "form", string>>;
+type FieldErrors = Partial<Record<FieldKey | "form" | "headers", string>>;
 
 const PROTOCOLS = SiteProtocol.options;
+
+// Mirror the backend's header validation (also enforced by the Zod schema) so
+// we can block before submit with an inline error.
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HEADER_VALUE_CONTROL_RE = /[\x00-\x1f\x7f]/;
+
+// A single editable header row. `id` keeps React keys stable across reorders
+// when rows are added/removed.
+interface HeaderRow {
+  id: string;
+  name: string;
+  value: string;
+}
+
+let headerRowSeq = 0;
+function newHeaderRow(name = "", value = ""): HeaderRow {
+  headerRowSeq += 1;
+  return { id: `hdr-${headerRowSeq}`, name, value };
+}
+
+function rowsFromHeaders(headers: Record<string, string>): HeaderRow[] {
+  return Object.entries(headers).map(([name, value]) => newHeaderRow(name, value));
+}
+
+// Serialize rows into a header map: drop fully-empty rows, last write wins on
+// duplicate names. Returns null + an error message if any non-empty row fails
+// validation (mirrors the backend).
+function serializeHeaders(
+  rows: HeaderRow[],
+): { headers: Record<string, string> } | { error: string } {
+  const nonEmpty = rows.filter(
+    (r) => r.name.trim() !== "" || r.value.trim() !== "",
+  );
+  for (const row of nonEmpty) {
+    const name = row.name.trim();
+    if (name.length < 1 || name.length > MAX_HEADER_NAME_LEN) {
+      return { error: `Header name must be 1–${MAX_HEADER_NAME_LEN} characters` };
+    }
+    if (!HEADER_NAME_RE.test(name)) {
+      return { error: `Invalid header name "${name}" (use a valid HTTP token)` };
+    }
+    if (row.value.length > MAX_HEADER_VALUE_LEN) {
+      return {
+        error: `Header value must be at most ${MAX_HEADER_VALUE_LEN} characters`,
+      };
+    }
+    if (HEADER_VALUE_CONTROL_RE.test(row.value)) {
+      return { error: `Header "${name}" value must not contain control characters` };
+    }
+  }
+  const headers: Record<string, string> = {};
+  for (const row of nonEmpty) headers[row.name.trim()] = row.value;
+  if (Object.keys(headers).length > MAX_HEADERS) {
+    return { error: `At most ${MAX_HEADERS} headers are allowed` };
+  }
+  return { headers };
+}
 
 const inputClass =
   "w-full rounded-md border border-status-prevBg px-3 py-2 text-sm text-nav shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60";
@@ -107,6 +167,9 @@ export function SiteFormModal({
   const [form, setForm] = useState<SiteFormState>(() =>
     site ? stateFromSite(site) : emptyState(),
   );
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>(() =>
+    site ? rowsFromHeaders(site.headers) : [],
+  );
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const queryClient = useQueryClient();
@@ -116,6 +179,7 @@ export function SiteFormModal({
   useEffect(() => {
     if (open) {
       setForm(site ? stateFromSite(site) : emptyState());
+      setHeaderRows(site ? rowsFromHeaders(site.headers) : []);
       setErrors({});
     }
   }, [open, site]);
@@ -157,8 +221,29 @@ export function SiteFormModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function setHeaderField(id: string, key: "name" | "value", value: string) {
+    setHeaderRows((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    );
+  }
+
+  function addHeaderRow() {
+    setHeaderRows((prev) => [...prev, newHeaderRow()]);
+  }
+
+  function removeHeaderRow(id: string) {
+    setHeaderRows((prev) => prev.filter((row) => row.id !== id));
+  }
+
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Validate + serialize headers first so an inline header error blocks
+    // submit even when the rest of the form is valid.
+    const serialized = serializeHeaders(headerRows);
+    if ("error" in serialized) {
+      setErrors({ headers: serialized.error });
+      return;
+    }
     const candidate = {
       slug: form.slug,
       name: form.name,
@@ -168,13 +253,16 @@ export function SiteFormModal({
       dest_protocol: form.dest_protocol,
       dest_host: form.dest_host,
       dest_port: form.dest_port,
+      headers: serialized.headers,
     };
     const parsed = SiteCreate.safeParse(candidate);
     if (!parsed.success) {
       const next: FieldErrors = {};
       for (const issue of parsed.error.issues) {
         const field = issue.path[0];
-        if (typeof field === "string") {
+        if (field === "headers") {
+          next.headers = next.headers ?? issue.message;
+        } else if (typeof field === "string") {
           next[field as FieldKey] = next[field as FieldKey] ?? issue.message;
         }
       }
@@ -363,6 +451,60 @@ export function SiteFormModal({
               )}
               {errors.dest_port && (
                 <p className={errorClass}>{errors.dest_port}</p>
+              )}
+            </fieldset>
+
+            <fieldset className="flex flex-col gap-2 rounded-md border border-status-prevBg p-3">
+              <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-status-prevFg">
+                Custom headers
+              </legend>
+              <p className="text-xs text-status-prevFg">
+                Injected on every forwarded request. A configured value
+                overrides any client-supplied same-named header.
+              </p>
+              {headerRows.length > 0 && (
+                <ul className="flex flex-col gap-2">
+                  {headerRows.map((row, index) => (
+                    <li key={row.id} className="flex items-start gap-2">
+                      <input
+                        aria-label={`Header name ${index + 1}`}
+                        value={row.name}
+                        onChange={(e) =>
+                          setHeaderField(row.id, "name", e.target.value)
+                        }
+                        placeholder="X-Forwarded-Host"
+                        className={`${inputClass} flex-1`}
+                      />
+                      <input
+                        aria-label={`Header value ${index + 1}`}
+                        value={row.value}
+                        onChange={(e) =>
+                          setHeaderField(row.id, "value", e.target.value)
+                        }
+                        placeholder="example.com"
+                        className={`${inputClass} flex-1`}
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Remove header ${index + 1}`}
+                        onClick={() => removeHeaderRow(row.id)}
+                        className="shrink-0 rounded-md border border-status-prevBg px-2 py-2 text-sm font-medium text-danger transition hover:bg-danger/10"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                onClick={addHeaderRow}
+                className="self-start rounded-md border border-status-prevBg px-3 py-1 text-xs font-medium text-nav transition hover:bg-status-prevBg/30"
+              >
+                + Add header
+              </button>
+              {errors.headers && (
+                <p className={errorClass}>{errors.headers}</p>
               )}
             </fieldset>
 

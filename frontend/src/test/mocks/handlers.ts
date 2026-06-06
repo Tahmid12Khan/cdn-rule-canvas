@@ -15,4 +15,9 @@ export const handlers = [
   http.get(`${API_BASE}/api/v1/node-types`, () =>
     HttpResponse.json(NODE_TYPES_FIXTURE),
   ),
+  // Test-preset library default: empty. The TestPresetBar (embedded in both Test
+  // panels) lists presets on mount; tests that care override this per-test.
+  http.get(`${API_BASE}/api/v1/test-presets`, () =>
+    HttpResponse.json({ items: [], page: 1, page_size: 100, total: 0 }),
+  ),
 ];
