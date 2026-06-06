@@ -49,6 +49,9 @@ pub enum AppError {
     /// Site slug missing. → 404
     #[error("{0}")]
     SiteNotFound(String),
+    /// Test-preset slug missing. → 404
+    #[error("{0}")]
+    TestPresetNotFound(String),
     /// Version (by number or id) missing. → 404
     #[error("{0}")]
     VersionNotFound(String),
@@ -85,6 +88,7 @@ impl AppError {
             AppError::Validation { .. } => "VALIDATION_ERROR",
             AppError::FeatureNotFound(_) => "FEATURE_NOT_FOUND",
             AppError::SiteNotFound(_) => "SITE_NOT_FOUND",
+            AppError::TestPresetNotFound(_) => "TEST_PRESET_NOT_FOUND",
             AppError::VersionNotFound(_) => "VERSION_NOT_FOUND",
             AppError::OutcomeNotFound(_) => "OUTCOME_NOT_FOUND",
             AppError::ComponentNotFound(_) => "COMPONENT_NOT_FOUND",
@@ -103,6 +107,7 @@ impl AppError {
             AppError::Validation { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::FeatureNotFound(_)
             | AppError::SiteNotFound(_)
+            | AppError::TestPresetNotFound(_)
             | AppError::VersionNotFound(_)
             | AppError::OutcomeNotFound(_)
             | AppError::ComponentNotFound(_)

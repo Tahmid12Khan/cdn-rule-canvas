@@ -7,7 +7,7 @@ use crate::models::site::Site;
 
 /// Column list shared by all `SELECT`/`RETURNING` clauses.
 const COLS: &str = "slug, name, source_protocol, source_host, source_port, \
-     dest_protocol, dest_host, dest_port, created_at, updated_at";
+     dest_protocol, dest_host, dest_port, headers, created_at, updated_at";
 
 /// Insert a new site. The caller maps a unique-violation (pg `23505`) to a
 /// conflict; this repository surfaces the raw [`sqlx::Error`].
@@ -22,12 +22,13 @@ pub async fn insert(
     dest_protocol: &str,
     dest_host: &str,
     dest_port: i32,
+    headers: &serde_json::Value,
 ) -> Result<Site, sqlx::Error> {
     let sql = format!(
         "INSERT INTO rre.sites \
             (slug, name, source_protocol, source_host, source_port, \
-             dest_protocol, dest_host, dest_port) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {COLS}"
+             dest_protocol, dest_host, dest_port, headers) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {COLS}"
     );
     sqlx::query_as::<_, Site>(sqlx::AssertSqlSafe(sql))
         .bind(slug)
@@ -38,6 +39,7 @@ pub async fn insert(
         .bind(dest_protocol)
         .bind(dest_host)
         .bind(dest_port)
+        .bind(headers)
         .fetch_one(pool)
         .await
 }
@@ -98,6 +100,7 @@ pub async fn update(
     dest_protocol: Option<&str>,
     dest_host: Option<&str>,
     dest_port: Option<i32>,
+    headers: Option<&serde_json::Value>,
 ) -> Result<Option<Site>, sqlx::Error> {
     let sql = format!(
         "UPDATE rre.sites SET \
@@ -108,6 +111,7 @@ pub async fn update(
             dest_protocol = COALESCE($6, dest_protocol), \
             dest_host = COALESCE($7, dest_host), \
             dest_port = COALESCE($8, dest_port), \
+            headers = COALESCE($9, headers), \
             updated_at = now() \
          WHERE slug = $1 RETURNING {COLS}"
     );
@@ -120,6 +124,7 @@ pub async fn update(
         .bind(dest_protocol)
         .bind(dest_host)
         .bind(dest_port)
+        .bind(headers)
         .fetch_optional(pool)
         .await
 }

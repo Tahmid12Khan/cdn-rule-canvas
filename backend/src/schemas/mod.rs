@@ -14,6 +14,7 @@ pub mod node_type;
 pub mod outcome;
 pub mod rule_graph;
 pub mod site;
+pub mod test_preset;
 pub mod version;
 
 pub use pagination::{Page, PageParams};

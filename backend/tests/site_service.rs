@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::collections::HashMap;
+
 use rre_backend::{
     error::AppError,
     schemas::{
@@ -12,6 +14,14 @@ use rre_backend::{
     },
     services::site_service,
 };
+
+/// Build a header map from `(name, value)` pairs.
+fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
 
 fn create_input(slug: &str, name: &str) -> SiteCreate {
     SiteCreate {
@@ -23,6 +33,7 @@ fn create_input(slug: &str, name: &str) -> SiteCreate {
         dest_protocol: "http".to_string(),
         dest_host: "demo-upstream".to_string(),
         dest_port: 8081,
+        headers: None,
     }
 }
 
@@ -210,4 +221,161 @@ async fn delete_missing_is_not_found() {
         .await
         .expect_err("expected not found");
     assert!(matches!(err, AppError::SiteNotFound(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_with_headers_roundtrips() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let mut input = create_input("demo-localhost", "Demo");
+    input.headers = Some(headers(&[
+        ("X-Forwarded-Host", "news.example.com"),
+        ("X-RRE-Tenant", "acme"),
+    ]));
+
+    let created = site_service::create(pool, input).await.expect("create");
+    assert_eq!(
+        created.headers.get("X-Forwarded-Host").map(String::as_str),
+        Some("news.example.com")
+    );
+    assert_eq!(created.headers.len(), 2);
+
+    let fetched = site_service::get(pool, "demo-localhost")
+        .await
+        .expect("get");
+    assert_eq!(fetched.headers, created.headers);
+}
+
+#[tokio::test]
+async fn create_without_headers_defaults_to_empty_map() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let created = site_service::create(pool, create_input("demo-localhost", "Demo"))
+        .await
+        .expect("create");
+    assert!(created.headers.is_empty());
+}
+
+#[tokio::test]
+async fn create_with_crlf_header_value_is_validation_error() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let mut input = create_input("demo-localhost", "Demo");
+    input.headers = Some(headers(&[("X-Foo", "a\r\nInjected: 1")]));
+
+    let err = site_service::create(pool, input)
+        .await
+        .expect_err("expected validation error");
+    assert!(matches!(err, AppError::Validation { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_with_invalid_header_name_is_validation_error() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let mut input = create_input("demo-localhost", "Demo");
+    input.headers = Some(headers(&[("Bad Name", "1")]));
+
+    let err = site_service::create(pool, input)
+        .await
+        .expect_err("expected validation error");
+    assert!(matches!(err, AppError::Validation { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_with_too_many_headers_is_validation_error() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let many: HashMap<String, String> = (0..33)
+        .map(|i| (format!("X-H-{i}"), "v".to_string()))
+        .collect();
+    let mut input = create_input("demo-localhost", "Demo");
+    input.headers = Some(many);
+
+    let err = site_service::create(pool, input)
+        .await
+        .expect_err("expected validation error");
+    assert!(matches!(err, AppError::Validation { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn patch_headers_replaces_map_and_none_leaves_unchanged() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    let mut input = create_input("demo-localhost", "Demo");
+    input.headers = Some(headers(&[("X-One", "1"), ("X-Two", "2")]));
+    site_service::create(pool, input).await.expect("create");
+
+    // PATCH with headers replaces the whole map.
+    let replaced = site_service::update(
+        pool,
+        "demo-localhost",
+        SiteUpdate {
+            headers: Some(headers(&[("X-Three", "3")])),
+            ..SiteUpdate::default()
+        },
+    )
+    .await
+    .expect("update headers");
+    assert_eq!(replaced.headers, headers(&[("X-Three", "3")]));
+
+    // PATCH without headers (changing only name) leaves the map unchanged.
+    let untouched = site_service::update(
+        pool,
+        "demo-localhost",
+        SiteUpdate {
+            name: Some("Renamed".to_string()),
+            ..SiteUpdate::default()
+        },
+    )
+    .await
+    .expect("update name only");
+    assert_eq!(untouched.name, "Renamed");
+    assert_eq!(untouched.headers, headers(&[("X-Three", "3")]));
+}
+
+#[tokio::test]
+async fn patch_with_invalid_header_value_is_validation_error() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    site_service::create(pool, create_input("demo-localhost", "Demo"))
+        .await
+        .expect("create");
+
+    let err = site_service::update(
+        pool,
+        "demo-localhost",
+        SiteUpdate {
+            headers: Some(headers(&[("X-Foo", "bad\nvalue")])),
+            ..SiteUpdate::default()
+        },
+    )
+    .await
+    .expect_err("expected validation error");
+    assert!(matches!(err, AppError::Validation { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_with_forbidden_header_name_is_validation_error() {
+    let db = common::setup().await;
+    let pool = &db.state.pool;
+
+    // Overriding a proxy-managed routing/framing header is rejected
+    // (case-insensitive) before any persistence.
+    for name in ["Host", "Content-Length"] {
+        let mut input = create_input("demo-localhost", "Demo");
+        input.headers = Some(headers(&[(name, "evil")]));
+
+        let err = site_service::create(pool, input)
+            .await
+            .expect_err("expected validation error");
+        assert!(matches!(err, AppError::Validation { .. }), "got {err:?}");
+    }
 }

@@ -7,7 +7,7 @@
 use utoipa::OpenApi;
 
 use crate::{
-    api::v1::{components, features, health, node_types, outcomes, sites, versions},
+    api::v1::{components, features, health, node_types, outcomes, sites, test_presets, versions},
     error::{ErrorBody, ErrorEnvelope, ValidationDetail},
     models::enums::{FeatureType, Placement, VersionStatus},
     schemas::{
@@ -25,6 +25,7 @@ use crate::{
         outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem},
         rule_graph::{Branch, CanvasGraph, Edge, Node, Position, ProcessorConfig, RuleGraph},
         site::{SiteCreate, SiteRead, SiteUpdate},
+        test_preset::{TestPresetCreate, TestPresetRead, TestPresetUpdate},
         version::{
             PublishEnvironment, PublishRequest, VersionCreate, VersionRead, VersionSummary,
             VersionUpdate,
@@ -72,6 +73,11 @@ use crate::{
         sites::get,
         sites::update,
         sites::delete,
+        test_presets::create,
+        test_presets::list,
+        test_presets::get,
+        test_presets::update,
+        test_presets::delete,
     ),
     components(schemas(
         // Infra / error envelope
@@ -91,6 +97,10 @@ use crate::{
         SiteCreate,
         SiteUpdate,
         SiteRead,
+        // Test preset
+        TestPresetCreate,
+        TestPresetUpdate,
+        TestPresetRead,
         // Version
         VersionCreate,
         VersionUpdate,
@@ -138,6 +148,7 @@ use crate::{
         (name = "node-types", description = "Node-type manifest"),
         (name = "features", description = "Feature CRUD + active version"),
         (name = "sites", description = "Site (host config) CRUD"),
+        (name = "test_presets", description = "Test-preset library CRUD"),
         (name = "versions", description = "Version lifecycle"),
         (name = "outcomes", description = "Outcomes and their components"),
         (name = "components", description = "Flat component operations"),

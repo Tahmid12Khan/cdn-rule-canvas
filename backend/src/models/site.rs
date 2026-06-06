@@ -24,6 +24,10 @@ pub struct Site {
     pub dest_host: String,
     /// Destination port for the upstream forward (1..=65535).
     pub dest_port: i32,
+    /// Custom request headers injected when forwarding, stored as JSONB
+    /// (`{ "Header-Name": "value" }`). Typed into a `HashMap<String, String>` on
+    /// read in the service layer (default `{}`).
+    pub headers: serde_json::Value,
     /// Creation timestamp.
     pub created_at: DateTime<Utc>,
     /// Last-update timestamp.

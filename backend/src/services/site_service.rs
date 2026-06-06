@@ -13,7 +13,7 @@ use crate::{
     repositories::site_repository as repo,
     schemas::{
         pagination::{Page, PageParams},
-        site::{SiteCreate, SiteRead, SiteUpdate},
+        site::{self, SiteCreate, SiteRead, SiteUpdate},
     },
 };
 
@@ -23,6 +23,11 @@ const PG_UNIQUE_VIOLATION: &str = "23505";
 /// Create a site. Duplicate slug / name / source → [`AppError::SlugConflict`].
 pub async fn create(pool: &PgPool, input: SiteCreate) -> AppResult<SiteRead> {
     input.validate().map_err(AppError::from)?;
+
+    // Custom headers default to an empty map; validated before persist.
+    let headers = input.headers.unwrap_or_default();
+    site::validate_headers(&headers)?;
+    let headers_json = site::headers_to_json(&headers);
 
     match repo::insert(
         pool,
@@ -34,6 +39,7 @@ pub async fn create(pool: &PgPool, input: SiteCreate) -> AppResult<SiteRead> {
         &input.dest_protocol,
         &input.dest_host,
         input.dest_port,
+        &headers_json,
     )
     .await
     {
@@ -79,6 +85,16 @@ pub async fn update(pool: &PgPool, slug: &str, input: SiteUpdate) -> AppResult<S
         return get(pool, slug).await;
     }
 
+    // `Some(map)` replaces the stored headers wholesale; `None` leaves them
+    // unchanged (the repo COALESCEs a NULL bind). Validate when present.
+    let headers_json = match &input.headers {
+        Some(headers) => {
+            site::validate_headers(headers)?;
+            Some(site::headers_to_json(headers))
+        }
+        None => None,
+    };
+
     match repo::update(
         pool,
         slug,
@@ -89,6 +105,7 @@ pub async fn update(pool: &PgPool, slug: &str, input: SiteUpdate) -> AppResult<S
         input.dest_protocol.as_deref(),
         input.dest_host.as_deref(),
         input.dest_port,
+        headers_json.as_ref(),
     )
     .await
     {
@@ -140,6 +157,7 @@ mod tests {
             dest_protocol: "http".to_string(),
             dest_host: "demo-upstream".to_string(),
             dest_port: 8081,
+            headers: None,
         }
     }
 

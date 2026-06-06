@@ -81,6 +81,8 @@ async fn create_site_returns_201_with_site_read_body() {
     assert_eq!(body["dest_protocol"], "http");
     assert_eq!(body["dest_host"], "demo-upstream");
     assert_eq!(body["dest_port"], 8081);
+    // No headers supplied → empty map (not null/absent).
+    assert_eq!(body["headers"], json!({}));
     assert!(body["created_at"].is_string());
     assert!(body["updated_at"].is_string());
 }
@@ -319,4 +321,119 @@ async fn delete_site_returns_204_then_get_404() {
     .await;
     assert_eq!(after, StatusCode::NOT_FOUND);
     assert_eq!(body["error"]["code"], "SITE_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn create_site_with_headers_roundtrips() {
+    let db = common::setup().await;
+    let mut payload = site_payload("demo-localhost", "Demo");
+    payload["headers"] = json!({
+        "X-Forwarded-Host": "news.example.com",
+        "X-RRE-Tenant": "acme"
+    });
+
+    let (status, body) = send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["headers"]["X-Forwarded-Host"], "news.example.com");
+    assert_eq!(body["headers"]["X-RRE-Tenant"], "acme");
+
+    let (get_status, get_body) = send(
+        db.state.clone(),
+        "GET",
+        "/api/v1/sites/demo-localhost",
+        None,
+    )
+    .await;
+    assert_eq!(get_status, StatusCode::OK);
+    assert_eq!(get_body["headers"], body["headers"]);
+}
+
+#[tokio::test]
+async fn create_site_with_crlf_header_value_returns_422() {
+    let db = common::setup().await;
+    let mut payload = site_payload("demo-localhost", "Demo");
+    payload["headers"] = json!({ "X-Foo": "a\r\nInjected: 1" });
+
+    let (status, body) = send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+    let details = body["error"]["details"].as_array().unwrap();
+    assert_eq!(details[0]["loc"], "headers[\"X-Foo\"]");
+    assert_eq!(details[0]["rule_id"], "header_value_control_char");
+}
+
+#[tokio::test]
+async fn create_site_with_invalid_header_name_returns_422() {
+    let db = common::setup().await;
+    let mut payload = site_payload("demo-localhost", "Demo");
+    payload["headers"] = json!({ "Bad Name": "1" });
+
+    let (status, body) = send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+    let details = body["error"]["details"].as_array().unwrap();
+    assert_eq!(details[0]["rule_id"], "header_name_invalid");
+}
+
+#[tokio::test]
+async fn create_site_with_forbidden_header_name_returns_422() {
+    let db = common::setup().await;
+    let mut payload = site_payload("demo-localhost", "Demo");
+    // A valid HTTP token, but a proxy-managed routing header → rejected.
+    payload["headers"] = json!({ "Host": "evil.example.com" });
+
+    let (status, body) = send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+    let details = body["error"]["details"].as_array().unwrap();
+    assert_eq!(details[0]["rule_id"], "header_name_forbidden");
+    assert_eq!(details[0]["loc"], "headers[\"Host\"]");
+}
+
+#[tokio::test]
+async fn create_site_with_too_many_headers_returns_422() {
+    let db = common::setup().await;
+    let mut map = serde_json::Map::new();
+    for i in 0..33 {
+        map.insert(format!("X-H-{i}"), json!("v"));
+    }
+    let mut payload = site_payload("demo-localhost", "Demo");
+    payload["headers"] = Value::Object(map);
+
+    let (status, body) = send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+    let details = body["error"]["details"].as_array().unwrap();
+    assert_eq!(details[0]["rule_id"], "headers_too_many");
+}
+
+#[tokio::test]
+async fn patch_headers_replaces_map_and_omitting_leaves_unchanged() {
+    let db = common::setup().await;
+    let mut payload = site_payload("demo-localhost", "Demo");
+    payload["headers"] = json!({ "X-One": "1", "X-Two": "2" });
+    send(db.state.clone(), "POST", "/api/v1/sites", Some(payload)).await;
+
+    // PATCH with headers replaces the whole map.
+    let (status, body) = send(
+        db.state.clone(),
+        "PATCH",
+        "/api/v1/sites/demo-localhost",
+        Some(json!({ "headers": { "X-Three": "3" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["headers"], json!({ "X-Three": "3" }));
+
+    // PATCH without headers (name only) leaves the map unchanged.
+    let (status2, body2) = send(
+        db.state.clone(),
+        "PATCH",
+        "/api/v1/sites/demo-localhost",
+        Some(json!({ "name": "Renamed" })),
+    )
+    .await;
+    assert_eq!(status2, StatusCode::OK);
+    assert_eq!(body2["name"], "Renamed");
+    assert_eq!(body2["headers"], json!({ "X-Three": "3" }));
 }

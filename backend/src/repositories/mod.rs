@@ -7,4 +7,5 @@ pub mod component_repository;
 pub mod feature_repository;
 pub mod outcome_repository;
 pub mod site_repository;
+pub mod test_preset_repository;
 pub mod version_repository;
