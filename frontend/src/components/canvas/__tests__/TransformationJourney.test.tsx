@@ -255,6 +255,63 @@ describe("TransformationJourney", () => {
     expect(body()).toContain('"body": [');
   });
 
+  it("first step has no diff section (no predecessor)", async () => {
+    const user = userEvent.setup();
+    renderJourney();
+    await expand(user);
+
+    expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
+    expect(screen.queryByTestId("journey-diff")).not.toBeInTheDocument();
+  });
+
+  it("shows a no-change note when the node didn't mutate the body", async () => {
+    const user = userEvent.setup();
+    renderJourney();
+    await expand(user);
+
+    // Step 2: the decision leaves the body identical to step 1.
+    await user.click(screen.getByRole("button", { name: "Next node" }));
+    expect(screen.getByTestId("journey-diff")).toHaveTextContent(
+      "didn't change the body",
+    );
+  });
+
+  it("diffs added lines against the previous step", async () => {
+    const user = userEvent.setup();
+    renderJourney();
+    await expand(user);
+
+    // Walk to the END step, which adds `paywall_show` to the body.
+    const next = screen.getByRole("button", { name: "Next node" });
+    await user.click(next);
+    await user.click(next);
+    await user.click(next);
+    expect(screen.getByText("Step 4 of 4")).toBeInTheDocument();
+
+    const diff = screen.getByTestId("journey-diff");
+    expect(diff).toHaveTextContent("paywall_show");
+    // The new key shows up as a git-diff added (green-tinted) line.
+    const added = Array.from(diff.querySelectorAll(".bg-status-liveBg"));
+    expect(
+      added.some((el) => el.textContent?.includes("paywall_show")),
+    ).toBe(true);
+  });
+
+  it("diffs removed lines against the previous step", async () => {
+    const user = userEvent.setup();
+    renderJourney();
+    await expand(user);
+
+    // Step 3: trim_json empties the body array → its items are removed.
+    await user.click(screen.getByRole("button", { name: "Next node" }));
+    await user.click(screen.getByRole("button", { name: "Next node" }));
+    expect(screen.getByText("Step 3 of 4")).toBeInTheDocument();
+
+    const diff = screen.getByTestId("journey-diff");
+    const removed = diff.querySelector(".bg-danger-bg");
+    expect(removed).not.toBeNull();
+  });
+
   it("renders raw string body for HTML features", async () => {
     const user = userEvent.setup();
     const htmlJourney: JourneyStep[] = [
