@@ -29,8 +29,9 @@ Then open:
 - API docs — http://localhost:8000/docs
 
 `make up` builds every image, waits for the backend, and seeds the demo feature
-`dn-article` (a LIVE version the proxy serves + an editable DRAFT). Tear down
-with `make down` (`make down-clean` also drops the database volume). No Make?
+`demo-article` (a LIVE version the proxy serves + an editable DRAFT) and a demo
+Site (localhost:9000 → demo-upstream:8081). Tear down with `make down` 
+(`make down-clean` also drops the database volume). No Make?
 Use `./scripts/up.sh` / `./scripts/down.sh` directly.
 
 ## Services & ports
@@ -83,7 +84,7 @@ each canvas into a [zen](https://github.com/gorules/zen) JDM `DecisionContent`
 
 ### 1. The domain model — how a rule is structured
 
-A **feature** is the unit an author owns (e.g. `dn-article`), keyed by slug and
+A **feature** is the unit an author owns (e.g. `demo-article`), keyed by slug and
 typed `html` or `json`. A feature holds many **versions**; each version has a
 status (`draft → staging → live → prev`) and carries the actual rule logic.
 Everything below a version is JSONB or child rows in Postgres schema `rre`:
@@ -144,25 +145,28 @@ failure panics into the client.
  reader request
       │
       ▼
- 1. feature_map.resolve(host, path) ─▶ feature_id        miss ─▶ pass-through
+ 1. parse Host header ─▶ site_map.resolve(source_host:port) ─▶ upstream destination
+                           miss ─▶ fallback to default upstream
  2. classifier(headers) ─▶ Canvas (cookie rre_user_type, default anonymous)
- 3. backend.active_version(feature_id, live) ─▶ snapshot  (moka cache, TTL 30s)
-                                                          err/none ─▶ fail-open
+ 3. backend.fetch(ALL features, live) ─▶ cached list (moka cache, TTL 30s)
+                                           err/none ─▶ fail-open
  4. fetch upstream response                               non-HTML ─▶ pass-through
- 5. translate canvas ─▶ zen DecisionContent (compiled cache, ≤256 LRU)
+ 5. for each feature: translate canvas ─▶ zen DecisionContent (compiled cache, ≤256 LRU)
        └─ evaluate in spawn_blocking + current-thread rt  ─▶ outcomeId? (or none)
  6. apply matched outcome's components to body            per-component fail-open
        (order_index ASC; html via lol_html, json via path edits; idempotent)
  7. re-encode (gzip) ─▶ response + X-RRE-Apply-Status + X-RRE-Trace-Id
 ```
 
+- **Step 1**: Sites provide host-based routing; the `site_match` decision node
+  enables per-site branching in rule graphs.
 - **Step 2 is the isolation boundary**: an anonymous request evaluates *only*
   `rule_graph.anonymous` — no code path lets one class reach another's graph.
 - **Step 5** is the zen handoff. Each Decision node → a `CustomNode` +
   `SwitchNode` pair; each `apply_outcome` expression → an `ExpressionNode` +
   `OutputNode` emitting `{ outcomeId }`. A single `CanvasNodeAdapter` dispatches
   custom nodes to pure `CanvasProcessor` impls (`meta_tags`, `device_type`,
-  `article_url`, …). zen evaluation is `!Send`, so it runs off the async runtime
+  `site_match`, …). zen evaluation is `!Send`, so it runs off the async runtime
   in `spawn_blocking`.
 - **Step 6** turns the matched outcome's components into edits. HTML rewrites
   stream through `lol_html`; injected HTML is sanitized (`ammonia`). Every

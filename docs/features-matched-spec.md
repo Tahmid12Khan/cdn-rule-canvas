@@ -30,14 +30,14 @@ detail here seems underspecified.
 
 ## 1. Locked definitions
 
-- **feature_id**: the slug (`dn-json-article`, `dn-article`). Used as the key in
+- **feature_id**: the slug (`demo-json-article`, `demo-article`). Used as the key in
   headers and in `features_matched` (header/JSON-safe — names have spaces, slugs
   don't). The spec's `{feature_name}` placeholder == feature_id.
 - **"matched" feature**: a feature whose evaluated path produced **≥1 expression
   action** (i.e. `outcome_ids` is non-empty). A feature that resolves the route
   but whose decision goes straight to END with no expression node is NOT matched
-  → no header, no `features_matched` entry. (dn-article on a JSON response =
-  not matched; dn-json-article on that response = matched.)
+  → no header, no `features_matched` entry. (demo-article on a JSON response =
+  not matched; demo-json-article on that response = matched.)
 - **outcome node**: in this spec "outcome" == **expression node** (the action
   nodes: `trim_json`, `add_attribute`, `apply_outcome`, …). Decision / start / end
   nodes are NEVER outcomes.
@@ -209,7 +209,7 @@ show BOTH:
   - `trim_json` → "Trimmed the array at `$.body` to at most 0 items."
   - `add_attribute` → "Set `$.paywall_show` to `<html>paywall_showed</html>`."
   - `apply_outcome` → "Applied the outcome ‘<label>’."
-  - decision → "Checked `$.api` equals `dn-article` → matched (yes)."
+  - decision → "Checked `$.api` equals `demo-article` → matched (yes)."
   - start/end → "Start of the flow." / "End of the flow — this is the final output."
 
 Inputs come from the live canvas node (find by `node_id` in the selected canvas)
@@ -240,13 +240,13 @@ byte-identical (minus `ToSchema`).
 - `make backend-check` — incl. empty-canvas normalization test.
 - `make frontend-check` (lint + typecheck + vitest) — journey collapse + rich step + full-path highlight tests.
 - **Live E2E** (stack already runs natively via `scripts/dev.sh`; proxy upstream
-  is `localhost:9001` → dn.no):
+  is `localhost:9001`):
   - JSON: `curl -s -D - http://localhost:9000/proxy/v2/content/2-1-1997318` →
-    header `x-rre-feature-dn-json-article: true`; body has
-    `rre.features_matched["dn-json-article"]` with outcome_ids `["t_body","a_pw"]`,
+    header `x-rre-feature-demo-json-article: true`; body has
+    `rre.features_matched["demo-json-article"]` with outcome_ids `["t_body","a_pw"]`,
     labels, `time_took_ms` `d.dd`, `expensive_nodes` top-3 desc.
   - HTML: `curl -s http://localhost:9000/article.html` → ends with a
-    `<script>window.rre.features_matched=…</script>`; `x-rre-feature-dn-article: true`.
+    `<script>window.rre.features_matched=…</script>`; `x-rre-feature-demo-article: true`.
   - Test panel (browser, after hard reload): journey collapsed by default with
     full START→END highlight; expand → node-by-node with inputs + plain-English
     description + per-node time; collapse → full highlight again.
@@ -261,10 +261,10 @@ byte-identical minus `ToSchema`).
 
 ### v2.1 — "matched" now requires the body to ACTUALLY CHANGE
 
-Root cause of the `x-rre-feature-dn-article: true` bug on JSON: dn-article's
+Root cause of the `x-rre-feature-demo-article: true` bug on JSON: demo-article's
 `apply_outcome` references an HTML outcome whose components are no-ops on a JSON
 body (`json_apply` skips non-JSON component types → `changed = false`), yet v1
-marked the feature on "≥1 expression node traversed" regardless. dn-article also
+marked the feature on "≥1 expression node traversed" regardless. demo-article also
 has an EMPTY `json_selector` (= "always apply"), so the selector gate can't stop
 it. Fix:
 
@@ -280,7 +280,7 @@ it. Fix:
   wraps it in `if applied`. The `/__rre/eval` `summary` is NOT applied-gated
   (it's an authoring preview of what the canvas does).
 
-Result: dn-article → marked only on HTML; dn-json-article → marked only on JSON.
+Result: demo-article → marked only on HTML; demo-json-article → marked only on JSON.
 
 ### v2.2 — rename + restructure to `feature_expressions`
 
@@ -354,14 +354,14 @@ New shape — identical for JSON body, HTML window, and the eval `summary`:
 ### v2 verification (live E2E, after the stack picks up new binaries)
 
 - JSON `curl -s -D - http://localhost:9000/proxy/v2/content/2-1-1997318`:
-  - header `x-rre-feature-dn-json-article: true` present; `x-rre-feature-dn-article`
+  - header `x-rre-feature-demo-json-article: true` present; `x-rre-feature-demo-article`
     **ABSENT** (no-op on JSON).
-  - body `rre.feature_expressions["dn-json-article"].expressions` =
+  - body `rre.feature_expressions["demo-json-article"].expressions` =
     `[{expression_id:"t_body",…}, {expression_id:"a_pw",…}]` with
     `custom_expression_label` + `expression_time_ms` (`d.dd`); `expensive_nodes`
-    top-3 DESC; no `dn-article` key.
-- HTML `curl -s http://localhost:9000/article.html`: `x-rre-feature-dn-article: true`;
-  `x-rre-feature-dn-json-article` ABSENT; `<script>window.rre.feature_expressions=…</script>`.
+    top-3 DESC; no `demo-article` key.
+- HTML `curl -s http://localhost:9000/article.html`: `x-rre-feature-demo-article: true`;
+  `x-rre-feature-demo-json-article` ABSENT; `<script>window.rre.feature_expressions=…</script>`.
 - A custom name with uppercase/space → backend 422 with
   `expression_custom_label_invalid` and the frontend form shows the inline error;
   empty custom name saves fine.

@@ -67,16 +67,21 @@ contract.
 For every inbound reader request the **proxy** runs this pipeline
 (`proxy/src/forwarder.rs`):
 
-1. **feature_map** resolves `(host, path)` → `feature_id` (miss → pass-through).
+1. **site_map** matches the incoming `Host` header to a configured Site,
+   determining the upstream destination protocol/host/port. If no Site matches,
+   falls back to the configured `upstream_base_url`. Requests are tagged with the
+   matched site slug (or `None` on fallback).
 2. **classifier** picks exactly one canvas from the `rre_user_type` cookie
    (default `anonymous`). This is the canvas-isolation boundary.
-3. **backend_client** fetches the cached `active-version` payload (moka, TTL 30s;
+3. **backend_client** fetches the cached list of all active features (moka, TTL 30s;
    backend error → fail-open pass-through).
 4. The proxy fetches the **upstream** response. Non-HTML → streamed untouched.
-5. The rule graph for the classified canvas is **translated to a zen JDM
-   `DecisionContent`** (cached, compiled) and **evaluated** inside a
+5. For each feature, the rule graph for the classified canvas is **translated to a
+   zen JDM `DecisionContent`** (cached, compiled) and **evaluated** inside a
    `spawn_blocking` current-thread runtime (zen `Variable` / `scraper::Html` are
-   `!Send`). The result yields an `outcomeId` (or none).
+   `!Send`). The result yields an `outcomeId` (or none). A new `site_match`
+   decision node enables branching on whether the current request's site matches
+   a chosen site.
 6. The matched outcome's **components** are applied to the HTML via streaming
    `lol_html` rewriters (idempotent; selector misses fail-open).
 7. The (optionally gzip re-encoded) response is returned with

@@ -35,8 +35,9 @@ Then open:
 - API docs — http://localhost:8000/docs
 
 `make up` builds every image, waits for the backend, and seeds the demo feature
-`dn-article` (a LIVE version the proxy serves + an editable DRAFT). Tear down
-with `make down` (or `make down-clean` to also drop the database volume).
+`demo-article` (a LIVE version the proxy serves + an editable DRAFT) and a demo
+Site (localhost:9000 → demo-upstream:8081). Tear down with `make down` 
+(or `make down-clean` to also drop the database volume).
 
 No Make? Use the scripts directly:
 
@@ -105,14 +106,16 @@ End-to-end:
 
 ## How the demo flows
 
-1. `dn-article`'s LIVE version routes the **anonymous** canvas:
+1. A **demo Site** (localhost:9000 → demo-upstream:8081) is seeded in the database.
+2. `demo-article`'s LIVE version routes the **anonymous** canvas:
    `meta[name=paywall]=true?` → if mobile, **Registration Wall**; else
    **Paywall** (truncate + subscribe block); if no paywall meta, **Show Content**
    (untouched).
-2. The proxy resolves the feature from `(host, path)`, fetches the cached
-   active-version from the backend, evaluates the canvas with zen, and applies
-   the matched outcome's components to the upstream HTML.
-3. Responses carry `X-RRE-Trace-Id` and `X-RRE-Apply-Status`.
+3. The proxy matches the incoming Host header to the demo Site to determine the
+   upstream destination, fetches all active features from the backend (cached,
+   TTL 30s), evaluates each canvas with zen, and applies matched outcomes'
+   components to the upstream HTML.
+4. Responses carry `X-RRE-Trace-Id` and `X-RRE-Apply-Status`.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design and
 [`docs/runbook.md`](docs/runbook.md) for operations.

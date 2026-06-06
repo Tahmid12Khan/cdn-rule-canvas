@@ -275,21 +275,21 @@ drop the injected start/end nodes + their edges). `rre.outcomes`/`components` ta
 
 ## 7. Seed — `backend/src/bin/seed_demo.rs`
 
-Add feature **`dn-json-article`** (type `json`) with one published version whose
+Add feature **`demo-json-article`** (type `json`) with one published version whose
 **anonymous** canvas implements:
 
 ```
-start ──> json_expression{ json_path:"$.api", operator:"equals", value:"dn-article" }
+start ──> json_expression{ json_path:"$.api", operator:"equals", value:"demo-article" }
               ├─ yes ─> trim_json{ json_path:"$.body", length:0 }
               │            └─> add_attribute{ json_path:"$.paywall_show", value:"<html>paywall_showed</html>" }
               │                   └─> end
               └─ no  ─> end
 ```
 
-i.e. when `$.api == "dn-article"`: empty `$.body` and set
+i.e. when `$.api == "demo-article"`: empty `$.body` and set
 `$.paywall_show = "<html>paywall_showed</html>"`; otherwise pass through to END. Seed
-must be idempotent (upsert by feature key) like the existing `dn-article` seed. If the
-user’s running DB already has a `dn-json-article` feature row, the seed should update its
+must be idempotent (upsert by feature key) like the existing `demo-article` seed. If the
+user’s running DB already has a `demo-json-article` feature row, the seed should update its
 version’s rule_graph rather than duplicate.
 
 ---

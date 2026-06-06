@@ -60,11 +60,15 @@ make seed
 docker compose --env-file infra/.env -f infra/docker-compose.yml exec backend seed_demo
 ```
 
-It creates feature `dn-article` with:
+It creates feature `demo-article` with:
 - **LIVE v1** — the worked-example anonymous canvas
   (`paywall` meta → device type → Registration Wall / Paywall / Show Content)
   with three outcomes and their components. This is what the proxy serves.
 - **DRAFT v2** — an editable clone for the rule-builder UI.
+
+It also creates a demo Site:
+- **slug**: `demo-localhost`, **name**: `Demo (localhost:9000)`,
+  source `http localhost:9000`, destination `http demo-upstream:8081`.
 
 ## Verifying the end-to-end demo
 
@@ -76,8 +80,8 @@ curl -s -H 'Host: localhost:9000' http://localhost:9000/article.html | grep rre-
 curl -s -H 'Host: localhost:9000' \
      -H 'User-Agent: iPhone' http://localhost:9000/article.html | grep rre-regwall
 
-# Non-matching path -> pass-through untouched:
-curl -si -H 'Host: localhost:9000' http://localhost:9000/free.html | grep -i x-rre-apply-status
+# Request to unmapped host -> fallback to default upstream (pass-through):
+curl -si -H 'Host: unmapped.example.com' http://localhost:9000/article.html | grep -i x-rre-apply-status
 ```
 
 Every proxied response carries `X-RRE-Trace-Id` and `X-RRE-Apply-Status`
@@ -97,8 +101,8 @@ Every proxied response carries `X-RRE-Trace-Id` and `X-RRE-Apply-Status`
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `POSTGRES_PASSWORD is required` on `up` | no `infra/.env` | `cp infra/.env.example infra/.env` (or rerun `make up`) |
-| Proxy returns the untransformed article | feature not LIVE / not seeded | `make seed`; check `GET /api/v1/features/dn-article/active-version?env=live` |
-| Proxy pass-through on `/article.html` | Host header ≠ `localhost:9000` | send `Host: localhost:9000` (the feature_map host); use port 9000 |
+| Proxy returns the untransformed article | feature not LIVE / not seeded | `make seed`; check `GET /api/v1/features/demo-article/active-version?env=live` |
+| Proxy pass-through on `/article.html` | Site source host:port ≠ `localhost:9000` | send `Host: localhost:9000`; seeded demo Site is `localhost:9000` → `demo-upstream:8081` |
 | Backend unhealthy on boot | postgres not ready / bad `DATABASE_URL` | `make logs`; confirm `postgres` is `healthy` (`make ps`) |
 | Frontend shows backend offline | `NEXT_PUBLIC_API_BASE` baked wrong at build | rebuild with the correct build-arg (`make restart`) |
 | Stale data after schema change | old volume | `make down-clean` then `make up` |

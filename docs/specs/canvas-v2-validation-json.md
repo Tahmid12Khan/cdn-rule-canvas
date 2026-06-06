@@ -138,7 +138,7 @@ JsonReplace { target_path: String, value: serde_json::Value },
 - `ActiveComponent.type` is a free string already — no change. Proxy dispatches on it (WF2).
 
 ### 2.4 Seed / demo
-`bin/seed_demo.rs` seeds `dn-article` (HTML feature). After adding `outcome_reachable`, ensure the seeded graph's every reachable node reaches an outcome and `root_node_id` is set. If the seed graph has a dead-end, fix it. Run `cargo run --bin seed_demo` is not part of CI; just ensure `cargo test` passes and the seed graph would validate (add/adjust a test if practical).
+`bin/seed_demo.rs` seeds `demo-article` (HTML feature). After adding `outcome_reachable`, ensure the seeded graph's every reachable node reaches an outcome and `root_node_id` is set. If the seed graph has a dead-end, fix it. Run `cargo run --bin seed_demo` is not part of CI; just ensure `cargo test` passes and the seed graph would validate (add/adjust a test if practical).
 
 ### 2.5 Verify (WF1 done-criteria)
 `PATH="$HOME/.cargo/bin:$PATH" cargo build --manifest-path backend/Cargo.toml` and `cargo test --manifest-path backend/Cargo.toml` green. `make backend-check` mirrors CI (fmt + clippy + test). New unit tests for `outcome_reachable`, applicability round-trip in `to_read`, and the new ComponentConfig variants' `validate_domain`.

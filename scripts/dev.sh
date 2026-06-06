@@ -7,7 +7,7 @@
 # docker db + upstream are left running (stop them with `make down`).
 #
 # Usage:  ./scripts/dev.sh [--seed]      (or `make dev`)
-#   --seed   run the idempotent demo seeder (seed_demo -> feature `dn-article`)
+#   --seed   run the idempotent demo seeder (seed_demo -> feature `demo-article`)
 #            once the backend is healthy.
 set -uo pipefail
 
@@ -147,7 +147,7 @@ wait_up "http://localhost:8000/health"       180 || { echo "[dev] backend not he
 if [[ "$SEED" == "1" && "$ALL_OK" == 1 ]]; then
   echo "[dev] seeding demo data (seed_demo)..."
   ( cd "$ROOT/backend" && cargo run --bin seed_demo ) >"$LOG_DIR/seed.log" 2>&1 \
-    && echo "[dev] seed complete (feature dn-article)." \
+    && echo "[dev] seed complete (feature demo-article)." \
     || echo "[dev] seed failed — see .devlogs/seed.log"
 fi
 

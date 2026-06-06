@@ -43,7 +43,7 @@ source of truth and the PROXY section mirrors it.
 ### 1. Error Envelope (uniform, ALL endpoints)
 
 ```json
-{ "error": { "code": "VERSION_NOT_FOUND", "message": "Version 4 not found for feature 'dn-article'",
+{ "error": { "code": "VERSION_NOT_FOUND", "message": "Version 4 not found for feature 'demo-article'",
   "details": [ { "loc": "rule_graph.anonymous.edges[1]", "msg": "edge target 'n9' not found in nodes", "rule_id": "edge_endpoint_exists" } ] } }
 ```
 
@@ -58,7 +58,9 @@ source of truth and the PROXY section mirrors it.
 | `OUTCOME_NOT_FOUND` | 404 | outcome id missing |
 | `COMPONENT_NOT_FOUND` | 404 | component id missing |
 | `NO_LIVE_VERSION` | 404 | active-version requested, none LIVE/STAGING |
-| `SLUG_CONFLICT` | 409 | duplicate feature slug |
+| `SITE_NOT_FOUND` | 404 | site slug missing |
+| `SLUG_CONFLICT` | 409 | duplicate feature slug or site slug |
+| `CONFLICT` | 409 | site name or source (host:port) already exists |
 | `VERSION_EDIT_LOCKED` | 409 | mutate rule_graph/outcomes/components on non-DRAFT version |
 | `INVALID_STATUS_TRANSITION` | 409 | illegal publish/unpublish/delete transition |
 | `BUILTIN_OUTCOME_PROTECTED` | 409 | delete builtin ShowContent outcome |
@@ -127,6 +129,12 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   DEFAULT '{}'::jsonb` (additive; existing rows backfill to the empty gate). (b) drops & recreates
   `components_type_known` to also allow `'json_remove','json_set','json_replace'`. Down restores the
   0005 CHECK and drops the column.
+- `0009_sites`: creates `rre.sites` table with columns: `slug VARCHAR(64) PK`, `name VARCHAR(200) UNIQUE NOT NULL`,
+  `source_protocol VARCHAR(8) NOT NULL`, `source_host VARCHAR(255) NOT NULL`, `source_port INTEGER NOT NULL`,
+  `dest_protocol VARCHAR(8) NOT NULL`, `dest_host VARCHAR(255) NOT NULL`, `dest_port INTEGER NOT NULL`,
+  `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+  Indexes: `sites_source_unique UNIQUE (source_host, source_port)`; `sites_created_at_idx (created_at DESC, slug ASC)`.
+  CHECKs: source/dest protocol IN (`http`,`https`); source/dest port 1..65535. Down drops the table.
 
 Migration order is load-bearing (0002 features WITHOUT versions FK; 0003 ALTERs in the deferrable FK
 after creating versions). Never reorder.
@@ -159,6 +167,13 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
 - Feature: `FeatureCreate { id (SLUG_RE, 3..=64), name (1..=200), r#type }`, `FeatureUpdate { name? }`,
   `FeatureRead { id, name, r#type, staging_version_id?, live_version_id?, created_at, updated_at }`.
   `SLUG_RE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+- Site: `SiteCreate { slug (3..=64, kebab-case), name (1..=200), source_protocol, source_host (1..=255),
+  source_port (1..=65535), dest_protocol, dest_host (1..=255), dest_port (1..=65535) }`,
+  `SiteUpdate { slug (immutable), name?, source_protocol?, source_host?, source_port?, dest_protocol?,
+  dest_host?, dest_port? }`, `SiteRead { slug, name, source_protocol, source_host, source_port,
+  dest_protocol, dest_host, dest_port, created_at, updated_at }`. All fields required in Create;
+  protocol/host/port validations: protocol IN {`http`,`https`}; host/port non-empty, port 1..=65535.
+  `deny_unknown_fields` on all DTOs.
 - Version: `VersionCreate { description? (<=2000), rule_graph?: RuleGraph, applicability?: Applicability }`,
   `VersionUpdate { description? (<=2000), rule_graph?: RuleGraph, applicability?: Applicability }`,
   `VersionRead { id, feature_id, version_number, description?, status, rule_graph: RuleGraph,
@@ -262,6 +277,23 @@ path (`request_path`); `matches` is a regex.
 once at startup into `Arc<NodeManifest>` (in `AppState`) and served verbatim at
 `GET /api/v1/node-types`. Adding a node type = ONE manifest entry on the backend (plus a proxy
 `CanvasProcessor` impl for eval logic); ZERO frontend changes, ZERO backend Rust changes.
+
+**`site_match` node** (new decision node, category `request`):
+```json
+{
+  "kind": "site_match",
+  "label": "Site Match",
+  "category": "request",
+  "summary": "Branch on whether the request's site matches a chosen site",
+  "applies_to": ["html", "json"],
+  "node_kind": "decision",
+  "fields": [
+    { "name": "site", "label": "Site", "control": "site_select", "required": true,
+      "placeholder": "Search sites by name…" }
+  ],
+  "output": { "branches": [ { "id": "yes" }, { "id": "no" } ] }
+}
+```
 
 ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top level):
 `{ categories: Category[], node_types: NodeTypeSpec[], display?: Display }`.
@@ -398,6 +430,13 @@ PATCH  /api/v1/features/{fid}                 -> features::update        -> feat
 DELETE /api/v1/features/{fid}                 -> features::delete        -> feature_service::delete
 GET    /api/v1/features/{fid}/active-version  -> features::active_version-> version_service::active_version
 
+# Sites (host-based routing config)
+POST   /api/v1/sites                          -> sites::create           -> site_service::create
+GET    /api/v1/sites                          -> sites::list             -> site_service::list
+GET    /api/v1/sites/{slug}                   -> sites::get              -> site_service::get
+PATCH  /api/v1/sites/{slug}                   -> sites::update           -> site_service::update
+DELETE /api/v1/sites/{slug}                   -> sites::delete           -> site_service::delete
+
 # Versions (nested under feature; {vnum} = version_number i32)
 POST   /api/v1/features/{fid}/versions                -> versions::create    -> version_service::create_version
 GET    /api/v1/features/{fid}/versions                -> versions::list      -> version_service::list
@@ -421,13 +460,14 @@ DELETE /api/v1/components/{cid}         -> components::delete         -> outcome
 ```
 
 Canonical responses: POST/clone/add → 201; DELETE → 204; others → 200. `POST /features` dup slug → 409
-`SLUG_CONFLICT`. `GET active-version?env=live|staging` (default live) → `ActiveVersionRead` / 404
-`NO_LIVE_VERSION`. `POST versions` clones rule_graph from current LIVE (else empty 3-canvas) and seeds
-builtin `ShowContent` outcome. `PATCH version` with rule_graph on non-DRAFT → 409 `VERSION_EDIT_LOCKED`;
-invalid graph → 422. DELETE version on LIVE/STAGING → 409 `INVALID_STATUS_TRANSITION` (only DRAFT/PREV
-deletable). Outcome create/delete on non-DRAFT version → 409 `VERSION_EDIT_LOCKED`; delete builtin → 409
-`BUILTIN_OUTCOME_PROTECTED`. Clone → deep copy incl. components, new UUIDs, `is_builtin=false`, title
-`"{title} (copy)"`.
+`SLUG_CONFLICT`. `POST /sites` dup slug/name/source → 409 `CONFLICT`. `GET active-version?env=live|staging`
+(default live) → `ActiveVersionRead` / 404 `NO_LIVE_VERSION`. `POST versions` clones rule_graph from
+current LIVE (else empty 3-canvas) and seeds builtin `ShowContent` outcome. `PATCH version` with rule_graph
+on non-DRAFT → 409 `VERSION_EDIT_LOCKED`; invalid graph → 422. DELETE version on LIVE/STAGING → 409
+`INVALID_STATUS_TRANSITION` (only DRAFT/PREV deletable). Outcome create/delete on non-DRAFT version → 409
+`VERSION_EDIT_LOCKED`; delete builtin → 409 `BUILTIN_OUTCOME_PROTECTED`. Clone → deep copy incl. components,
+new UUIDs, `is_builtin=false`, title `"{title} (copy)"`. `GET /sites?page&page_size&q` supports pagination
+and optional `q` (case-insensitive `name ILIKE` filter).
 
 #### Status lifecycle (service-enforced)
 
@@ -491,10 +531,11 @@ The proxy is the production hot path. Latency overhead and correctness errors he
 - Config: layered JSON via the `config` crate into a single `Settings` (same scheme as BACKEND §0:
   `config/default.json` → `config/{APP_ENV}.json` → env vars, `__` separator; `dotenvy` loads `.env`
   into env first). No scattered `std::env::var`. Secrets/per-deploy overrides stay env-only.
-  `feature_map.yaml` / `sanitizer.yaml` remain separate YAML (distinct config concern).
+  `sanitizer.yaml` remains separate YAML (distinct config concern). Sites + features are
+  fetched from the backend API (DB-backed, TTL-cached) — no routing YAML.
 - Logging: `tracing` + json layer (pretty in dev). NEVER log raw bodies / cookie values.
 - Layering: `middleware` -> `forwarder` (the only network IO + pipeline glue) -> `domain`
-  (pure eval + pure transform) -> `infra` (feature_map, backend_client, caches, encoding).
+  (pure eval + pure transform) -> `infra` (site_map, backend_client, caches, encoding).
 - Async-runtime rule (HARD): NO sync IO in the request path. zen evaluation runs in
   `tokio::task::spawn_blocking` on a `Builder::new_current_thread().enable_all().build()` runtime
   (zen `Variable` is `!Send`). `scraper::Html` is `!Send`, reconstructed INSIDE the closure from a
@@ -507,13 +548,16 @@ The proxy is the production hot path. Latency overhead and correctness errors he
 ```
 Client -> [axum fallback] -> forwarder::forward
   middleware/trace: ensure X-RRE-Trace-Id (Uuid v4), bind span, echo on response
-  1. feature_map.resolve(host, path) -> Option<feature_id>     miss -> PASS-THROUGH (skipped)
+  1. parse Host header -> source_host:source_port. site_map.resolve(host:port) -> Option<Site>
+       found -> upstream = dest_protocol://dest_host:dest_port, ctx.site = Some(slug)
+       miss -> upstream = settings.upstream_base_url (fallback), ctx.site = None
   2. classifier::classify(&headers) -> Canvas                  cookie rre_user_type, default anonymous
-  3. backend.active_version(feature_id, Live) -> Arc<ActiveVersionRead>  none/err -> PASS-THROUGH (fail-open)
-  4. send_upstream(reqwest) -> upstream Response               err/timeout -> typed 502/504, never panic
+  3. backend.active_version(ALL features, Live, cached) -> Arc<Vec<ActiveVersionRead>>
+       evaluate every feature (no host/path gating); none/err -> PASS-THROUGH (fail-open)
+  4. send_upstream(reqwest, upstream) -> upstream Response     err/timeout -> typed 502/504, never panic
   5. content-type gate: text/html -> modify; else pass-through
-  6. EvaluationContextParts::from_request(headers, path, cookies, html_string)   html kept as Send String
-  7. GraphEvaluator::evaluate(canvas_graph, ctx, feature_id, version_number, canvas)
+  6. EvaluationContextParts::from_request(headers, path, cookies, body, site)   body kept as Send String
+  7. for each feature: GraphEvaluator::evaluate(canvas_graph, ctx, feature_id, version_number, canvas)
        - compiled_cache.get_or_compile((feature_id, version_number, canvas)) -> Arc<DecisionContent> (<=256)
        - spawn_blocking + current_thread rt: parse scraper::Html; adapter = CanvasNodeAdapter{registry, ctx};
          engine = DecisionEngine::default().with_adapter(...); decision = engine.create_decision(content);
@@ -531,9 +575,9 @@ Client -> [axum fallback] -> forwarder::forward
 
 | Stage | p99 target |
 |---|---|
-| feature_map resolve | < 50us |
+| site_map resolve | < 50us |
 | classify | < 10us |
-| active-version (cache hit) | < 50us |
+| active-version (cache hit, all features) | < 50us |
 | translate + compile (cache hit) | < 20us |
 | eval (zen, spawn_blocking) | **< 5ms** |
 | transform (applier, lol_html) | **< 20ms** |
@@ -547,7 +591,7 @@ wrapped so any error returns the original `html` and sets `X-RRE-Apply-Status: e
 
 | Failure | Behavior | Header |
 |---|---|---|
-| Feature not mapped | pass-through | skipped |
+| Site not found in site_map | fallback to upstream_base_url | skipped |
 | Upstream connect timeout (2s) | `ProxyError::UpstreamTimeout` | 504 |
 | Upstream read timeout (10s) | `ProxyError::UpstreamTimeout` | 504 |
 | Upstream refused / DNS | `ProxyError::UpstreamUnavailable` | 502 |
@@ -600,7 +644,7 @@ canvas; no code path lets one class's request reach another class's graph.
 pub struct AppState {
     pub settings: Arc<Settings>,
     pub http: reqwest::Client,
-    pub feature_map: Arc<FeatureMap>,
+    pub site_map: Arc<SiteMap>,
     pub backend: Arc<BackendClient>,
     pub compiled: Arc<CompiledCache>,
     pub registry: Arc<ProcessorRegistry>,
@@ -612,15 +656,17 @@ pub struct AppState {
 (default `http://demo-upstream:8081`), `backend_base_url` (default `http://backend:8000`), `app_env`,
 `active_version_ttl_secs` (default 30), `compiled_cache_capacity` (default 256),
 `upstream_connect_timeout_secs` (default 2), `upstream_read_timeout_secs` (default 10),
-`feature_map_path` (default `proxy/config/feature_map.yaml`),
 `sanitizer_config_path` (default `proxy/config/sanitizer.yaml`).
+
+`SiteMap`: an in-memory `HashMap<String, Site>` keyed by normalized `source_host:source_port`
+(lowercase host). Cached with the same TTL mechanism as the active-version cache.
 
 ### 7. Module Paths + Signatures (key)
 
 - `forwarder::forward(State<AppState>, Request) -> Response`; `strip_hop_by_hop(&mut HeaderMap)`;
   `send_upstream(&AppState, Request) -> Result<UpstreamResponse, ProxyError>`.
 - `middleware::trace::layer()`; `TRACE_HEADER = "x-rre-trace-id"`.
-- `infra::feature_map::FeatureMap::{load, resolve}`.
+- `infra::site_map::SiteMap::{load, resolve}`.
 - `infra::backend_client::{BackendClient, Env, ActiveVersionRead, ActiveOutcome, ActiveComponent, Placement}`.
 - `infra::compiled_cache::CompiledCache::{new, get_or_compile}`.
 - `infra::encoding::{gunzip, gzip, decode_for_modify, reencode}`.
@@ -631,7 +677,7 @@ pub struct AppState {
 - `domain::translator::to_decision_content(&CanvasGraph) -> DecisionContent`.
 - `domain::processors` — `CanvasProcessor` trait, `ProcessorRegistry`, `ProcessorOutcome`, `Branch`,
   `ProcessorError`, `default_registry()`.
-- `domain::processors::{meta_tags::MetaTagsProcessor, device_type::DeviceTypeProcessor}`.
+- `domain::processors::{meta_tags::MetaTagsProcessor, device_type::DeviceTypeProcessor, site_match::SiteMatchProcessor}`.
 - `domain::adapter::CanvasNodeAdapter` (impl zen `CustomNodeAdapter`).
 - `domain::evaluator::GraphEvaluator::evaluate(...)`.
 - `domain::classifier::classify(&HeaderMap) -> Canvas`.
@@ -670,8 +716,15 @@ pub struct AppState {
 
 ### 9. Backend Dependency
 
-Proxy calls `GET {backend_base_url}/api/v1/features/{id}/active-version?env=live` and deserializes the
-exact `ActiveVersionRead` shape. 404 / NO_LIVE_VERSION / any error -> fail open (pass-through).
+Proxy calls:
+- `GET {backend_base_url}/api/v1/features?page_size=100` (cached, TTL same as active-version) to fetch
+  all features; deserializes the `Page<FeatureRead>` shape.
+- For each feature, evaluates if it applies to the current request (based on the canvas + decision nodes).
+- 404 / NO_LIVE_VERSION / any error -> fail open (pass-through).
+- `GET {backend_base_url}/api/v1/sites?page_size=100` (cached, TTL 30s) to fetch all sites; builds
+  `SiteMap` keyed by `source_host:source_port`. 404 / error -> empty map (no site match, fallback to
+  upstream_base_url).
+
 `Placement` mirrored as `#[serde(rename_all="snake_case")] { Inline, StickyFooter, Popup }`.
 
 ### 10. Observability
