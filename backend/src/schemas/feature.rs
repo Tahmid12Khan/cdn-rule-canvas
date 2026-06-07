@@ -29,6 +29,11 @@ pub struct FeatureCreate {
     pub name: String,
     /// Content type.
     pub r#type: FeatureType,
+    /// Per-type execution order (lowest runs first). Omit to auto-assign the
+    /// next free number for the type; supply to pin a value (subject to the
+    /// per-type unique constraint → 409 on collision).
+    #[serde(default)]
+    pub execution_order: Option<i32>,
 }
 
 /// Request body for `PATCH /features/{fid}`.
@@ -38,6 +43,11 @@ pub struct FeatureUpdate {
     /// New human-readable name.
     #[validate(length(min = 1, max = 200))]
     pub name: Option<String>,
+    /// New per-type execution order (lowest runs first). A duplicate within the
+    /// same type → 409 `EXECUTION_ORDER_CONFLICT`. Gaps are preserved (other
+    /// rows are not renumbered).
+    #[serde(default)]
+    pub execution_order: Option<i32>,
 }
 
 /// Response shape for a feature.
@@ -49,6 +59,8 @@ pub struct FeatureRead {
     pub name: String,
     /// Content type.
     pub r#type: FeatureType,
+    /// Per-type execution order (lowest runs first).
+    pub execution_order: i32,
     /// Currently-staged version id, if any.
     pub staging_version_id: Option<Uuid>,
     /// Currently-live version id, if any.
@@ -65,6 +77,7 @@ impl From<Feature> for FeatureRead {
             id: f.id,
             name: f.name,
             r#type: f.r#type,
+            execution_order: f.execution_order,
             staging_version_id: f.staging_version_id,
             live_version_id: f.live_version_id,
             created_at: f.created_at,

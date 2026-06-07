@@ -88,8 +88,8 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     // --- feature ---------------------------------------------------------------
     sqlx::query(
         r#"
-        INSERT INTO rre.features (id, name, "type")
-        VALUES ($1, $2, 'html')
+        INSERT INTO rre.features (id, name, "type", execution_order)
+        VALUES ($1, $2, 'html', 1)
         ON CONFLICT (id) DO NOTHING
         "#,
     )
@@ -297,10 +297,12 @@ async fn seed_site(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Re
 /// `$.api == "demo-article"`. The version row is UPSERTED on its rule_graph so a
 /// pre-existing row converges to this canvas rather than duplicating.
 async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
+    // execution_order is per-type, so the JSON feature is order 1 independently
+    // of the HTML demo feature (which is also order 1).
     sqlx::query(
         r#"
-        INSERT INTO rre.features (id, name, "type")
-        VALUES ($1, $2, 'json')
+        INSERT INTO rre.features (id, name, "type", execution_order)
+        VALUES ($1, $2, 'json', 1)
         ON CONFLICT (id) DO NOTHING
         "#,
     )

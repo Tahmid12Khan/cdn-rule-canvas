@@ -67,6 +67,9 @@ pub enum AppError {
     /// Duplicate feature slug. → 409
     #[error("{0}")]
     SlugConflict(String),
+    /// Duplicate feature `execution_order` within a type. → 409
+    #[error("{0}")]
+    ExecutionOrderConflict(String),
     /// Mutate rule_graph/outcomes/components on a non-DRAFT version. → 409
     #[error("{0}")]
     VersionEditLocked(String),
@@ -94,6 +97,7 @@ impl AppError {
             AppError::ComponentNotFound(_) => "COMPONENT_NOT_FOUND",
             AppError::NoLiveVersion(_) => "NO_LIVE_VERSION",
             AppError::SlugConflict(_) => "SLUG_CONFLICT",
+            AppError::ExecutionOrderConflict(_) => "EXECUTION_ORDER_CONFLICT",
             AppError::VersionEditLocked(_) => "VERSION_EDIT_LOCKED",
             AppError::InvalidStatusTransition(_) => "INVALID_STATUS_TRANSITION",
             AppError::BuiltinOutcomeProtected(_) => "BUILTIN_OUTCOME_PROTECTED",
@@ -113,6 +117,7 @@ impl AppError {
             | AppError::ComponentNotFound(_)
             | AppError::NoLiveVersion(_) => StatusCode::NOT_FOUND,
             AppError::SlugConflict(_)
+            | AppError::ExecutionOrderConflict(_)
             | AppError::VersionEditLocked(_)
             | AppError::InvalidStatusTransition(_)
             | AppError::BuiltinOutcomeProtected(_) => StatusCode::CONFLICT,

@@ -65,7 +65,9 @@ async fn migration_0007_transforms_outcomes_to_pipeline() {
         "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
 
-    sqlx::query("INSERT INTO rre.features (id, name, type) VALUES ('mig-0007', 'm', 'html')")
+    sqlx::query(
+        "INSERT INTO rre.features (id, name, type, execution_order) VALUES ('mig-0007', 'm', 'html', 1)",
+    )
         .execute(pool)
         .await
         .expect("seed feature");

@@ -14,7 +14,11 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 async fn seed_feature(pool: &PgPool, id: &str) {
-    sqlx::query("INSERT INTO rre.features (id, name, type) VALUES ($1, $2, 'html')")
+    sqlx::query(
+        "INSERT INTO rre.features (id, name, type, execution_order) \
+         VALUES ($1, $2, 'html', \
+                 (SELECT COALESCE(MAX(execution_order), 0) + 1 FROM rre.features WHERE type = 'html'))",
+    )
         .bind(id)
         .bind(format!("Feature {id}"))
         .execute(pool)

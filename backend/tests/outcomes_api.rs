@@ -17,7 +17,11 @@ use uuid::Uuid;
 /// Insert a feature + a DRAFT version directly; return the version id.
 async fn seed_draft_version(pool: &PgPool) -> Uuid {
     let feature_id = format!("feat-{}", &Uuid::new_v4().to_string()[..8]);
-    sqlx::query("INSERT INTO rre.features (id, name, type) VALUES ($1, 'F', 'html')")
+    sqlx::query(
+        "INSERT INTO rre.features (id, name, type, execution_order) \
+         VALUES ($1, 'F', 'html', \
+                 (SELECT COALESCE(MAX(execution_order), 0) + 1 FROM rre.features WHERE type = 'html'))",
+    )
         .bind(&feature_id)
         .execute(pool)
         .await

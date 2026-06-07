@@ -15,6 +15,8 @@ pub struct Feature {
     pub name: String,
     /// Content type (`html` | `json`).
     pub r#type: FeatureType,
+    /// Per-type execution order (lowest runs first; unique within a type).
+    pub execution_order: i32,
     /// Currently-staged version id, if any.
     pub staging_version_id: Option<Uuid>,
     /// Currently-live version id, if any.

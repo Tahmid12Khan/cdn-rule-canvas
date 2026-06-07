@@ -45,7 +45,7 @@ pub fn router() -> Router<AppState> {
     request_body = FeatureCreate,
     responses(
         (status = 201, description = "Created", body = FeatureRead),
-        (status = 409, description = "Slug conflict", body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Slug or execution-order conflict", body = crate::error::ErrorEnvelope),
         (status = 422, description = "Validation error", body = crate::error::ErrorEnvelope)
     ),
     tag = "features"
@@ -102,6 +102,7 @@ pub async fn get(
     responses(
         (status = 200, description = "Updated", body = FeatureRead),
         (status = 404, description = "Not found", body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Execution-order conflict", body = crate::error::ErrorEnvelope),
         (status = 422, description = "Validation error", body = crate::error::ErrorEnvelope)
     ),
     tag = "features"

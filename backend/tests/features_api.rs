@@ -60,7 +60,82 @@ async fn create_feature_returns_201() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["id"], "demo-article");
     assert_eq!(body["type"], "html");
+    assert_eq!(
+        body["execution_order"], 1,
+        "first html feature auto-assigns 1"
+    );
     assert!(body["live_version_id"].is_null());
+}
+
+#[tokio::test]
+async fn create_duplicate_execution_order_returns_409() {
+    let db = common::setup().await;
+
+    let (first, _) = send(
+        db.state.clone(),
+        "POST",
+        "/api/v1/features",
+        Some(json!({ "id": "feat-a", "name": "A", "type": "html", "execution_order": 3 })),
+    )
+    .await;
+    assert_eq!(first, StatusCode::CREATED);
+
+    let (second, body) = send(
+        db.state.clone(),
+        "POST",
+        "/api/v1/features",
+        Some(json!({ "id": "feat-b", "name": "B", "type": "html", "execution_order": 3 })),
+    )
+    .await;
+    assert_eq!(second, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "EXECUTION_ORDER_CONFLICT");
+}
+
+#[tokio::test]
+async fn html_and_json_can_share_execution_order() {
+    let db = common::setup().await;
+
+    let (html, html_body) = send(
+        db.state.clone(),
+        "POST",
+        "/api/v1/features",
+        Some(json!({ "id": "html-feat", "name": "H", "type": "html" })),
+    )
+    .await;
+    let (json_status, json_body) = send(
+        db.state.clone(),
+        "POST",
+        "/api/v1/features",
+        Some(json!({ "id": "json-feat", "name": "J", "type": "json" })),
+    )
+    .await;
+
+    assert_eq!(html, StatusCode::CREATED);
+    assert_eq!(json_status, StatusCode::CREATED);
+    assert_eq!(html_body["execution_order"], 1);
+    assert_eq!(json_body["execution_order"], 1);
+}
+
+#[tokio::test]
+async fn patch_reorders_execution_order() {
+    let db = common::setup().await;
+    send(
+        db.state.clone(),
+        "POST",
+        "/api/v1/features",
+        Some(json!({ "id": "feat-a", "name": "A", "type": "html" })),
+    )
+    .await;
+
+    let (status, body) = send(
+        db.state.clone(),
+        "PATCH",
+        "/api/v1/features/feat-a",
+        Some(json!({ "execution_order": 9 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["execution_order"], 9);
 }
 
 #[tokio::test]
