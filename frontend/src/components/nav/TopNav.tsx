@@ -40,6 +40,12 @@ export function TopNav() {
         >
           Test Presets
         </Link>
+        <Link
+          href="/products/test-full-journey"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          Test Full Journey
+        </Link>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />
