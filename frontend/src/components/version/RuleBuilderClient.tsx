@@ -249,22 +249,34 @@ export function RuleBuilderClient({
           </p>
         )}
 
-        {isEditing && (
-          <NodePalette
-            outcomes={paletteOutcomes}
-            draggable={isEditing}
+        {/* Canvas region (palette + canvas + config drawer) is the main/left
+            area; the TestingPanel docks to the right. Collapsed (initial), the
+            sidebar shrinks to a rail and the canvas takes the full width;
+            expanded, they sit side-by-side so the canvas highlight stays
+            visible while reading the journey. Stacks on narrow screens. */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-start">
+          <div className="min-w-0 flex-1 space-y-4">
+            {isEditing && (
+              <NodePalette
+                outcomes={paletteOutcomes}
+                draggable={isEditing}
+                featureType={featureType}
+              />
+            )}
+
+            <RuleBuilderCanvas canvasKey={selected} editable={isEditing} />
+
+            <NodeConfigDrawer
+              canvasKey={selected}
+              outcomes={paletteOutcomes}
+            />
+          </div>
+
+          <TestingPanel
+            outcomeTitleById={outcomeTitleById}
             featureType={featureType}
           />
-        )}
-
-        <RuleBuilderCanvas canvasKey={selected} editable={isEditing} />
-
-        <NodeConfigDrawer canvasKey={selected} outcomes={paletteOutcomes} />
-
-        <TestingPanel
-          outcomeTitleById={outcomeTitleById}
-          featureType={featureType}
-        />
+        </div>
 
         <SaveBar
           fid={fid}
