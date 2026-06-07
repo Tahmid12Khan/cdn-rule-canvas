@@ -6,6 +6,7 @@ pub mod domain;
 pub mod error;
 pub mod eval;
 pub mod forwarder;
+pub mod full_journey;
 pub mod infra;
 pub mod middleware;
 pub mod observability;
@@ -33,6 +34,10 @@ pub fn build_app(state: AppState) -> Router {
         .route("/metrics", get(observability::metrics_handler))
         .route("/__rre/eval", post(eval::eval_handler))
         .route("/__rre/eval-url", post(eval::eval_url_handler))
+        .route(
+            "/__rre/eval-full-journey",
+            post(full_journey::full_journey_handler),
+        )
         .layer(dev_cors())
         .with_state(state.clone());
 

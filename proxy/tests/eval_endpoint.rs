@@ -409,6 +409,15 @@ async fn json_eval_has_summary_and_per_step_time() {
         assert!(parsed <= prev, "expensive_nodes DESC by time");
         prev = parsed;
     }
+
+    // spec item 7: top-level `total_time_ms` (eval wall-clock), `d.dd` string.
+    let total_time_ms = v["total_time_ms"]
+        .as_str()
+        .expect("total_time_ms is a top-level string");
+    assert!(
+        is_d_dd(total_time_ms),
+        "total_time_ms d.dd, got {total_time_ms:?}"
+    );
 }
 
 /// Spec §5/§8: a path with no expression node (the `no` branch) yields NO

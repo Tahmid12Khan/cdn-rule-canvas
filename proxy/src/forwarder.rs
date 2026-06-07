@@ -18,7 +18,7 @@ use crate::domain::evaluator::{GraphEvaluator, MatchedAction};
 use crate::domain::features_matched::{self, FeatureEntry, NodeTiming};
 use crate::domain::graph::{Canvas, CanvasGraph, Node};
 use crate::error::ProxyError;
-use crate::infra::backend_client::{ActiveVersionRead, Env};
+use crate::infra::backend_client::{ActiveVersionRead, Applicability, Env};
 use crate::infra::encoding;
 use crate::state::AppState;
 
@@ -71,16 +71,14 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     //    No match -> fall back to `upstream_base_url` (dev + tests); `site = None`.
     let route = resolve_route(&state, &host, is_https).await;
 
-    // 1. Run the per-feature pipeline for EVERY feature id (TTL-cached list).
-    //    Empty list -> pass-through. Each feature self-gates by response
-    //    content-kind / applicability / eval, so a non-applicable feature is a
-    //    no-op; the matched Site decides upstream + the `site_match` node scopes.
-    let feature_ids = state.backend.feature_ids().await;
-    if feature_ids.is_empty() {
+    // 1. Fetch the typed feature list (TTL-cached: id + type/kind). Empty list ->
+    //    pass-through. The list is filtered to the RESPONSE content kind once the
+    //    upstream content-type is known (step 5), so only matching-type features
+    //    are evaluated — no pointless cross-type evals (e.g. an HTML feature on a
+    //    JSON response) and HALF the active-version fetches per request.
+    let feature_list = state.backend.feature_list_cached().await;
+    if feature_list.is_empty() {
         return passthrough(&state, &route, req).await;
-    }
-    for feature_id in feature_ids.iter() {
-        metrics::counter!("proxy_requests_total", "feature" => feature_id.clone()).increment(1);
     }
 
     // 2. Classify (canvas isolation source) — same canvas class for every feature.
@@ -128,7 +126,25 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         }
     };
 
-    // 5. Apply each matching feature in order, chaining the running body. The
+    // 5. Content-type FILTER: keep only features whose `type` matches the response
+    //    content kind (`html` features for an HTML response, `json` for JSON). This
+    //    removes cross-type evals + their cold active-version fetches entirely.
+    //    Count `proxy_requests_total` for the features actually evaluated.
+    let want_kind = if is_html { "html" } else { "json" };
+    let feature_ids: Vec<String> = feature_list
+        .iter()
+        .filter(|f| f.kind.eq_ignore_ascii_case(want_kind))
+        .map(|f| f.id.clone())
+        .collect();
+    if feature_ids.is_empty() {
+        // No feature of this content kind -> serve upstream untouched (skipped).
+        return rebuild_response(status, resp_headers, body, "skipped");
+    }
+    for feature_id in feature_ids.iter() {
+        metrics::counter!("proxy_requests_total", "feature" => feature_id.clone()).increment(1);
+    }
+
+    // 5b. Apply each matching feature in order, chaining the running body. The
     //    overall apply_status is "ok" if ANY feature changed the body, else
     //    "skipped" (every feature self-gates: a non-matching feature is a no-op).
     //    `matched` carries each MATCHED feature's (feature_id, feature_expressions
@@ -137,6 +153,8 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         body: final_body,
         any_applied,
         matched,
+        total_time_ms: _total_time_ms,
+        compute_time_ms: _compute_time_ms,
     } = if is_html {
         apply_features_html(
             &state,
@@ -202,6 +220,19 @@ struct ApplyResult {
     body: String,
     any_applied: bool,
     matched: Vec<(String, FeatureEntry)>,
+    /// EXACT rule-engine wall-clock across ALL features (spec item 7), `d.dd`.
+    /// Measured from immediately before the per-feature loop to immediately after
+    /// the feature-expression injection — i.e. the rule-engine boundary (excludes
+    /// upstream fetch + response re-encoding). Includes selector gates + context
+    /// builds + evals + applies AND the per-feature rule-fetch I/O wait, so it is
+    /// legitimately >= Σ feature `time_took_ms`.
+    total_time_ms: String,
+    /// `total_time_ms` MINUS the rule-fetch I/O wait (the sum of each
+    /// `active_version(...)` await), `d.dd`. This is the actual COMPUTE the engine
+    /// did (selector gates + evals + applies + injection) with the backend round
+    /// trips excluded — so a 34ms cold request whose 32ms was a rule refetch
+    /// reports ~2ms compute, matching the warm number. Always <= `total_time_ms`.
+    compute_time_ms: String,
 }
 
 /// Apply every matching feature's actions to an HTML body, in order, chaining
@@ -222,8 +253,17 @@ async fn apply_features_html(
 ) -> ApplyResult {
     let mut any_applied = false;
     let mut matched: Vec<(String, FeatureEntry)> = Vec::new();
+    // EXACT rule-engine wall-clock (spec item 7): start IMMEDIATELY before the
+    // per-feature loop, stop IMMEDIATELY after injection is computed below.
+    let engine_start = Instant::now();
+    // Accumulated rule-fetch I/O wait (each `active_version(...)` await). Subtracted
+    // from the wall-clock to derive `compute_time_ms` (engine work only).
+    let mut fetch_ms = 0.0_f64;
     for feature_id in feature_ids {
-        let Some(av) = state.backend.active_version(feature_id, Env::Live).await else {
+        let fetch_start = Instant::now();
+        let av = state.backend.active_version(feature_id, Env::Live).await;
+        fetch_ms += fetch_start.elapsed().as_secs_f64() * 1000.0;
+        let Some(av) = av else {
             continue;
         };
         if !html_selector_matches(&av, &current) {
@@ -281,29 +321,48 @@ async fn apply_features_html(
         // The feature is MARKED only when it actually CHANGED the body (spec
         // v2.1 applied-gate) AND it traversed >=1 expression node (build_entry).
         if applied {
-            if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
+            if let Some(entry) =
+                features_matched::build_entry(&timings, eval_ms, Some(av.version_number))
+            {
                 matched.push((feature_id.clone(), entry));
             }
         }
     }
-    // Inject `window.rre.feature_expressions` as the FINAL step — after all
-    // sanitized component transforms (spec §2 sanitizer bypass) — only when
-    // >=1 feature matched.
+    // total_time_ms boundary: the rule-engine wall-clock spans the loop AND the
+    // feature-expression injection. Compute it BEFORE injecting so the injected
+    // value reflects the work measured up to (but not including) re-encoding.
+    let elapsed_ms = engine_start.elapsed().as_secs_f64() * 1000.0;
+    let total_time_ms = features_matched::fmt_ms(elapsed_ms);
+    // compute_time_ms = wall-clock EXCLUDING the rule-fetch I/O wait (clamped >= 0).
+    let compute_time_ms = features_matched::fmt_ms((elapsed_ms - fetch_ms).max(0.0));
+    // Inject `window.rre.{feature_expressions,total_time_ms,compute_time_ms}` as the
+    // FINAL step — after all sanitized component transforms (spec §2 sanitizer
+    // bypass) — only when >=1 feature matched.
     if !matched.is_empty() {
-        current = inject_html_feature_expressions(current, &matched);
+        current =
+            inject_html_feature_expressions(current, &matched, &total_time_ms, &compute_time_ms);
     }
     ApplyResult {
         body: current,
         any_applied,
         matched,
+        total_time_ms,
+        compute_time_ms,
     }
 }
 
-/// Append the trusted `window.rre.feature_expressions` script immediately before
-/// `</body>` (or at the end of the document if there is none). The serialized
-/// map has every `<` escaped to `<` so an embedded `</script>` cannot break
-/// out — XSS-safe; this is first-party trusted data (spec §2).
-fn inject_html_feature_expressions(body: String, matched: &[(String, FeatureEntry)]) -> String {
+/// Append the trusted `window.rre.{feature_expressions,total_time_ms,compute_time_ms}`
+/// script immediately before `</body>` (or at the end of the document if there is
+/// none). The serialized map has every `<` escaped to `<` so an embedded
+/// `</script>` cannot break out — XSS-safe; this is first-party trusted data
+/// (spec §2). `total_time_ms` and `compute_time_ms` are top-level SIBLINGS of
+/// `feature_expressions` (spec item 7; `compute_time_ms` = total minus rule-fetch I/O).
+fn inject_html_feature_expressions(
+    body: String,
+    matched: &[(String, FeatureEntry)],
+    total_time_ms: &str,
+    compute_time_ms: &str,
+) -> String {
     let map: serde_json::Map<String, serde_json::Value> = matched
         .iter()
         .map(|(id, entry)| (id.clone(), serde_json::to_value(entry).unwrap_or_default()))
@@ -311,8 +370,16 @@ fn inject_html_feature_expressions(body: String, matched: &[(String, FeatureEntr
     let json = serde_json::to_string(&serde_json::Value::Object(map))
         .unwrap_or_else(|_| "{}".to_string())
         .replace('<', "\\u003c");
+    // The time fields are `d.dd` strings; serialize so each is a quoted JSON string
+    // (escaping any `<` for the same break-out safety).
+    let total_json = serde_json::to_string(total_time_ms)
+        .unwrap_or_else(|_| "\"0.00\"".to_string())
+        .replace('<', "\\u003c");
+    let compute_json = serde_json::to_string(compute_time_ms)
+        .unwrap_or_else(|_| "\"0.00\"".to_string())
+        .replace('<', "\\u003c");
     let script = format!(
-        "<script>window.rre=window.rre||{{}};window.rre.feature_expressions={json};</script>"
+        "<script>window.rre=window.rre||{{}};window.rre.feature_expressions={json};window.rre.total_time_ms={total_json};window.rre.compute_time_ms={compute_json};</script>"
     );
     match body.rfind("</body>") {
         Some(idx) => {
@@ -350,8 +417,17 @@ async fn apply_features_json(
 ) -> ApplyResult {
     let mut any_applied = false;
     let mut matched: Vec<(String, FeatureEntry)> = Vec::new();
+    // EXACT rule-engine wall-clock (spec item 7): start IMMEDIATELY before the
+    // per-feature loop, stop IMMEDIATELY after injection is computed below.
+    let engine_start = Instant::now();
+    // Accumulated rule-fetch I/O wait (each `active_version(...)` await). Subtracted
+    // from the wall-clock to derive `compute_time_ms` (engine work only).
+    let mut fetch_ms = 0.0_f64;
     for feature_id in feature_ids {
-        let Some(av) = state.backend.active_version(feature_id, Env::Live).await else {
+        let fetch_start = Instant::now();
+        let av = state.backend.active_version(feature_id, Env::Live).await;
+        fetch_ms += fetch_start.elapsed().as_secs_f64() * 1000.0;
+        let Some(av) = av else {
             continue;
         };
         if !json_selector_matches(&av, &current) {
@@ -399,16 +475,25 @@ async fn apply_features_json(
         // The feature is MARKED only when it actually CHANGED the body (spec
         // v2.1 applied-gate) AND it traversed >=1 expression node (build_entry).
         if applied {
-            if let Some(entry) = features_matched::build_entry(&timings, eval_ms) {
+            if let Some(entry) =
+                features_matched::build_entry(&timings, eval_ms, Some(av.version_number))
+            {
                 matched.push((feature_id.clone(), entry));
             }
         }
     }
-    // Inject `body.rre.feature_expressions` (spec v2.2): create `rre` if absent,
-    // merge `feature_expressions` without clobbering other `rre.*` keys. Only
-    // when >=1 feature matched.
+    // total_time_ms boundary: the rule-engine wall-clock spans the loop AND the
+    // feature-expression injection. Compute it BEFORE injecting so the injected
+    // value reflects the work measured up to (but not including) re-serialization.
+    let elapsed_ms = engine_start.elapsed().as_secs_f64() * 1000.0;
+    let total_time_ms = features_matched::fmt_ms(elapsed_ms);
+    // compute_time_ms = wall-clock EXCLUDING the rule-fetch I/O wait (clamped >= 0).
+    let compute_time_ms = features_matched::fmt_ms((elapsed_ms - fetch_ms).max(0.0));
+    // Inject `body.rre.{feature_expressions,total_time_ms,compute_time_ms}` (spec
+    // v2.2 / item 7): create `rre` if absent, merge without clobbering other
+    // `rre.*` keys. Only when >=1 feature matched.
     if !matched.is_empty() {
-        inject_json_feature_expressions(&mut current, &matched);
+        inject_json_feature_expressions(&mut current, &matched, &total_time_ms, &compute_time_ms);
     }
     // Serialize the final chained body. A serialize error (≈never for a Value)
     // falls back to the original untouched body.
@@ -417,6 +502,8 @@ async fn apply_features_json(
             body: s,
             any_applied,
             matched,
+            total_time_ms,
+            compute_time_ms,
         },
         Err(e) => {
             metrics::counter!("proxy_apply_errors_total").increment(1);
@@ -425,17 +512,22 @@ async fn apply_features_json(
                 body: original.to_string(),
                 any_applied: false,
                 matched: Vec::new(),
+                total_time_ms: features_matched::fmt_ms(0.0),
+                compute_time_ms: features_matched::fmt_ms(0.0),
             }
         }
     }
 }
 
 /// Merge the matched features' entries into `body["rre"]["feature_expressions"]`
-/// (spec v2.2). Creates the `rre` object if absent; sets `feature_expressions`
+/// (spec v2.2) and set `body["rre"]["total_time_ms"]` + `["compute_time_ms"]` (spec
+/// item 7) as top-level SIBLINGS. Creates the `rre` object if absent; sets the keys
 /// without clobbering other `rre.*` keys. A non-object `body` is left untouched.
 fn inject_json_feature_expressions(
     body: &mut serde_json::Value,
     matched: &[(String, FeatureEntry)],
+    total_time_ms: &str,
+    compute_time_ms: &str,
 ) {
     let Some(root) = body.as_object_mut() else {
         return; // top-level non-object body: nothing to namespace under.
@@ -455,6 +547,14 @@ fn inject_json_feature_expressions(
     rre_obj.insert(
         "feature_expressions".to_string(),
         serde_json::Value::Object(fe),
+    );
+    rre_obj.insert(
+        "total_time_ms".to_string(),
+        serde_json::Value::String(total_time_ms.to_string()),
+    );
+    rre_obj.insert(
+        "compute_time_ms".to_string(),
+        serde_json::Value::String(compute_time_ms.to_string()),
     );
 }
 
@@ -501,45 +601,66 @@ fn log_skipped(feature_id: &str, canvas_label: &str, eval_ms: f64) {
 /// always) OR it parses and matches >=1 element. A malformed selector fails open
 /// (apply). Never panics.
 fn html_selector_matches(av: &ActiveVersionRead, body: &str) -> bool {
-    let Some(selector) = av
-        .applicability
-        .html_selector
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        return true; // no gate configured -> apply.
-    };
-    let sel = match scraper::Selector::parse(selector) {
-        Ok(s) => s,
-        Err(_) => {
-            tracing::warn!(selector, "html_selector parse failed, applying (fail-open)");
-            return true;
-        }
-    };
-    let doc = scraper::Html::parse_document(body);
-    doc.select(&sel).next().is_some()
+    selector_matches(&av.applicability, false, None, body)
 }
 
 /// JSON applicability gate. True when `json_selector` is absent/empty (apply
 /// always) OR it parses and matches >=1 node. A malformed selector fails open
 /// (apply). Never panics.
 fn json_selector_matches(av: &ActiveVersionRead, body: &serde_json::Value) -> bool {
-    let Some(selector) = av
-        .applicability
-        .json_selector
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        return true; // no gate configured -> apply.
-    };
-    match serde_json_path::JsonPath::parse(selector) {
-        Ok(path) => !path.query(body).all().is_empty(),
-        Err(_) => {
-            tracing::warn!(selector, "json_selector parse failed, applying (fail-open)");
-            true
+    selector_matches(&av.applicability, true, Some(body), "")
+}
+
+/// Shared applicability gate over an `&Applicability` + the CURRENT running body.
+/// `is_json` selects which selector applies: for JSON, `json_body` must be
+/// `Some` and the `json_selector` is queried against it; for HTML, the
+/// `html_selector` is matched against `html_body`. An absent/empty selector for
+/// the active content kind applies always (`true`); a malformed selector fails
+/// open (`true`). Never panics. Shared by production (`html_selector_matches`/
+/// `json_selector_matches`) and the full-journey endpoint so both gate identically.
+pub(crate) fn selector_matches(
+    applicability: &Applicability,
+    is_json: bool,
+    json_body: Option<&serde_json::Value>,
+    html_body: &str,
+) -> bool {
+    if is_json {
+        let Some(selector) = applicability
+            .json_selector
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            return true; // no gate configured -> apply.
+        };
+        let Some(body) = json_body else {
+            return true; // no body to query -> apply (fail-open).
+        };
+        match serde_json_path::JsonPath::parse(selector) {
+            Ok(path) => !path.query(body).all().is_empty(),
+            Err(_) => {
+                tracing::warn!(selector, "json_selector parse failed, applying (fail-open)");
+                true
+            }
         }
+    } else {
+        let Some(selector) = applicability
+            .html_selector
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            return true; // no gate configured -> apply.
+        };
+        let sel = match scraper::Selector::parse(selector) {
+            Ok(s) => s,
+            Err(_) => {
+                tracing::warn!(selector, "html_selector parse failed, applying (fail-open)");
+                return true;
+            }
+        };
+        let doc = scraper::Html::parse_document(html_body);
+        doc.select(&sel).next().is_some()
     }
 }
 
@@ -835,6 +956,23 @@ fn host(req: &axum::extract::Request) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .or_else(|| req.uri().authority().map(|a| a.as_str().to_string()))
+}
+
+/// Convert a `{name: value}` test-header map into a `HeaderMap`, skipping any
+/// entry whose name or value is not a valid HTTP header (defensive — the frontend
+/// already validates header names/values to the same rules as Site headers).
+/// Shared by `/__rre/eval-url` and `/__rre/eval-full-journey`.
+pub(crate) fn headers_to_map(headers: &HashMap<String, String>) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        if let (Ok(n), Ok(v)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            map.insert(n, v);
+        }
+    }
+    map
 }
 
 /// Parse all request cookies into a map.

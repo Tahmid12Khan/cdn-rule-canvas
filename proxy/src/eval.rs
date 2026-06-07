@@ -15,7 +15,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -26,6 +25,7 @@ use crate::domain::features_matched::{self, FeatureEntry, NodeTiming};
 use crate::domain::graph::{CanvasGraph, Node};
 use crate::domain::translator::to_decision_content;
 use crate::forwarder;
+use crate::infra::backend_client::ActiveOutcome;
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -116,6 +116,15 @@ pub struct EvalResponse {
     /// expression node matched (the path went straight to END).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<FeatureEntry>,
+    /// EXACT rule-engine wall-clock for this single canvas under test (spec
+    /// item 7), `d.dd`. Measured boundary-to-boundary of the `evaluate_with_trace`
+    /// call (the same `eval_ms` boundary). Mirrors the runtime `rre.total_time_ms`.
+    pub total_time_ms: String,
+    /// Engine compute time EXCLUDING rule-fetch I/O (mirrors the runtime
+    /// `rre.compute_time_ms`), `d.dd`. The test-eval path does NO backend fetch, so
+    /// this always equals `total_time_ms`. Present so the test panel and the runtime
+    /// injection share one shape.
+    pub compute_time_ms: String,
 }
 
 #[derive(Serialize)]
@@ -146,10 +155,22 @@ pub struct JourneyEntry {
 /// it. Built either from the request context (`/__rre/eval`) or from a real
 /// upstream fetch (`/__rre/eval-url`); `build_journey` folds each expression
 /// node's action onto this running body.
-struct JourneyInputs {
-    is_json: bool,
-    json_body: Value,
-    html_body: String,
+pub(crate) struct JourneyInputs {
+    pub(crate) is_json: bool,
+    pub(crate) json_body: Value,
+    pub(crate) html_body: String,
+}
+
+/// The result of folding a canvas's matched expression actions over a running
+/// body: the ordered per-node journey, the per-node expression timings (for the
+/// `features_matched` summary), and the FINAL running body after the last action.
+/// `final_body` is a JSON value for JSON features, a `Value::String` for HTML —
+/// the same `body_after` snapshot shape — so the full-journey endpoint can chain
+/// it straight into the next feature.
+pub(crate) struct JourneyResult {
+    pub(crate) journey: Vec<JourneyEntry>,
+    pub(crate) timings: Vec<NodeTiming>,
+    pub(crate) final_body: Value,
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +193,7 @@ pub async fn eval_handler(
         .context
         .headers
         .as_ref()
-        .map(headers_to_map)
+        .map(forwarder::headers_to_map)
         .unwrap_or_default();
     let request_cookies = crate::forwarder::parse_cookies(&request_headers);
 
@@ -233,7 +254,7 @@ pub async fn eval_url_handler(
         path_and_query.push_str(q);
     }
 
-    let test_headers = headers_to_map(&req.headers);
+    let test_headers = forwarder::headers_to_map(&req.headers);
 
     // Fetch the real upstream THROUGH the proxy: resolves the Site (REQUIRED — no
     // fallback), applies the Site headers (site wins over the test headers on a
@@ -279,22 +300,6 @@ pub async fn eval_url_handler(
     };
 
     eval_to_response(&state, &req.canvas, ctx, &inputs).await
-}
-
-/// Convert a `{name: value}` test-header map into a `HeaderMap`, skipping any entry
-/// whose name or value is not a valid HTTP header (defensive — the frontend already
-/// validates header names/values to the same rules as Site headers).
-fn headers_to_map(headers: &HashMap<String, String>) -> HeaderMap {
-    let mut map = HeaderMap::new();
-    for (name, value) in headers {
-        if let (Ok(n), Ok(v)) = (
-            http::header::HeaderName::from_bytes(name.as_bytes()),
-            http::header::HeaderValue::from_str(value),
-        ) {
-            map.insert(n, v);
-        }
-    }
-    map
 }
 
 /// Run the shared eval core and serialize the result into an HTTP response. Errors
@@ -450,11 +455,23 @@ fn build_response(
         .find(|s| s.kind == "expression")
         .map(|s| s.node_id.clone());
 
-    let (journey, timings) = build_journey(state, canvas, inputs, &trace);
+    // The `/__rre/eval` + `/__rre/eval-url` test panels have no `outcomes` to
+    // resolve `apply_outcome` against (they exercise body-mutating actions), so the
+    // single-canvas path passes an empty outcomes slice and ignores `final_body`.
+    let JourneyResult {
+        journey, timings, ..
+    } = build_journey(state, canvas, inputs, &trace, &[]);
 
     // Summary (spec §5/§8): built exactly like one feature's entry, for the
-    // single canvas under test. `None` when no expression node matched.
-    let summary = features_matched::build_entry(&timings, eval_ms);
+    // single canvas under test. `None` when no expression node matched. The test
+    // panel posts a canvas (no saved version), so `version` is `None` (omitted).
+    let summary = features_matched::build_entry(&timings, eval_ms, None);
+
+    // total_time_ms (spec item 7): the eval wall-clock for this single canvas,
+    // measured boundary-to-boundary of the `evaluate_with_trace` call (`eval_ms`).
+    // The test-eval path does NO backend rule-fetch, so compute_time_ms == total.
+    let total_time_ms = features_matched::fmt_ms(eval_ms);
+    let compute_time_ms = total_time_ms.clone();
 
     let steps = trace
         .steps
@@ -483,6 +500,8 @@ fn build_response(
         steps,
         journey,
         summary,
+        total_time_ms,
+        compute_time_ms,
     }
 }
 
@@ -491,12 +510,19 @@ fn build_response(
 /// resulting body. Decisions snapshot the unchanged running body. The start node
 /// (synthetic) and the trailing end node bookend the journey. `body_after` is a
 /// JSON value for JSON features, a string for HTML.
-fn build_journey(
+///
+/// `outcomes` resolves `apply_outcome` actions (production semantics). The
+/// single-canvas test panels pass `&[]` (no outcomes to apply); the full-journey
+/// endpoint passes the resolved version's `outcomes` so chained body edits match
+/// production. Returns the journey, per-node timings, AND the final running body
+/// (so the full-journey caller can chain it into the next feature).
+pub(crate) fn build_journey(
     state: &AppState,
     canvas: &CanvasGraph,
     inputs: &JourneyInputs,
     trace: &EvalTrace,
-) -> (Vec<JourneyEntry>, Vec<NodeTiming>) {
+    outcomes: &[ActiveOutcome],
+) -> JourneyResult {
     let is_json = inputs.is_json;
     // Running JSON body (only meaningful for JSON features).
     let mut json_body: Value = inputs.json_body.clone();
@@ -539,10 +565,14 @@ fn build_journey(
             if let Some(action) = action_for.get(step.node_id.as_str()) {
                 let t_node = std::time::Instant::now();
                 if is_json {
-                    json_apply::apply_action_json(&mut json_body, action, &[]);
+                    json_apply::apply_action_json(&mut json_body, action, outcomes);
                 } else {
-                    let (next, _) =
-                        json_apply::apply_action_html(html_body, action, &[], &state.sanitizer);
+                    let (next, _) = json_apply::apply_action_html(
+                        html_body,
+                        action,
+                        outcomes,
+                        &state.sanitizer,
+                    );
                     html_body = next;
                 }
                 step_time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
@@ -580,7 +610,14 @@ fn build_journey(
         });
     }
 
-    (journey, timings)
+    // The FINAL running body (same snapshot shape as `body_after`): the chained
+    // input for the next feature on the full-journey path.
+    let final_body = snapshot(is_json, &json_body, &html_body);
+    JourneyResult {
+        journey,
+        timings,
+        final_body,
+    }
 }
 
 /// Snapshot the running body as a journey `body_after` value (JSON or string).

@@ -22,13 +22,14 @@ const HOST: &str = "rre.test";
 
 /// Mount `GET /api/v1/features?page_size=100` returning the single demo feature so
 /// the proxy's per-feature pipeline runs it for every request (no feature_map).
+/// `type: "json"` so the content-type filter keeps it on a JSON response.
 async fn mount_feature_list(backend: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/api/v1/features"))
         .and(query_param("page_size", "100"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [{ "id": FEATURE, "name": FEATURE, "type": "json", "execution_order": 1 }]
+        })))
         .mount(backend)
         .await;
 }
@@ -226,6 +227,13 @@ async fn matched_feature_injects_header_and_feature_expressions() {
     let v: Value = serde_json::from_str(&body).unwrap();
     let entry = &v["rre"]["feature_expressions"][FEATURE];
 
+    // The entry carries the served active `version` (== 1, the mounted version).
+    assert_eq!(
+        entry["version"],
+        json!(1),
+        "entry carries the served active version_number: {entry}"
+    );
+
     // v2.2: the matched path traversed t_body then a_pw, as an `expressions`
     // array of objects (in order).
     let expressions = entry["expressions"].as_array().unwrap();
@@ -270,6 +278,32 @@ async fn matched_feature_injects_header_and_feature_expressions() {
         assert!(parsed <= prev, "expensive_nodes must be DESC by time");
         prev = parsed;
     }
+
+    // spec item 7: `rre.total_time_ms` is a top-level `d.dd` STRING sibling of
+    // feature_expressions (NOT nested per-feature).
+    let total_time_ms = v["rre"]["total_time_ms"]
+        .as_str()
+        .expect("rre.total_time_ms is a string sibling of feature_expressions");
+    assert!(
+        is_d_dd(total_time_ms),
+        "total_time_ms should be d.dd, got {total_time_ms:?}"
+    );
+
+    // `rre.compute_time_ms` is a `d.dd` STRING sibling, <= total_time_ms (it
+    // excludes the per-feature rule-fetch I/O wait).
+    let compute_time_ms = v["rre"]["compute_time_ms"]
+        .as_str()
+        .expect("rre.compute_time_ms is a string sibling of feature_expressions");
+    assert!(
+        is_d_dd(compute_time_ms),
+        "compute_time_ms should be d.dd, got {compute_time_ms:?}"
+    );
+    let total_f: f64 = total_time_ms.parse().unwrap();
+    let compute_f: f64 = compute_time_ms.parse().unwrap();
+    assert!(
+        compute_f <= total_f + 1e-9,
+        "compute_time_ms ({compute_f}) <= total_time_ms ({total_f})"
+    );
 
     // The actual body transform is unchanged.
     assert_eq!(v["body"], json!([]));
@@ -395,6 +429,77 @@ async fn no_op_expression_is_not_marked_applied_gate() {
     );
     // The body itself is unchanged.
     assert_eq!(v["body"], json!(["p1", "p2", "p3"]));
+}
+
+/// Content-type filter: on a JSON response the proxy evaluates ONLY json-type
+/// features — an html-type feature's active-version endpoint is NEVER fetched
+/// (and would not be evaluated). Proves the hot-path filter removes cross-type
+/// evals + their cold rule fetches.
+#[tokio::test]
+async fn json_response_does_not_fetch_or_eval_html_features() {
+    const HTML_FEATURE: &str = "demo-html-article";
+
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/article/ct"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"api":"demo-article","body":["p1","p2","p3"]}"#.as_bytes(),
+            "application/json; charset=utf-8",
+        ))
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    // Feature list with BOTH a json and an html feature.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/features"))
+        .and(query_param("page_size", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [
+                { "id": FEATURE,      "name": FEATURE,      "type": "json", "execution_order": 1 },
+                { "id": HTML_FEATURE, "name": HTML_FEATURE, "type": "html", "execution_order": 1 }
+            ]
+        })))
+        .mount(&backend)
+        .await;
+    // The json feature IS fetched + applied.
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
+    // The html feature's active-version MUST NOT be fetched on a JSON response.
+    // `expect(0)` fails the test on any hit.
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/features/{HTML_FEATURE}/active-version"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .expect(0)
+        .mount(&backend)
+        .await;
+
+    let base = spawn(&upstream.uri(), &backend.uri()).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base}/article/ct"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 200);
+    let body = res.text().await.unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
+    // The json feature still applied (body emptied) — the filter kept it.
+    assert_eq!(v["body"], json!([]), "json feature applied: {body}");
+    // Only the json feature is in feature_expressions; the html feature is absent.
+    let fe = &v["rre"]["feature_expressions"];
+    assert!(fe.get(FEATURE).is_some(), "json feature present: {fe}");
+    assert!(
+        fe.get(HTML_FEATURE).is_none(),
+        "html feature must not appear on a JSON response: {fe}"
+    );
+    // The `expect(0)` mock is verified on drop (no html active-version fetch).
 }
 
 /// A value is `d.dd`: digits, a dot, exactly two trailing digits.

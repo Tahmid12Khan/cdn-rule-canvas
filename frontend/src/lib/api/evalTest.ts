@@ -105,6 +105,9 @@ export type SummaryExpression = z.infer<typeof SummaryExpression>;
 // §5 / §v2.2). Mirrors a single feature's `feature_expressions` entry. All
 // times are strings formatted "d.dd" so trailing zeros survive (0.10, not 0.1).
 export const EvalSummary = z.object({
+  // The served active version_number, in the PRODUCTION injection. The test
+  // panel posts a canvas (no saved version) so the proxy omits it → null/absent.
+  version: z.number().int().nullable().optional(),
   expressions: z.array(SummaryExpression),
   time_took_ms: z.string(),
   expensive_nodes: z.array(SummaryExpression),
@@ -122,6 +125,13 @@ export const EvalResponse = z.object({
   // Additive (features-matched-spec §5). Absent on older proxies → null, so
   // the timing summary simply doesn't render.
   summary: EvalSummary.nullish().default(null),
+  // EXACT rule-engine wall-clock for the single canvas under test (spec item 7),
+  // formatted "d.dd". Additive — absent on older proxies → defaults to "0.00".
+  total_time_ms: z.string().default("0.00"),
+  // Engine compute time EXCLUDING rule-fetch I/O (mirrors runtime
+  // `rre.compute_time_ms`), "d.dd". On the test-eval path there is no backend
+  // fetch, so it equals total_time_ms. Additive → defaults to "0.00".
+  compute_time_ms: z.string().default("0.00"),
 });
 export type EvalResponse = z.infer<typeof EvalResponse>;
 

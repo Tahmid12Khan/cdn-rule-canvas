@@ -21,13 +21,14 @@ const PAYWALL_OUTCOME: &str = "22222222-2222-2222-2222-222222222222";
 
 /// Mount `GET /api/v1/features?page_size=100` returning the single demo feature so
 /// the proxy's per-feature pipeline runs it for every request (no feature_map).
+/// `type: "html"` so the content-type filter keeps it on an HTML response.
 async fn mount_feature_list(backend: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/api/v1/features"))
         .and(query_param("page_size", "100"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [{ "id": FEATURE, "name": FEATURE, "type": "html", "execution_order": 1 }]
+        })))
         .mount(backend)
         .await;
 }
@@ -279,9 +280,12 @@ async fn matched_html_feature_injects_script_before_body_close() {
         "script must precede </body>; body: {body}"
     );
 
-    // Extract the JSON between `=` and the closing `;</script>`.
+    // Extract the feature_expressions JSON between `=` and the next assignment
+    // (`;window.rre.total_time_ms=`, a sibling of feature_expressions per spec item 7).
     let after = &body[script_start + marker.len()..];
-    let json_end = after.find(";</script>").expect("script terminator");
+    let json_end = after
+        .find(";window.rre.total_time_ms=")
+        .expect("total_time_ms sibling assignment");
     let json_part = &after[..json_end];
     // §2 escape: the serialized JSON carries NO raw `<` (so no `</script>` breakout).
     assert!(
@@ -298,6 +302,41 @@ async fn matched_html_feature_injects_script_before_body_close() {
     assert!(
         parsed[FEATURE]["expressions"].is_array(),
         "entry has an expressions array: {parsed}"
+    );
+    // The entry carries the served active `version` (== 1, the mounted version).
+    assert_eq!(
+        parsed[FEATURE]["version"],
+        serde_json::json!(1),
+        "entry carries the served active version_number: {parsed}"
+    );
+    // spec item 7: `window.rre.total_time_ms` is a top-level `d.dd` STRING sibling
+    // of feature_expressions, assigned right after it (then compute_time_ms).
+    let total_after = &after[json_end + ";window.rre.total_time_ms=".len()..];
+    let total_end = total_after
+        .find(";window.rre.compute_time_ms=")
+        .expect("compute_time_ms sibling assignment");
+    let total_part = &total_after[..total_end];
+    let total: serde_json::Value = serde_json::from_str(total_part).unwrap();
+    let total_str = total.as_str().expect("total_time_ms is a string");
+    assert!(
+        total_str.contains('.') && total_str.split('.').nth(1).is_some_and(|d| d.len() == 2),
+        "total_time_ms is `d.dd`-formatted; got {total_str}"
+    );
+    // compute_time_ms: a `d.dd` STRING sibling, <= total_time_ms (excludes fetch I/O).
+    let compute_after = &total_after[total_end + ";window.rre.compute_time_ms=".len()..];
+    let compute_end = compute_after.find(";</script>").expect("script terminator");
+    let compute_part = &compute_after[..compute_end];
+    let compute: serde_json::Value = serde_json::from_str(compute_part).unwrap();
+    let compute_str = compute.as_str().expect("compute_time_ms is a string");
+    assert!(
+        compute_str.contains('.') && compute_str.split('.').nth(1).is_some_and(|d| d.len() == 2),
+        "compute_time_ms is `d.dd`-formatted; got {compute_str}"
+    );
+    let total_f: f64 = total_str.parse().unwrap();
+    let compute_f: f64 = compute_str.parse().unwrap();
+    assert!(
+        compute_f <= total_f + 1e-9,
+        "compute_time_ms ({compute_f}) <= total_time_ms ({total_f})"
     );
 }
 
@@ -876,4 +915,79 @@ async fn eval_url_drops_invalid_test_headers() {
         req.headers.get("x-bad header").is_none(),
         "an invalid test-header name is dropped, never forwarded"
     );
+}
+
+/// Content-type filter: on an HTML response the proxy evaluates ONLY html-type
+/// features — a json-type feature's active-version endpoint is NEVER fetched.
+/// The reverse of `json_response_does_not_fetch_or_eval_html_features`.
+#[tokio::test]
+async fn html_response_does_not_fetch_or_eval_json_features() {
+    const JSON_FEATURE: &str = "demo-json-feature";
+
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/article/ct"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"<html><head><meta name="paywall" content="true"></head><body><div id="article-body"><p>Body</p></div></body></html>"#
+                .as_bytes(),
+            "text/html; charset=utf-8",
+        ))
+        .mount(&upstream)
+        .await;
+
+    let backend = MockServer::start().await;
+    // Feature list with BOTH an html and a json feature.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/features"))
+        .and(query_param("page_size", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [
+                { "id": FEATURE,      "name": FEATURE,      "type": "html", "execution_order": 1 },
+                { "id": JSON_FEATURE, "name": JSON_FEATURE, "type": "json", "execution_order": 1 }
+            ]
+        })))
+        .mount(&backend)
+        .await;
+    // The html feature IS fetched + applied.
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/features/{FEATURE}/active-version")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .mount(&backend)
+        .await;
+    // The json feature's active-version MUST NOT be fetched on an HTML response.
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/features/{JSON_FEATURE}/active-version"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(active_version_body()))
+        .expect(0)
+        .mount(&backend)
+        .await;
+
+    let base = spawn(&upstream.uri(), &backend.uri()).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base}/article/ct"))
+        .header("host", HOST)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 200);
+    // The html feature applied (paywall injected); the json feature never ran.
+    assert_eq!(
+        res.headers()
+            .get(format!("x-rre-feature-{FEATURE}"))
+            .and_then(|v| v.to_str().ok()),
+        Some("true"),
+        "html feature applied (filter kept it)"
+    );
+    assert!(
+        res.headers()
+            .get(format!("x-rre-feature-{JSON_FEATURE}"))
+            .is_none(),
+        "json feature must not run on an HTML response"
+    );
+    let body = res.text().await.unwrap();
+    assert!(body.contains("Subscribe to continue"), "body: {body}");
+    // The `expect(0)` mock is verified on drop (no json active-version fetch).
 }

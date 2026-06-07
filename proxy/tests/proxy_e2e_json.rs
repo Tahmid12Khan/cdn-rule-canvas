@@ -122,9 +122,9 @@ async fn run(upstream_json: &str, upstream_path: &str, applicability: Value) -> 
     Mock::given(method("GET"))
         .and(path("/api/v1/features"))
         .and(query_param("page_size", "100"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({ "items": [{ "id": FEATURE }] })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [{ "id": FEATURE, "name": FEATURE, "type": "json", "execution_order": 1 }]
+        })))
         .mount(&backend)
         .await;
     Mock::given(method("GET"))

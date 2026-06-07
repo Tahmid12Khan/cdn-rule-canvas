@@ -60,6 +60,7 @@ source of truth and the PROXY section mirrors it.
 | `NO_LIVE_VERSION` | 404 | active-version requested, none LIVE/STAGING |
 | `SITE_NOT_FOUND` | 404 | site slug missing |
 | `SLUG_CONFLICT` | 409 | duplicate feature slug or site slug |
+| `EXECUTION_ORDER_CONFLICT` | 409 | duplicate feature `execution_order` within a type |
 | `CONFLICT` | 409 | site name or source (host:port) already exists |
 | `VERSION_EDIT_LOCKED` | 409 | mutate rule_graph/outcomes/components on non-DRAFT version |
 | `INVALID_STATUS_TRANSITION` | 409 | illegal publish/unpublish/delete transition |
@@ -80,6 +81,7 @@ pub enum AppError {
     #[error("{0}")] ComponentNotFound(String),
     #[error("{0}")] NoLiveVersion(String),
     #[error("{0}")] SlugConflict(String),
+    #[error("{0}")] ExecutionOrderConflict(String),
     #[error("{0}")] VersionEditLocked(String),
     #[error("{0}")] InvalidStatusTransition(String),
     #[error("{0}")] BuiltinOutcomeProtected(String),
@@ -135,6 +137,13 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
   Indexes: `sites_source_unique UNIQUE (source_host, source_port)`; `sites_created_at_idx (created_at DESC, slug ASC)`.
   CHECKs: source/dest protocol IN (`http`,`https`); source/dest port 1..65535. Down drops the table.
+- `0012_feature_execution_order`: `ALTER TABLE rre.features ADD COLUMN execution_order INTEGER NOT NULL
+  DEFAULT 0`, then BACKFILL existing rows deterministically per type
+  (`ROW_NUMBER() OVER (PARTITION BY "type" ORDER BY created_at, id)`), then `DROP DEFAULT` (new rows get
+  an explicit order from the service), then `ADD CONSTRAINT features_type_execution_order_unique UNIQUE
+  ("type", execution_order)`. Lowest `execution_order` runs first; the number space is PER type
+  (html/json independently) so an HTML and a JSON feature can both be order 1. Down drops the constraint
+  then the column.
 - `0011_test_presets`: creates `rre.test_presets` table — a GLOBAL library of reusable inputs for the
   rule-builder Test panels (not feature/version-scoped). Columns: `slug VARCHAR(64) PK`,
   `name VARCHAR(200) UNIQUE NOT NULL`, `kind VARCHAR(8) NOT NULL`, `payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
@@ -153,6 +162,7 @@ after creating versions). Never reorder.
 
 ```rust
 pub struct Feature { pub id: String, pub name: String, pub r#type: FeatureType,
+  pub execution_order: i32, /* per-type, lowest runs first; UNIQUE(type, execution_order) */
   pub staging_version_id: Option<Uuid>, pub live_version_id: Option<Uuid>,
   pub created_at: DateTime<Utc>, pub updated_at: DateTime<Utc> }
 pub struct Version { pub id: Uuid, pub feature_id: String, pub version_number: i32,
@@ -174,9 +184,14 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
 - Pagination (SCAFFOLD): `PageParams { page: Option<u32>, page_size: Option<u32> }` with
   `resolve() -> (limit i64, offset i64, page u32, page_size u32)` (default 20, cap 100);
   `Page<T> { items: Vec<T>, page: u32, page_size: u32, total: i64 }`.
-- Feature: `FeatureCreate { id (SLUG_RE, 3..=64), name (1..=200), r#type }`, `FeatureUpdate { name? }`,
-  `FeatureRead { id, name, r#type, staging_version_id?, live_version_id?, created_at, updated_at }`.
-  `SLUG_RE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+- Feature: `FeatureCreate { id (SLUG_RE, 3..=64), name (1..=200), r#type, execution_order? }`,
+  `FeatureUpdate { name?, execution_order? }`,
+  `FeatureRead { id, name, r#type, execution_order, staging_version_id?, live_version_id?, created_at,
+  updated_at }`. `SLUG_RE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`. `execution_order` (i32) is PER type, lowest runs
+  first. On create, omit it → the service auto-assigns `MAX(execution_order WHERE type) + 1` (or 1);
+  supply it → pinned (subject to the per-type UNIQUE → 409 `EXECUTION_ORDER_CONFLICT`). On update it
+  reorders the one feature only — gaps are preserved, other rows are NOT renumbered; a duplicate within
+  the same type → 409 `EXECUTION_ORDER_CONFLICT`. HTML and JSON share the number space independently.
 - Site: `SiteCreate { slug (3..=64, kebab-case), name (1..=200), source_protocol, source_host (1..=255),
   source_port (1..=65535), dest_protocol, dest_host (1..=255), dest_port (1..=65535) }`,
   `SiteUpdate { slug (immutable), name?, source_protocol?, source_host?, source_port?, dest_protocol?,
@@ -432,7 +447,7 @@ Base prefix `/api/v1`; built in `lib.rs::build_app(state)`. CORS allows `setting
 # Node-type manifest (backend-owned; served verbatim, cacheable)
 GET    /api/v1/node-types                     -> node_types::list        -> serves Arc<NodeManifest>
 
-# Features
+# Features (list ordered by `type ASC, execution_order ASC` — lowest runs first)
 POST   /api/v1/features                       -> features::create        -> feature_service::create
 GET    /api/v1/features                       -> features::list          -> feature_service::list
 GET    /api/v1/features/{fid}                 -> features::get           -> feature_service::get
@@ -480,7 +495,8 @@ DELETE /api/v1/components/{cid}         -> components::delete         -> outcome
 ```
 
 Canonical responses: POST/clone/add → 201; DELETE → 204; others → 200. `POST /features` dup slug → 409
-`SLUG_CONFLICT`. `POST /sites` dup slug/name/source → 409 `CONFLICT`. `GET active-version?env=live|staging`
+`SLUG_CONFLICT`; dup `execution_order` within a type (create with pinned order, or `PATCH` reorder onto a
+taken slot) → 409 `EXECUTION_ORDER_CONFLICT`. `POST /sites` dup slug/name/source → 409 `CONFLICT`. `GET active-version?env=live|staging`
 (default live) → `ActiveVersionRead` / 404 `NO_LIVE_VERSION`. `POST versions` clones rule_graph from
 current LIVE (else empty 3-canvas) and seeds builtin `ShowContent` outcome. `PATCH version` with rule_graph
 on non-DRAFT → 409 `VERSION_EDIT_LOCKED`; invalid graph → 422. DELETE version on LIVE/STAGING → 409
@@ -594,14 +610,23 @@ Client -> [axum fallback] -> forwarder::forward
 #### Internal test-eval endpoints (rule-builder Test panels; not on the hot path)
 
 ```
-POST /__rre/eval      -> eval::eval_handler      synthetic: build EvaluationContext from the request body,
-                                                  NO upstream fetch. Used by the "Test a rule" panel.
-POST /__rre/eval-url  -> eval::eval_url_handler   live: resolve url host -> Site, fetch the REAL upstream
-                                                  (Site headers applied; SSRF-safe), eval the posted canvas.
+POST /__rre/eval               -> eval::eval_handler               synthetic: build EvaluationContext from the
+                                                                    request body, NO upstream fetch. "Test a rule".
+POST /__rre/eval-url           -> eval::eval_url_handler            live: resolve url host -> Site, fetch the REAL
+                                                                    upstream (Site headers applied; SSRF-safe), eval
+                                                                    the ONE posted canvas. "Test with a live URL".
+POST /__rre/eval-full-journey  -> full_journey::full_journey_handler live: fetch the URL once, run ALL saved features
+                                                                    of the response's content type, in execution
+                                                                    order, CHAINING the body feature->feature like
+                                                                    production. "Test Full Journey" (spec item 5).
 ```
-Both return the same `EvalResponse { matched_node_id?, traversed_node_ids[], traversed_edge_ids[], steps[],
-journey[], summary? }`. Errors use the nested envelope `{ error: { code, message } }` (matches `EvalFetchError`
-and the backend) so the frontend parses every eval failure uniformly.
+`/__rre/eval` and `/__rre/eval-url` return the same `EvalResponse { matched_node_id?, traversed_node_ids[],
+traversed_edge_ids[], steps[], journey[], summary?, total_time_ms }`. Errors use the nested envelope
+`{ error: { code, message } }` (matches `EvalFetchError` and the backend) so the frontend parses every eval
+failure uniformly. `journey[]` entries are `JourneyEntry { index, node_id, kind, label, branch?, body_after,
+time_ms }` (`body_after` is a JSON value for JSON features, a string for HTML; `time_ms` is `d.dd`).
+`total_time_ms` (added, `d.dd` string) is the rule-engine wall-clock for the single canvas under test (the
+`eval_ms` boundary) — the test-panel mirror of the runtime `rre.total_time_ms` (spec item 7).
 
 `POST /__rre/eval` request: `{ canvas: CanvasGraph, context: EvalContext }` where `EvalContext` (all fields
 optional, `#[serde(default)]`) =
@@ -613,6 +638,42 @@ header rules first). `site` simulates a matched-Site slug for `site_match` nodes
 
 `POST /__rre/eval-url` request: `{ canvas: CanvasGraph, url: String, headers?{} }`. A Site's configured header
 ALWAYS WINS over a colliding test `header` on the upstream fetch (a test header may not override a site default).
+
+`POST /__rre/eval-full-journey` request:
+`{ url: String, headers?{name:value}, env?: "live"|"staging" (default "live"), version_overrides?: { "<feature_id>": <version_number i32> } }`.
+Like `/__rre/eval-url` it validates the URL (absolute http/https + host) and resolves the host to a configured
+Site (SSRF-safe; Site headers win over a colliding test header). It then `classify`es the request, fetches the
+ordered feature list (`GET /features?page_size=100`), and KEEPS ONLY features whose `type` matches the response
+content kind — `json` features for a JSON body, `html` for HTML (spec items 8/9: HTML and JSON rules are
+separate, per-type-ordered lists). This feature SELECTION differs from production (which runs all features and
+self-gates); the per-feature LOOP is identical. For each kept feature it resolves the version
+(`version_overrides[id]` -> `GET /features/{fid}/versions/{vnum}`, else `active-version?env=`; unresolved ->
+skipped, body untouched), runs the selector gate against the CURRENT (chained) running body, builds the ctx from
+the CURRENT body, evals, and folds the matched actions — setting `current` to the result so a later feature sees
+an earlier one's edits. A JSON parse failure runs ZERO features (mirrors production "nothing runs"):
+`features: []`, `total_time_ms: "0.00"`. Response:
+```jsonc
+{
+  "content_kind": "html" | "json",
+  "site": "<slug>" | null,
+  "total_time_ms": "d.dd",            // EXACT wall-clock around the WHOLE multi-feature loop (Instant before the
+                                      // loop -> after the last feature), NOT a sum of per-feature times.
+  "features": [ {
+    "feature_id": "<id>",
+    "name": "<display name>",
+    "type": "html" | "json",
+    "execution_order": <number>,      // per-type, lowest first
+    "version_number": <number> | null,// resolved version; null if unresolved/skipped
+    "matched": <bool>,                // selector gate passed AND it evaluated
+    "journey": JourneyEntry[],        // SAME shape as EvalResponse.journey; [] when skipped
+    "summary": FeatureEntry | null,   // SAME as EvalResponse.summary; null when skipped / no expression matched
+    "time_took_ms": "d.dd"            // eval_ms + Σ per-node apply times (matches a single feature's entry)
+  } ]
+}
+```
+The three diff levels the frontend renders are derived from `features[].journey`: per-node (consecutive
+`body_after`), per-feature (first vs last `body_after` of one feature), and first-feature-start vs
+last-feature-end (`features[0].journey[0].body_after` vs `features[last].journey[last].body_after`).
 
 ### 2. Hot-Path Budget (p99)
 
@@ -776,6 +837,43 @@ Per-request JSON log (NEVER bodies/cookies): `trace_id`, `feature_id`, `canvas`,
 `eval_ms`, `transform_ms`, `apply_status`. Metrics (`metrics` + `metrics-exporter-prometheus`, `/metrics`):
 histograms `proxy_eval_ms` / `proxy_transform_ms` / `proxy_e2e_ms`; counters `proxy_requests_total{feature}`,
 `proxy_outcomes_total{outcome_id}`, `proxy_apply_errors_total`.
+
+#### In-band timing injection (`rre.*` — spec items 2 / 7)
+
+When ≥1 feature matched on a live request, the proxy injects a first-party timing block into the SERVED body
+as the FINAL step (after all sanitized component transforms). HTML: appended as
+`<script>window.rre.feature_expressions=…;window.rre.total_time_ms=…;window.rre.compute_time_ms=…;</script>`
+immediately before `</body>` (every `<` in the serialized JSON escaped to `<` so an embedded `</script>`
+cannot break out). JSON: merged under a reserved top-level `body.rre` object (created if absent; sibling
+`rre.*` keys preserved).
+
+- `rre.feature_expressions`: a `{ "<feature_id>": FeatureEntry }` map of each MATCHED feature's
+  `{ version, expressions[] (last-10 in order), time_took_ms ("d.dd"), expensive_nodes[] (top-3 by per-node
+  time) }`. `version` (i32) is the `version_number` of the active version used to evaluate that feature (the
+  served version). It is OMITTED on the `/__rre/eval(-url)` test-panel `summary` (a posted canvas has no saved
+  version → `#[serde(skip_serializing_if = "Option::is_none")]`). Example production entry:
+  `"dn-json-article": { "version": 7, "expressions":[…], "time_took_ms":"1.04", "expensive_nodes":[…] }`.
+- `rre.total_time_ms` (`"d.dd"` STRING, a top-level SIBLING of `feature_expressions`): the EXACT rule-engine
+  wall-clock across ALL features for this request — measured from immediately before the per-feature loop to
+  immediately after the feature-expression injection (the engine boundary; excludes upstream fetch +
+  re-encoding). It INCLUDES the per-feature rule-fetch I/O wait (each cached `active_version` await), so on a
+  cold cache it is dominated by backend round trips and is NOT a sum of per-feature `time_took_ms` (it also
+  covers selector gates + context builds + skipped features). Injected for BOTH HTML and JSON.
+- `rre.compute_time_ms` (`"d.dd"` STRING, top-level SIBLING): `total_time_ms` MINUS the accumulated
+  rule-fetch I/O wait (clamped ≥ 0) — the actual engine COMPUTE (selector gates + evals + applies +
+  injection) with backend round trips excluded. So a 34 ms cold request whose ~32 ms was a rule refetch
+  reports ~2 ms `compute_time_ms`, matching the warm number; always ≤ `total_time_ms`. Injected for both kinds.
+
+Active-version caching is STALE-WHILE-REVALIDATE (`backend_client`): a cache hit older than
+`active_version_ttl_secs` is served IMMEDIATELY while a background task refreshes it (a 404/NO_LIVE_VERSION
+on the refresh invalidates the key), so a refresh no longer blocks the request and `total_time_ms` stays
+warm across the TTL boundary. The hot-path forwarder also FILTERS features to the response content kind
+(html features for HTML, json for JSON), so only matching-type features are fetched + evaluated.
+
+The test panels surface the same numbers without injecting into a served page: `/__rre/eval(-url)`
+`EvalResponse.total_time_ms` is the single-canvas eval wall-clock and `EvalResponse.compute_time_ms`
+equals it (the test path does no backend rule-fetch); `/__rre/eval-full-journey`'s top-level
+`total_time_ms` is the whole-loop wall-clock (see §1 endpoints).
 
 ---
 

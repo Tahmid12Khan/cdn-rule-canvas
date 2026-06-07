@@ -34,6 +34,12 @@ pub struct Expression {
 /// `/__rre/eval` `summary` for the single canvas under test (spec §5).
 #[derive(Serialize, Clone, Debug)]
 pub struct FeatureEntry {
+    /// The `version_number` of the active version used to evaluate this feature.
+    /// `Some` for the production injection (the served version); `None` for the
+    /// `/__rre/eval(-url)` test panel (a posted canvas has no saved version) →
+    /// omitted from the JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i32>,
     /// Last-10 expression nodes the matched path traversed, in order.
     pub expressions: Vec<Expression>,
     /// Whole-feature time (`eval_ms + sum(per-node apply times)`), `d.dd`.
@@ -64,9 +70,14 @@ fn to_expression(t: &NodeTiming) -> Expression {
 }
 
 /// Build a feature's entry from the per-node expression timings (in traversal
-/// order) and the feature's eval duration. Returns `None` when no expression
-/// node was applied (the feature did NOT match — no header, no entry).
-pub fn build_entry(timings: &[NodeTiming], eval_ms: f64) -> Option<FeatureEntry> {
+/// order), the feature's eval duration, and the served active `version` (`None`
+/// for the test panel — a posted canvas has no saved version). Returns `None`
+/// when no expression node was applied (the feature did NOT match — no entry).
+pub fn build_entry(
+    timings: &[NodeTiming],
+    eval_ms: f64,
+    version: Option<i32>,
+) -> Option<FeatureEntry> {
     if timings.is_empty() {
         return None;
     }
@@ -90,6 +101,7 @@ pub fn build_entry(timings: &[NodeTiming], eval_ms: f64) -> Option<FeatureEntry>
         by_time.iter().take(3).map(|t| to_expression(t)).collect();
 
     Some(FeatureEntry {
+        version,
         expressions,
         time_took_ms,
         expensive_nodes,
@@ -111,7 +123,23 @@ mod tests {
 
     #[test]
     fn empty_timings_is_not_matched() {
-        assert!(build_entry(&[], 1.0).is_none());
+        assert!(build_entry(&[], 1.0, Some(1)).is_none());
+    }
+
+    #[test]
+    fn version_present_for_production_omitted_for_test_panel() {
+        let timings = vec![timing("a", 1.0)];
+        // Production: a served version_number is carried.
+        let with = build_entry(&timings, 0.0, Some(7)).unwrap();
+        assert_eq!(with.version, Some(7));
+        // Test panel: no saved version -> omitted (None -> skipped in JSON).
+        let without = build_entry(&timings, 0.0, None).unwrap();
+        assert_eq!(without.version, None);
+        let json = serde_json::to_value(&without).unwrap();
+        assert!(
+            json.get("version").is_none(),
+            "version omitted when None: {json}"
+        );
     }
 
     #[test]
@@ -132,7 +160,7 @@ mod tests {
             timing("d", 2.0),
             timing("e", 0.25),
         ];
-        let entry = build_entry(&timings, 0.0).unwrap();
+        let entry = build_entry(&timings, 0.0, Some(1)).unwrap();
 
         // expressions: traversal order (here all 5, since <=10).
         let ids: Vec<&str> = entry
@@ -159,7 +187,7 @@ mod tests {
     #[test]
     fn expressions_keep_last_10() {
         let timings: Vec<NodeTiming> = (0..12).map(|i| timing(&format!("n{i}"), 1.0)).collect();
-        let entry = build_entry(&timings, 0.0).unwrap();
+        let entry = build_entry(&timings, 0.0, Some(1)).unwrap();
         assert_eq!(entry.expressions.len(), 10);
         assert_eq!(entry.expressions.first().unwrap().expression_id, "n2"); // last 10 = n2..n11
         assert_eq!(entry.expressions.last().unwrap().expression_id, "n11");
@@ -176,7 +204,7 @@ mod tests {
             time_ms: 1.0,
         };
         let without = timing("b", 1.0);
-        let entry = build_entry(&[with, without], 0.0).unwrap();
+        let entry = build_entry(&[with, without], 0.0, Some(1)).unwrap();
         assert_eq!(entry.expressions[0].custom_expression_label, "trim_body");
         assert_eq!(entry.expressions[1].custom_expression_label, "");
     }
