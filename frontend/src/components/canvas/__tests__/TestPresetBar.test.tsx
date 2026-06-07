@@ -67,9 +67,10 @@ describe("TestPresetBar", () => {
     expect(onLoad).toHaveBeenCalledWith(sample.payload);
   });
 
-  it("saves the current payload as a new preset", async () => {
+  it("saves the current payload as a new preset (quick mode: no Kind / Payload JSON)", async () => {
     const user = userEvent.setup();
-    let posted: { slug?: string; payload?: unknown } | null = null;
+    let posted: { slug?: string; kind?: string; payload?: unknown } | null =
+      null;
     server.use(
       http.get(PRESETS_URL, () =>
         HttpResponse.json({ items: [], page: 1, page_size: 100, total: 0 }),
@@ -93,12 +94,20 @@ describe("TestPresetBar", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findByRole("dialog");
 
+    // Quick mode hides the Kind selector + the raw Payload JSON textarea so a
+    // non-technical user never edits JSON.
+    expect(screen.queryByLabelText(/kind/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/payload/i)).not.toBeInTheDocument();
+
     await user.type(screen.getByLabelText(/^name$/i), "Mobile paywall");
     await user.type(screen.getByLabelText(/^slug$/i), "mobile-paywall");
-    await user.click(screen.getByRole("button", { name: /save preset/i }));
+    await user.click(screen.getByRole("button", { name: /create preset/i }));
 
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted!.slug).toBe("mobile-paywall");
+    // Kind is auto-derived from the calling panel; payload is the panel's
+    // current inputs verbatim.
+    expect(posted!.kind).toBe("rule");
     expect(posted!.payload).toEqual({
       feature_type: "html",
       device_type: "mobile",

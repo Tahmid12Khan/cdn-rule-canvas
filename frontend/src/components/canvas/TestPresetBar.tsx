@@ -6,22 +6,23 @@
 // (CONTRACTS.md §3 migration 0011 / §7) keyed by `kind` (rule | url); the
 // `payload` is opaque and owned by the panel.
 //
+// Saving opens the shared TestPresetFormModal in "quick" mode (Name + Slug
+// only) so a non-technical user never edits raw JSON — the panel's current
+// inputs are handed in as the payload + kind.
+//
 // Browser state + network mutations → client component.
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { ApiError } from "@/lib/api/client";
-import { SLUG_RE } from "@/lib/api/features";
+import { TestPresetFormModal } from "@/components/test-presets/TestPresetFormModal";
 import {
-  createTestPreset,
   deleteTestPreset,
   listTestPresets,
   updateTestPreset,
   type TestPresetKind,
   type TestPresetRead,
 } from "@/lib/api/test-presets";
-import { toUserError } from "@/lib/errors/userError";
 
 interface TestPresetBarProps {
   kind: TestPresetKind;
@@ -37,10 +38,6 @@ const PAGE_SIZE = 100;
 
 const selectClass =
   "rounded-md border border-status-prevBg px-2 py-1.5 text-sm text-nav focus:border-brand-500 focus:outline-none";
-const inputClass =
-  "w-full rounded-md border border-status-prevBg px-3 py-2 text-sm text-nav shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60";
-const labelClass = "text-sm font-medium text-nav";
-const errorClass = "text-xs font-medium text-danger";
 
 export function TestPresetBar({
   kind,
@@ -105,11 +102,20 @@ export function TestPresetBar({
         </select>
       </label>
 
-      <SavePresetDialog
-        kind={kind}
-        currentPayload={currentPayload}
-        payloadValid={payloadValid}
+      <TestPresetFormModal
+        mode="quick"
+        presetKind={kind}
+        presetPayload={currentPayload as Record<string, unknown>}
         onSaved={(slug) => setLoadedSlug(slug)}
+        trigger={
+          <button
+            type="button"
+            disabled={!payloadValid}
+            className="rounded-md bg-action-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-action-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Save
+          </button>
+        }
       />
 
       {loaded && (
@@ -130,158 +136,6 @@ export function TestPresetBar({
         </>
       )}
     </div>
-  );
-}
-
-interface SavePresetDialogProps {
-  kind: TestPresetKind;
-  currentPayload: unknown;
-  payloadValid: boolean;
-  onSaved: (slug: string) => void;
-}
-
-function SavePresetDialog({
-  kind,
-  currentPayload,
-  payloadValid,
-  onSaved,
-}: SavePresetDialogProps) {
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [errors, setErrors] = useState<{
-    name?: string;
-    slug?: string;
-    form?: string;
-  }>({});
-
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setSlug("");
-      setErrors({});
-    }
-  }, [open]);
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createTestPreset({
-        slug,
-        name,
-        kind,
-        payload: currentPayload as Record<string, unknown>,
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["test-presets"] });
-      onSaved(slug);
-      setOpen(false);
-    },
-    onError: (err: unknown) => {
-      if (err instanceof ApiError && err.status === 409) {
-        setErrors({ slug: "That slug or name is already in use" });
-        return;
-      }
-      const ue = toUserError(err, { surface: "create" });
-      setErrors({ form: `${ue.title}. ${ue.howToFix}` });
-    },
-  });
-
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const next: { name?: string; slug?: string } = {};
-    if (name.trim().length < 1) next.name = "Name is required";
-    if (slug.length < 3 || slug.length > 64 || !SLUG_RE.test(slug)) {
-      next.slug = "Use lowercase kebab-case (3–64 chars, e.g. my-test)";
-    }
-    if (next.name || next.slug) {
-      setErrors(next);
-      return;
-    }
-    setErrors({});
-    mutation.mutate();
-  }
-
-  return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <button
-          type="button"
-          disabled={!payloadValid}
-          className="rounded-md bg-action-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-action-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Save
-        </button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-bg-elevated p-6 shadow-xl focus:outline-none">
-          <Dialog.Title className="text-lg font-semibold text-nav">
-            Save test preset
-          </Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-status-prevFg">
-            Save the current {kind === "url" ? "live-URL" : "rule"} test inputs
-            to reuse later.
-          </Dialog.Description>
-
-          <form className="mt-5 flex flex-col gap-4" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="preset-name" className={labelClass}>
-                Name
-              </label>
-              <input
-                id="preset-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Mobile paywall path"
-                aria-invalid={errors.name ? true : undefined}
-                className={inputClass}
-              />
-              {errors.name && <p className={errorClass}>{errors.name}</p>}
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="preset-slug" className={labelClass}>
-                Slug
-              </label>
-              <input
-                id="preset-slug"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="mobile-paywall-path"
-                aria-invalid={errors.slug ? true : undefined}
-                className={inputClass}
-              />
-              {errors.slug && <p className={errorClass}>{errors.slug}</p>}
-            </div>
-
-            {errors.form && (
-              <p role="alert" className={errorClass}>
-                {errors.form}
-              </p>
-            )}
-
-            <div className="mt-2 flex justify-end gap-3">
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  className="rounded-md border border-status-prevBg px-4 py-2 text-sm font-medium text-nav transition hover:bg-status-prevBg/30"
-                >
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                type="submit"
-                disabled={mutation.isPending}
-                className="inline-flex items-center rounded-md bg-action-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-action-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {mutation.isPending ? "Saving…" : "Save preset"}
-              </button>
-            </div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
   );
 }
 

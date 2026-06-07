@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
+import { TEST_PRESET_EXAMPLES } from "@/components/test-presets/TestPresetExamples";
 import { TestPresetsListClient } from "@/components/test-presets/TestPresetsListClient";
 import { API_BASE } from "@/lib/api/client";
 import type { TestPresetRead } from "@/lib/api/test-presets";
@@ -47,15 +49,40 @@ describe("TestPresetsListClient", () => {
     );
     render(<TestPresetsListClient />, { wrapper });
 
+    // Exact name so the "Mobile paywall test" starter-example card (also a
+    // heading) doesn't collide with the preset card's "Mobile paywall".
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: /mobile paywall/i }),
+        screen.getByRole("heading", { name: "Mobile paywall" }),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("mobile-paywall")).toBeInTheDocument();
     expect(screen.getByText("rule")).toBeInTheDocument();
     // Summary surfaces salient payload fields.
     expect(screen.getByText(/mobile · \/article/)).toBeInTheDocument();
+  });
+
+  it("opens a pre-filled create modal when a starter template is used", async () => {
+    const user = userEvent.setup();
+    server.use(http.get(PRESETS_URL, () => HttpResponse.json(presetsPage([]))));
+    render(<TestPresetsListClient />, { wrapper });
+
+    await waitFor(() =>
+      expect(screen.getByText(/no test presets yet/i)).toBeInTheDocument(),
+    );
+
+    const example = TEST_PRESET_EXAMPLES[0];
+    const buttons = screen.getAllByRole("button", {
+      name: /use this template/i,
+    });
+    await user.click(buttons[0]);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(/^slug$/i)).toHaveValue(example.slug);
+    expect(within(dialog).getByLabelText(/^name$/i)).toHaveValue(example.name);
+    expect(within(dialog).getByLabelText(/payload/i)).toHaveValue(
+      JSON.stringify(example.payload, null, 2),
+    );
   });
 
   it("renders an error banner with retry when the request fails", async () => {

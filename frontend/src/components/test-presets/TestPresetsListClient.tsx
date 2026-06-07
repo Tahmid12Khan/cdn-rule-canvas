@@ -8,6 +8,10 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { TestPresetCard } from "@/components/test-presets/TestPresetCard";
 import { TestPresetDeleteDialog } from "@/components/test-presets/TestPresetDeleteDialog";
+import {
+  TestPresetExamples,
+  type TestPresetExample,
+} from "@/components/test-presets/TestPresetExamples";
 import { TestPresetFormModal } from "@/components/test-presets/TestPresetFormModal";
 import { CardGridSkeleton } from "@/components/ui/CardGridSkeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -40,6 +44,11 @@ export function TestPresetsListClient({
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<TestPresetRead | null>(null);
   const [deleting, setDeleting] = useState<TestPresetRead | null>(null);
+  // The starter example a user chose via "Use this template" — opens the full
+  // create modal pre-filled from it.
+  const [usingExample, setUsingExample] = useState<TestPresetExample | null>(
+    null,
+  );
 
   const { data, isPending, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["test-presets", { page, page_size: PAGE_SIZE }],
@@ -61,6 +70,12 @@ export function TestPresetsListClient({
         <TestPresetFormModal trigger={addButton} />
       </div>
 
+      {/* Onboarding helper: one-click starter templates. Shown for both new and
+          existing users so the "how do I make one?" path is always visible. */}
+      {!isError && (
+        <TestPresetExamples onUse={(example) => setUsingExample(example)} />
+      )}
+
       {isError && (
         <ErrorBanner
           error={toUserError(error, { surface: "load" })}
@@ -73,7 +88,7 @@ export function TestPresetsListClient({
       {!isPending && !isError && data.items.length === 0 && (
         <EmptyState
           title="No test presets yet"
-          description="Save a test from the rule builder, or add one here to reuse across versions."
+          description="Save a test from the rule builder, pick a starter template above, or add one here to reuse across versions."
           action={<TestPresetFormModal trigger={addButton} />}
         />
       )}
@@ -109,6 +124,17 @@ export function TestPresetsListClient({
           open
           onOpenChange={(open) => {
             if (!open) setEditing(null);
+          }}
+        />
+      )}
+
+      {usingExample && (
+        <TestPresetFormModal
+          key={usingExample.slug}
+          initialExample={usingExample}
+          open
+          onOpenChange={(open) => {
+            if (!open) setUsingExample(null);
           }}
         />
       )}
