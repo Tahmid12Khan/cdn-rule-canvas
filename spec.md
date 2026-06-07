@@ -1,0 +1,10 @@
+1. I want another section or page to create personilized outcomes (section: Component Editor)
+2. This would be versioned
+3. These components/outcomes only contains results. JSON rules and HTML rules will provide control flow (where to inject/replace etc)
+4. In the rules, user can specify which version of the component they want to use. By default, the latest version is used. When they select latest, if new version is available, it will be automatically updated and so the outcome will be the latest version. It will show the latest version in the outcome UI (within HTML/JSON rules) as well. 
+5. In the component editor, any valid HTML component can be used. Mustache should be supported. In a split tab, in left side, it would show all the mustache variables that are extracted from those html. 
+6. When in json or html rule, user selects an outcome/component, they can populate the mustache variable. That means, if there were 2 variables - title, body, then when user selects an outcome, they can populate title and body. These title, body will then automatically be injected to the mustache variables in the UI. The final outcome for the partical feature would be then saved to backend. In both outcome editor and the rule UI (when we select an outcome for a feature), should come with live preview editor so that we can see live what is happening with/without variables populated. 
+7. For each present variable (in the component editor), there should be title, variable name (for ex {{title}}, then variable name is title where this would be injected.), description. This will later help users populate the variables in the rule.
+8. There should be a basic engine that hightlights the html and shows errors/warnings. No error/warning should stop the user from saving the component/outcome.
+
+implement this feature. suggest improvements. ensure quality. query anything that might be ambious.
