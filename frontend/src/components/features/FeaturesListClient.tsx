@@ -1,39 +1,60 @@
 "use client";
 
 // Client component: owns the features list interactivity — TanStack Query for
-// the list, the create modal, and pagination. FRONTEND CONTRACT §2.2, Task 06.
-import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+// the list and the create modal. FRONTEND CONTRACT §2.2, Task 06.
+//
+// Spec item 8: the list is split into two labeled sections — "HTML Rules" and
+// "JSON Rules" — each ordered by execution_order ASC, with the execution number
+// shown per card (see FeatureCard). We fetch a large page so both sections show
+// all features on one page (no pager).
+import { useQuery } from "@tanstack/react-query";
 
 import { FeatureCard } from "@/components/features/FeatureCard";
 import { FeatureCreateModal } from "@/components/features/FeatureCreateModal";
 import { CardGridSkeleton } from "@/components/ui/CardGridSkeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { Pagination } from "@/components/ui/Pagination";
 import { toUserError } from "@/lib/errors/userError";
-import { listFeatures } from "@/lib/api/features";
+import type { FeatureType } from "@/lib/api/enums";
+import { type FeatureRead, listFeatures } from "@/lib/api/features";
 
-const PAGE_SIZE = 20;
+// High limit so both ordered sections show every feature on a single page.
+const PAGE_SIZE = 100;
 
 type FeaturesPage = Awaited<ReturnType<typeof listFeatures>>;
 
 interface FeaturesListClientProps {
-  // SSR-prefetched first page. Seeds initialData on the page-1 key so
-  // the list hydrates without a client-side fetch waterfall.
+  // SSR-prefetched first page. Seeds initialData on the list key so the list
+  // hydrates without a client-side fetch waterfall.
   initialFeatures?: FeaturesPage;
+}
+
+const SECTIONS: { type: FeatureType; label: string; emptyHint: string }[] = [
+  {
+    type: "html",
+    label: "HTML Rules",
+    emptyHint: "No HTML rules yet. Add one to transform HTML responses.",
+  },
+  {
+    type: "json",
+    label: "JSON Rules",
+    emptyHint: "No JSON rules yet. Add one to transform JSON responses.",
+  },
+];
+
+// Sort defensively by execution_order ASC (the API already orders, but the
+// section view depends on it so we don't trust ordering implicitly).
+function byExecutionOrder(a: FeatureRead, b: FeatureRead): number {
+  return a.execution_order - b.execution_order;
 }
 
 export function FeaturesListClient({
   initialFeatures,
 }: FeaturesListClientProps = {}) {
-  const [page, setPage] = useState(1);
-
   const { data, isPending, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["features", { page, page_size: PAGE_SIZE }],
-    queryFn: () => listFeatures({ page, page_size: PAGE_SIZE }),
-    placeholderData: keepPreviousData,
-    initialData: page === 1 ? initialFeatures : undefined,
+    queryKey: ["features", { page: 1, page_size: PAGE_SIZE }],
+    queryFn: () => listFeatures({ page: 1, page_size: PAGE_SIZE }),
+    initialData: initialFeatures,
   });
 
   return (
@@ -66,22 +87,32 @@ export function FeaturesListClient({
       )}
 
       {!isPending && !isError && data.items.length > 0 && (
-        <>
-          <div
-            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-            aria-busy={isFetching}
-          >
-            {data.items.map((feature) => (
-              <FeatureCard key={feature.id} feature={feature} />
-            ))}
-          </div>
-          <Pagination
-            page={data.page}
-            pageSize={data.page_size}
-            total={data.total}
-            onPageChange={setPage}
-          />
-        </>
+        <div className="flex flex-col gap-8" aria-busy={isFetching}>
+          {SECTIONS.map(({ type, label, emptyHint }) => {
+            const items = data.items
+              .filter((f) => f.type === type)
+              .sort(byExecutionOrder);
+            return (
+              <section key={type} className="flex flex-col gap-4">
+                <div className="flex items-center gap-3 border-b border-border pb-2">
+                  <h2 className="text-lg font-semibold text-nav">{label}</h2>
+                  <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-accent-onMuted">
+                    {items.length}
+                  </span>
+                </div>
+                {items.length === 0 ? (
+                  <p className="text-sm text-fg-muted">{emptyHint}</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {items.map((feature) => (
+                      <FeatureCard key={feature.id} feature={feature} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
       )}
     </div>
   );

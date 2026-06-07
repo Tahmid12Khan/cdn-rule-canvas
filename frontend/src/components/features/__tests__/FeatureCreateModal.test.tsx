@@ -65,6 +65,7 @@ describe("FeatureCreateModal", () => {
             id: "demo-article",
             name: "Article Paywall",
             type: "html",
+            execution_order: 1,
             staging_version_id: null,
             live_version_id: null,
             created_at: "2026-05-31T00:00:00Z",

@@ -13,6 +13,10 @@ export const FeatureRead = z.object({
   id: z.string(),
   name: z.string(),
   type: FeatureType,
+  // Execution order within the feature's type bucket (spec items 6 & 8). Lower
+  // runs first; unique per (type, execution_order) — backend enforces with 409
+  // EXECUTION_ORDER_CONFLICT.
+  execution_order: z.number().int(),
   staging_version_id: z.guid().nullable(),
   live_version_id: z.guid().nullable(),
   created_at: z.string(), // ISO8601 (DateTime<Utc>)
@@ -36,6 +40,7 @@ export type FeatureCreate = z.infer<typeof FeatureCreate>;
 
 export const FeatureUpdate = z.object({
   name: z.string().min(1).max(200).optional(),
+  execution_order: z.number().int().optional(),
 });
 export type FeatureUpdate = z.infer<typeof FeatureUpdate>;
 
