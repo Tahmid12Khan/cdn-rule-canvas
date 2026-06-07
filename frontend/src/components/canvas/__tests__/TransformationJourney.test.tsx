@@ -269,11 +269,10 @@ describe("TransformationJourney", () => {
     renderJourney();
     await expand(user);
 
-    // Step 2: the decision leaves the body identical to step 1.
+    // Step 2: the decision leaves the body identical to step 1, so the shared
+    // DiffView renders its all-context "No changes." note.
     await user.click(screen.getByRole("button", { name: "Next node" }));
-    expect(screen.getByTestId("journey-diff")).toHaveTextContent(
-      "didn't change the body",
-    );
+    expect(screen.getByTestId("journey-diff")).toHaveTextContent("No changes.");
   });
 
   it("diffs added lines against the previous step", async () => {
@@ -310,6 +309,22 @@ describe("TransformationJourney", () => {
     const diff = screen.getByTestId("journey-diff");
     const removed = diff.querySelector(".bg-danger-bg");
     expect(removed).not.toBeNull();
+  });
+
+  it("renders a combined Start → End diff independent of the current step", async () => {
+    const user = userEvent.setup();
+    renderJourney();
+    await expand(user);
+
+    // Visible on the first step (it doesn't depend on a predecessor).
+    expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
+    const combined = screen.getByTestId("journey-combined-diff");
+    // Start body has no paywall_show; END adds it → it appears as an added line.
+    expect(combined).toHaveTextContent("paywall_show");
+    const added = Array.from(combined.querySelectorAll(".bg-status-liveBg"));
+    expect(
+      added.some((el) => el.textContent?.includes("paywall_show")),
+    ).toBe(true);
   });
 
   it("renders raw string body for HTML features", async () => {
