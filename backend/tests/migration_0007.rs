@@ -127,7 +127,7 @@ async fn migration_0007_transforms_outcomes_to_pipeline() {
         .expect("manifest")
         .typed;
     let valid: HashSet<Uuid> = HashSet::from([o1, o2]);
-    rule_graph_service::validate(&graph, &valid, &manifest)
+    rule_graph_service::validate(&graph, &valid, &HashSet::new(), &manifest)
         .expect("migrated graph must validate under the new rules");
 
     // Idempotency: re-running the transform on the migrated canvas is a no-op.

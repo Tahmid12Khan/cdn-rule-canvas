@@ -33,6 +33,20 @@ pub enum VersionStatus {
     Prev,
 }
 
+/// How a Component template's `default` version resolves. Stored as a plain
+/// `VARCHAR(8)` (NOT a Postgres enum type) — the DB string form is lowercase.
+/// `Latest` tracks the highest `version_number`; `Pinned` resolves to the
+/// component's `default_version_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema)]
+#[sqlx(type_name = "VARCHAR", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum DefaultMode {
+    /// Default tracks the highest `version_number` (auto-advances).
+    Latest,
+    /// Default is pinned to `default_version_id`.
+    Pinned,
+}
+
 /// Component placement. DB type `rre.placement`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema)]
 #[sqlx(type_name = "placement", rename_all = "snake_case")]
