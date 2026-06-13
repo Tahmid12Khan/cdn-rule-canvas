@@ -12,8 +12,9 @@ function str(value: unknown): string {
 // `kind` is the journey step kind (start/decision/expression/end); `config` is
 // the live canvas node's processor (decision) or action (expression) config, or
 // undefined when the node isn't in the live canvas. `branch` is the decision's
-// taken branch (true/false) or null. `label` is the manifest label for the
-// outcome banner phrasing (apply_outcome).
+// taken branch (true/false) or null. `label` is the display name used for the
+// outcome banner phrasing (apply_outcome) and the component name phrasing
+// (apply_component / apply_component_json) — both resolved on deserialize.
 export function describeStep(
   kind: string,
   config: ProcessorConfig | undefined,
@@ -39,6 +40,18 @@ export function describeStep(
     }
     if (actionType === "apply_outcome") {
       return `Applied the outcome ‘${label}’.`;
+    }
+    if (actionType === "apply_component") {
+      // `label` carries the resolved component name (falls back to the manifest
+      // label when not yet resolved). `target_selector` + placement_mode come
+      // from the action config.
+      const selector = str(config?.target_selector) || "the page";
+      const placement = str(config?.placement_mode) || "append";
+      return `Rendered the component ‘${label}’ and applied it (${placement}) at \`${selector}\`.`;
+    }
+    if (actionType === "apply_component_json") {
+      const path = str(config?.target_path) || "$";
+      return `Rendered the component ‘${label}’ and set it at \`${path}\`.`;
     }
     // Fallback for an action kind without bespoke phrasing.
     return `Ran ${label}.`;

@@ -35,6 +35,12 @@ export function TopNav() {
           Sites
         </Link>
         <Link
+          href="/products/components"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          Components
+        </Link>
+        <Link
           href="/products/test-presets"
           className="text-sm font-medium text-nav-muted hover:text-fg"
         >

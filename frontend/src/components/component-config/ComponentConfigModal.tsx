@@ -19,6 +19,10 @@ import { useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import clsx from "clsx";
 
+import {
+  ComponentRefForm,
+  type ComponentRefAnyConfig,
+} from "@/components/component-config/ComponentRefForm";
 import { ContentTruncationForm } from "@/components/component-config/ContentTruncationForm";
 import { HtmlInjectionForm } from "@/components/component-config/HtmlInjectionForm";
 import {
@@ -44,11 +48,13 @@ const PLACEMENT_OPTIONS: { value: Placement; label: string }[] = [
 const HTML_TYPE_TABS: { value: ComponentType; label: string }[] = [
   { value: "html_injection", label: "HTML Injection" },
   { value: "content_truncation", label: "Content Truncation" },
+  { value: "component_ref", label: "Component" },
 ];
 const JSON_TYPE_TABS: { value: ComponentType; label: string }[] = [
   { value: "json_remove", label: "JSON Remove" },
   { value: "json_set", label: "JSON Set" },
   { value: "json_replace", label: "JSON Replace" },
+  { value: "component_ref_json", label: "Component" },
 ];
 
 const FORM_ID = "component-config-form";
@@ -124,6 +130,18 @@ export function ComponentConfigModal({
     if (jsonType === "json_remove") return defaultConfigFor("json_remove");
     if (jsonType === "json_replace") return defaultConfigFor("json_replace");
     return defaultConfigFor("json_set");
+  }, [initialConfig, type]);
+  // Component-ref initial config: seed from initialConfig when its type matches
+  // the active component_ref tab (HTML vs JSON); otherwise a default.
+  const componentRefInitial = useMemo<ComponentRefAnyConfig>(() => {
+    const refType =
+      type === "component_ref_json" ? "component_ref_json" : "component_ref";
+    if (initialConfig && initialConfig.type === refType) {
+      return initialConfig;
+    }
+    return refType === "component_ref_json"
+      ? defaultConfigFor("component_ref_json")
+      : defaultConfigFor("component_ref");
   }, [initialConfig, type]);
 
   function handleValidConfig(config: ComponentConfig) {
@@ -281,6 +299,14 @@ export function ComponentConfigModal({
                 key="content_truncation"
                 formId={FORM_ID}
                 initial={truncationInitial}
+                onValidSubmit={handleValidConfig}
+              />
+            ) : type === "component_ref" || type === "component_ref_json" ? (
+              <ComponentRefForm
+                key={type}
+                formId={FORM_ID}
+                type={type}
+                initial={componentRefInitial}
                 onValidSubmit={handleValidConfig}
               />
             ) : (
