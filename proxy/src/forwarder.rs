@@ -292,13 +292,22 @@ async fn apply_features_html(
             continue;
         }
         let canvas = av.canvas(canvas_class);
+        // Pre-resolve every Component reference (apply_component* actions AND
+        // component_ref* components inside applied outcomes) on the ASYNC side
+        // (cached await) before the sync apply — no I/O in the apply path (§4.3).
+        let components = resolve_action_components(state, &actions, &av.outcomes).await;
         let mut applied = false;
         // Per-node timing (spec §4): time each expression node's apply.
         let mut timings: Vec<NodeTiming> = Vec::with_capacity(actions.len());
         for ma in &actions {
             let t_node = Instant::now();
-            let (next, changed) =
-                json_apply::apply_action_html(current, &ma.action, &av.outcomes, &state.sanitizer);
+            let (next, changed) = json_apply::apply_action_html(
+                current,
+                &ma.action,
+                &av.outcomes,
+                &components,
+                &state.sanitizer,
+            );
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
             current = next;
             applied |= changed;
@@ -448,12 +457,21 @@ async fn apply_features_json(
             continue;
         }
         let canvas = av.canvas(canvas_class);
+        // Pre-resolve component references on the async side (design §4.3):
+        // apply_component* actions AND component_ref* components inside outcomes.
+        let components = resolve_action_components(state, &actions, &av.outcomes).await;
         let mut applied = false;
         // Per-node timing (spec §4): time each expression node's apply.
         let mut timings: Vec<NodeTiming> = Vec::with_capacity(actions.len());
         for ma in &actions {
             let t_node = Instant::now();
-            let changed = json_apply::apply_action_json(&mut current, &ma.action, &av.outcomes);
+            let changed = json_apply::apply_action_json(
+                &mut current,
+                &ma.action,
+                &av.outcomes,
+                &components,
+                &state.sanitizer,
+            );
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
             applied |= changed;
             let (label, custom_label) = expression_label(canvas, &ma.node_id);
@@ -582,6 +600,79 @@ async fn evaluate(
     let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
     metrics::histogram!("proxy_eval_ms").record(eval_ms);
     (actions, eval_ms)
+}
+
+/// Pre-resolve every Component-template reference touched by `actions` into a
+/// `ResolvedComponentMap`, ON THE ASYNC SIDE (design §4.3). Two ref sources:
+///
+/// 1. ACTION refs — an `apply_component` / `apply_component_json` action's own
+///    `(component_id, version)`.
+/// 2. OUTCOME-COMPONENT refs — a `component_ref` / `component_ref_json` COMPONENT
+///    inside an outcome referenced by an `apply_outcome` action. These render
+///    during outcome application, so they must be resolved too.
+///
+/// Each distinct `(component_id, version)` is resolved at most once (the map
+/// dedupes); `resolve_component` is itself a cached await (SWR), so a warm component
+/// is a HashMap hit with no I/O. A reference that fails to resolve (404/error) is
+/// simply absent from the map → the sync apply branch skips it (fail-open). Never
+/// panics.
+pub(crate) async fn resolve_action_components(
+    state: &AppState,
+    actions: &[MatchedAction],
+    outcomes: &[crate::infra::backend_client::ActiveOutcome],
+) -> json_apply::ResolvedComponentMap {
+    let mut map = json_apply::ResolvedComponentMap::new();
+    // Collect every distinct ref first (dedup), then resolve once each.
+    let mut keys: Vec<(uuid::Uuid, crate::infra::backend_client::VersionSelector)> = Vec::new();
+    let mut push = |key| {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    };
+    for ma in actions {
+        // 1. Direct action ref.
+        if let Some(key) = json_apply::component_ref(&ma.action) {
+            push(key);
+        }
+        // 2. component_ref/component_ref_json components inside an applied outcome.
+        if ma.action.get("type").and_then(serde_json::Value::as_str) == Some("apply_outcome") {
+            if let Some(outcome) = lookup_applied_outcome(&ma.action, outcomes) {
+                for component in &outcome.components {
+                    if let Some(key) =
+                        crate::domain::applier::component_ref::config_ref(&component.config)
+                    {
+                        push(key);
+                    }
+                }
+            }
+        }
+    }
+    for key in keys {
+        if let Some(resolved) = state.component_cache.resolve_component(key.0, key.1).await {
+            map.insert(key, resolved);
+        }
+    }
+    map
+}
+
+/// Resolve an `apply_outcome` action's `outcome_id` against `outcomes` (mirrors the
+/// applier's lookup, including the `fields.outcome_id` fallback) so the pre-resolve
+/// pass can walk the applied outcome's components for `component_ref*` refs.
+fn lookup_applied_outcome<'a>(
+    action: &serde_json::Value,
+    outcomes: &'a [crate::infra::backend_client::ActiveOutcome],
+) -> Option<&'a crate::infra::backend_client::ActiveOutcome> {
+    let id_str = action
+        .get("outcome_id")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            action
+                .get("fields")
+                .and_then(|f| f.get("outcome_id"))
+                .and_then(serde_json::Value::as_str)
+        })?;
+    let id = uuid::Uuid::parse_str(id_str).ok()?;
+    outcomes.iter().find(|o| o.id == id)
 }
 
 /// Structured "no modification" log shared by both content kinds (no matched

@@ -89,6 +89,68 @@ impl ActiveOutcome {
     }
 }
 
+/// Which version of a Component template a rule node references (design §2/§4.1).
+/// Parsed from a rule action's `version` field: the string `"default"` → `Default`
+/// (resolved per the component's movable default pointer), a positive integer → the
+/// pinned `Version(n)` (with proxy-side fall-back to the current default if `n` is
+/// gone). Used as the second half of the component-cache key so a `"default"` and a
+/// pinned reference cache independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum VersionSelector {
+    Default,
+    Version(i32),
+}
+
+impl VersionSelector {
+    /// Parse the rule action's `version` value: `"default"` (or absent/Null) →
+    /// `Default`; a JSON integer or numeric string → `Version(n)`. Anything else
+    /// (non-positive, non-numeric, structured) falls back to `Default` — the
+    /// proxy never trusts the value blindly and `Default` is always resolvable.
+    pub fn from_action_value(v: Option<&serde_json::Value>) -> Self {
+        match v {
+            None | Some(serde_json::Value::Null) => VersionSelector::Default,
+            Some(serde_json::Value::Number(n)) => match n.as_i64() {
+                Some(i) if i > 0 && i <= i64::from(i32::MAX) => VersionSelector::Version(i as i32),
+                _ => VersionSelector::Default,
+            },
+            Some(serde_json::Value::String(s)) => {
+                let s = s.trim();
+                if s.eq_ignore_ascii_case("default") {
+                    VersionSelector::Default
+                } else {
+                    match s.parse::<i32>() {
+                        Ok(i) if i > 0 => VersionSelector::Version(i),
+                        _ => VersionSelector::Default,
+                    }
+                }
+            }
+            _ => VersionSelector::Default,
+        }
+    }
+
+    /// The `?version=` query value the resolve endpoint expects.
+    pub fn as_query(&self) -> String {
+        match self {
+            VersionSelector::Default => "default".to_string(),
+            VersionSelector::Version(n) => n.to_string(),
+        }
+    }
+}
+
+/// Proxy-facing resolved Component payload — EXACT shape from the backend
+/// `GET /api/v1/component-templates/{cid}/resolve` endpoint (design §3.2
+/// `ResolvedComponentRead`). `variables` is carried as a raw JSON value (the
+/// proxy renders against the rule action's `variables`, not these declared ones,
+/// so it never inspects the shape here). No `deny_unknown_fields` so extra
+/// backend fields are ignored.
+#[derive(Deserialize, Clone, Debug)]
+pub struct ResolvedComponent {
+    pub version_number: i32,
+    pub html_body: String,
+    #[serde(default)]
+    pub variables: serde_json::Value,
+}
+
 /// Environment selector for the active-version fetch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Env {

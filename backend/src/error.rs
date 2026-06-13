@@ -61,6 +61,12 @@ pub enum AppError {
     /// Component id missing. → 404
     #[error("{0}")]
     ComponentNotFound(String),
+    /// Component template version missing. → 404
+    #[error("{0}")]
+    ComponentVersionNotFound(String),
+    /// Attempt to delete the only (last) version of a component. → 409
+    #[error("{0}")]
+    LastVersionProtected(String),
     /// Active-version requested, none LIVE/STAGING. → 404
     #[error("{0}")]
     NoLiveVersion(String),
@@ -95,6 +101,8 @@ impl AppError {
             AppError::VersionNotFound(_) => "VERSION_NOT_FOUND",
             AppError::OutcomeNotFound(_) => "OUTCOME_NOT_FOUND",
             AppError::ComponentNotFound(_) => "COMPONENT_NOT_FOUND",
+            AppError::ComponentVersionNotFound(_) => "COMPONENT_VERSION_NOT_FOUND",
+            AppError::LastVersionProtected(_) => "LAST_VERSION_PROTECTED",
             AppError::NoLiveVersion(_) => "NO_LIVE_VERSION",
             AppError::SlugConflict(_) => "SLUG_CONFLICT",
             AppError::ExecutionOrderConflict(_) => "EXECUTION_ORDER_CONFLICT",
@@ -115,11 +123,13 @@ impl AppError {
             | AppError::VersionNotFound(_)
             | AppError::OutcomeNotFound(_)
             | AppError::ComponentNotFound(_)
+            | AppError::ComponentVersionNotFound(_)
             | AppError::NoLiveVersion(_) => StatusCode::NOT_FOUND,
             AppError::SlugConflict(_)
             | AppError::ExecutionOrderConflict(_)
             | AppError::VersionEditLocked(_)
             | AppError::InvalidStatusTransition(_)
+            | AppError::LastVersionProtected(_)
             | AppError::BuiltinOutcomeProtected(_) => StatusCode::CONFLICT,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

@@ -62,6 +62,13 @@ const C_REGWALL_HTML: Uuid = Uuid::from_u128(0x51111111_1111_1111_1111_111111111
 const C_PAYWALL_HTML: Uuid = Uuid::from_u128(0x52222222_2222_2222_2222_222222222222);
 const C_PAYWALL_TRUNC: Uuid = Uuid::from_u128(0x53333333_3333_3333_3333_333333333333);
 
+// Component-template (Component Editor library) ids — a global "Promo Banner"
+// component + its v1. Wired into the editable DRAFT v2 of demo-article via an
+// `apply_component` expression node so the new flow is demonstrable end-to-end.
+const CT_PROMO_BANNER: Uuid = Uuid::from_u128(0x60000000_0000_0000_0000_000000000001);
+const CT_PROMO_BANNER_V1: Uuid = Uuid::from_u128(0x60000000_0000_0000_0000_0000000000A1);
+const CT_PROMO_BANNER_SLUG: &str = "promo-banner";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let settings = Settings::load().context("failed to load settings")?;
@@ -75,8 +82,9 @@ async fn main() -> anyhow::Result<()> {
     seed(&pool).await.context("seeding demo data")?;
 
     println!(
-        "demo seed complete: feature `{FEATURE_ID}` (LIVE v1 + DRAFT v2), \
-         feature `{JSON_FEATURE_ID}` (LIVE v1), site `{SITE_SLUG}`"
+        "demo seed complete: feature `{FEATURE_ID}` (LIVE v1 + DRAFT v2 with \
+         apply_component), feature `{JSON_FEATURE_ID}` (LIVE v1), \
+         component `{CT_PROMO_BANNER_SLUG}` (v1), site `{SITE_SLUG}`"
     );
     Ok(())
 }
@@ -219,23 +227,28 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // --- Component Editor library: the global "Promo Banner" component + v1.
+    // Seeded BEFORE the draft v2 below so the `apply_component` node wired into
+    // that draft passes `apply_component_ref_exists` validation.
+    seed_promo_banner(&mut tx).await?;
+
     // --- version 2 (DRAFT) — editable clone for the rule builder ---------------
+    // The anonymous canvas demonstrates the Component Editor flow end-to-end:
+    // start → apply_component(Promo Banner, version="default") → end.
+    let draft_graph = draft_rule_graph();
     sqlx::query(
         r#"
         INSERT INTO rre.versions
             (id, feature_id, version_number, description, status, rule_graph,
              created_by, last_updated_by)
-        VALUES ($1, $2, 2, $3, 'draft',
-                '{"anonymous":{"nodes":[],"edges":[],"root_node_id":null},
-                  "registered":{"nodes":[],"edges":[],"root_node_id":null},
-                  "customer":{"nodes":[],"edges":[],"root_node_id":null}}'::jsonb,
-                'seed', 'seed')
+        VALUES ($1, $2, 2, $3, 'draft', $4, 'seed', 'seed')
         ON CONFLICT (id) DO NOTHING
         "#,
     )
     .bind(V2_ID)
     .bind(FEATURE_ID)
     .bind("Editable draft (rule-builder demo)")
+    .bind(&draft_graph)
     .execute(&mut *tx)
     .await?;
 
@@ -286,6 +299,87 @@ async fn seed_site(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Re
     .bind(SITE_SOURCE_PORT)
     .bind(&dest_host)
     .bind(dest_port)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Idempotently seed the global "Promo Banner" Component Editor template + its
+/// v1. The body is a small mustache snippet using `{{headline}}`, `{{cta_label}}`
+/// and `{{cta_href}}` (rendered as a heading + anchor button); the variables
+/// carry author `title` + `description` metadata for the rule-side population UI.
+/// `default_mode = 'latest'` so a rule following `version = "default"` always
+/// resolves to the newest version. Keyed on the fixed component + version ids
+/// (`ON CONFLICT DO NOTHING`) so a re-seed converges and never clobbers an
+/// author-edited component.
+async fn seed_promo_banner(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
+    // The component row. default_version_id is wired AFTER the v1 insert (the FK
+    // is DEFERRABLE INITIALLY DEFERRED, so set-then-commit is fine in one tx).
+    sqlx::query(
+        r#"
+        INSERT INTO rre.component_templates (id, slug, name, description, default_mode)
+        VALUES ($1, $2, $3, $4, 'latest')
+        ON CONFLICT (id) DO NOTHING
+        "#,
+    )
+    .bind(CT_PROMO_BANNER)
+    .bind(CT_PROMO_BANNER_SLUG)
+    .bind("Promo Banner")
+    .bind("Reusable call-to-action banner: a headline plus a button link.")
+    .execute(&mut **tx)
+    .await?;
+
+    let html_body = "<section class=\"rre-promo-banner\">\n  \
+        <h2>{{headline}}</h2>\n  \
+        <a class=\"rre-promo-cta\" href=\"{{cta_href}}\">{{cta_label}}</a>\n\
+        </section>";
+
+    let variables = json!([
+        {
+            "name": "headline",
+            "title": "Headline",
+            "description": "The banner's main heading text."
+        },
+        {
+            "name": "cta_label",
+            "title": "Button label",
+            "description": "The visible text of the call-to-action button."
+        },
+        {
+            "name": "cta_href",
+            "title": "Button link",
+            "description": "The URL the call-to-action button points to."
+        }
+    ]);
+
+    sqlx::query(
+        r#"
+        INSERT INTO rre.component_template_versions
+            (id, component_id, version_number, description, html_body, variables)
+        VALUES ($1, $2, 1, $3, $4, $5)
+        ON CONFLICT (id) DO NOTHING
+        "#,
+    )
+    .bind(CT_PROMO_BANNER_V1)
+    .bind(CT_PROMO_BANNER)
+    .bind("Initial promo banner")
+    .bind(html_body)
+    .bind(&variables)
+    .execute(&mut **tx)
+    .await?;
+
+    // Point the default pointer at v1 only when unset, so a re-seed never
+    // re-pins a default the author has since moved.
+    sqlx::query(
+        r#"
+        UPDATE rre.component_templates
+        SET default_version_id = $1, updated_at = now()
+        WHERE id = $2 AND default_version_id IS NULL
+        "#,
+    )
+    .bind(CT_PROMO_BANNER_V1)
+    .bind(CT_PROMO_BANNER)
     .execute(&mut **tx)
     .await?;
 
@@ -423,6 +517,44 @@ fn anonymous_rule_graph() -> serde_json::Value {
     })
 }
 
+/// The editable DRAFT v2 anonymous canvas, demonstrating the Component Editor
+/// flow end-to-end: `start → apply_component(Promo Banner, version="default",
+/// variables filled) → end`. `placement_mode = append` injects the rendered
+/// banner at the `main` target selector. `registered`/`customer` are empty
+/// canvases. Passes `rule_graph_service::validate` (incl.
+/// `apply_component_ref_exists`, since the Promo Banner component is seeded).
+fn draft_rule_graph() -> serde_json::Value {
+    json!({
+        "anonymous": {
+            "root_node_id": "start",
+            "nodes": [
+                { "kind": "start", "id": "start", "position": { "x": 40, "y": 200 } },
+                { "kind": "expression", "id": "a_promo",
+                  "action": {
+                      "type": "apply_component",
+                      "component_id": CT_PROMO_BANNER.to_string(),
+                      "version": "default",
+                      "target_selector": "main",
+                      "placement_mode": "append",
+                      "variables": {
+                          "headline": "Enjoying this article?",
+                          "cta_label": "Subscribe now",
+                          "cta_href": "/subscribe"
+                      }
+                  },
+                  "position": { "x": 280, "y": 200 } },
+                { "kind": "end", "id": "end", "position": { "x": 540, "y": 200 } }
+            ],
+            "edges": [
+                { "id": "e_start", "source_node_id": "start",   "target_node_id": "a_promo", "branch": "yes" },
+                { "id": "e_end",   "source_node_id": "a_promo", "target_node_id": "end",     "branch": "yes" }
+            ]
+        },
+        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
+        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+    })
+}
+
 /// The anonymous canvas for the `demo-json-article` JSON feature:
 /// `start → json_expression($.api == "demo-article") → [yes] trim_json($.body, 0)
 /// → add_attribute($.paywall_show, "<html>paywall_showed</html>") → end ;
@@ -538,13 +670,58 @@ mod tests {
             .expect("load manifest")
             .typed;
 
-        rule_graph_service::validate(&graph, &valid_outcome_ids, &manifest)
+        rule_graph_service::validate(&graph, &valid_outcome_ids, &HashSet::new(), &manifest)
             .expect("seed graph must validate");
 
         assert_eq!(
             graph.anonymous.root_node_id.as_deref(),
             Some("start"),
             "seed must anchor the canvas root at the start node"
+        );
+    }
+
+    /// The seeded editable DRAFT v2 anonymous canvas parses and passes ALL
+    /// validation rules, including `apply_component_ref_exists`: the wired
+    /// `apply_component` node references the seeded Promo Banner component id.
+    /// Guards against a draft seed the API would reject.
+    #[test]
+    fn draft_graph_validates() {
+        let graph: RuleGraph =
+            serde_json::from_value(draft_rule_graph()).expect("draft graph parses");
+
+        let valid_component_ids: HashSet<Uuid> = HashSet::from([CT_PROMO_BANNER]);
+        let manifest = LoadedManifest::load("config/node_types.json")
+            .expect("load manifest")
+            .typed;
+
+        rule_graph_service::validate(&graph, &HashSet::new(), &valid_component_ids, &manifest)
+            .expect("draft graph must validate");
+
+        assert_eq!(
+            graph.anonymous.root_node_id.as_deref(),
+            Some("start"),
+            "draft seed must anchor the canvas root at the start node"
+        );
+    }
+
+    /// The draft graph's `apply_component` node references the seeded Promo
+    /// Banner component id. With an EMPTY valid-component set, validation must
+    /// FAIL on `apply_component_ref_exists` — proving the test above is real.
+    #[test]
+    fn draft_graph_rejects_unknown_component() {
+        let graph: RuleGraph =
+            serde_json::from_value(draft_rule_graph()).expect("draft graph parses");
+
+        let manifest = LoadedManifest::load("config/node_types.json")
+            .expect("load manifest")
+            .typed;
+
+        let err = rule_graph_service::validate(&graph, &HashSet::new(), &HashSet::new(), &manifest)
+            .expect_err("unknown component must fail validation");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("apply_component_ref_exists"),
+            "expected apply_component_ref_exists failure, got: {msg}"
         );
     }
 
@@ -560,7 +737,7 @@ mod tests {
             .expect("load manifest")
             .typed;
 
-        rule_graph_service::validate(&graph, &HashSet::new(), &manifest)
+        rule_graph_service::validate(&graph, &HashSet::new(), &HashSet::new(), &manifest)
             .expect("json seed graph must validate");
 
         assert_eq!(

@@ -4,6 +4,8 @@
 
 // Domain-owned leaf modules (filled by domain agents):
 pub mod component_repository;
+pub mod component_template_repository;
+pub mod component_template_version_repository;
 pub mod feature_repository;
 pub mod outcome_repository;
 pub mod site_repository;

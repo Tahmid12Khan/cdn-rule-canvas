@@ -22,6 +22,19 @@ same repository under `core/*` (and is documented by the main
   see [`docs/architecture.md`](docs/architecture.md) and
   [`CONTRACTS.md`](./CONTRACTS.md).
 
+## Component Editor
+
+A global library of reusable, **independently-versioned** HTML (mustache)
+templates — found in the admin UI at **`/products/components`**. A component
+holds only a result payload (`html_body` + declared `{{variables}}`); rules
+supply the control flow (where to inject/replace, which version, the variable
+values) via the `apply_component` / `apply_component_json` nodes. Each component
+has a movable **default** (track-latest or pinned to a version); a rule that
+references `"default"` auto-updates live proxy output when you edit or repoint
+that default — no need to republish the feature. The proxy resolves and renders
+templates at request time (mustache → ammonia sanitize → inject), fail-open. See
+[`CONTRACTS.md`](./CONTRACTS.md) for tables, routes, and the render path.
+
 ## Quick start (one command)
 
 ```bash

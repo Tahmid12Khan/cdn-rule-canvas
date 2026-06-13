@@ -48,6 +48,9 @@ function defaultCanvas(): CanvasWorkingState {
 export function deserializeCanvas(
   g: CanvasGraph,
   outcomeTitleById: (id: string) => string,
+  // Re-resolves an apply_component's display name from the components query.
+  // Optional (defaults to none) so legacy call sites stay valid.
+  componentNameById: (id: string) => string | undefined = () => undefined,
 ): CanvasWorkingState {
   // Empty backend canvas → inject the default start → end graph (spec §6).
   if (g.nodes.length === 0) return defaultCanvas();
@@ -76,12 +79,24 @@ export function deserializeCanvas(
       const outcomeId = n.action.outcome_id;
       const outcomeTitle =
         typeof outcomeId === "string" ? outcomeTitleById(outcomeId) : undefined;
+      // apply_component / apply_component_json carry component_id — re-resolve a
+      // display name so canvas/journey stay current (mirrors outcomeTitle).
+      const componentId = n.action.component_id;
+      const componentName =
+        typeof componentId === "string"
+          ? componentNameById(componentId)
+          : undefined;
       return {
         id: n.id,
         type: "expressionNode",
         position,
         // custom_label round-trips off the wire (spec §v2.3); absent when unset.
-        data: { action: n.action, outcomeTitle, custom_label: n.custom_label },
+        data: {
+          action: n.action,
+          outcomeTitle,
+          componentName,
+          custom_label: n.custom_label,
+        },
       };
     }
     return {
@@ -114,10 +129,23 @@ export function deserializeCanvas(
 export function deserializeRuleGraph(
   rg: RuleGraph,
   outcomeTitleById: (id: string) => string,
+  componentNameById: (id: string) => string | undefined = () => undefined,
 ): Record<CanvasKey, CanvasWorkingState> {
   return {
-    anonymous: deserializeCanvas(rg.anonymous, outcomeTitleById),
-    registered: deserializeCanvas(rg.registered, outcomeTitleById),
-    customer: deserializeCanvas(rg.customer, outcomeTitleById),
+    anonymous: deserializeCanvas(
+      rg.anonymous,
+      outcomeTitleById,
+      componentNameById,
+    ),
+    registered: deserializeCanvas(
+      rg.registered,
+      outcomeTitleById,
+      componentNameById,
+    ),
+    customer: deserializeCanvas(
+      rg.customer,
+      outcomeTitleById,
+      componentNameById,
+    ),
   };
 }

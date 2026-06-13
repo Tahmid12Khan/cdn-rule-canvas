@@ -12,7 +12,10 @@ use uuid::Uuid;
 use crate::{
     error::{AppError, AppResult},
     models::{component::Component, enums::VersionStatus, outcome::Outcome, version::Version},
-    repositories::{component_repository, outcome_repository, version_repository as repo},
+    repositories::{
+        component_repository, component_template_version_repository, outcome_repository,
+        version_repository as repo,
+    },
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
         applicability::Applicability,
@@ -169,7 +172,8 @@ pub async fn create_version(
             .iter()
             .map(|o| o.id)
             .collect();
-    rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
+    let valid_component_ids = existing_component_ids(&mut *tx, &graph).await?;
+    rule_graph_service::validate(&graph, &valid_outcome_ids, &valid_component_ids, manifest)?;
 
     // Applicability: caller-supplied (validated) when present, else carry forward
     // the source version's, else the default `{}`.
@@ -314,6 +318,39 @@ fn remap_outcome_refs(graph: &mut RuleGraph, map: &HashMap<Uuid, Uuid>) {
     }
 }
 
+/// Collect the component ids referenced by `apply_component`/`apply_component_json`
+/// actions across all three canvases, then return the subset that EXISTS in
+/// `rre.component_templates` — the set that backs the `apply_component_ref_exists`
+/// rule (mirrors how outcome ids are threaded). Unparsable / non-string ids are
+/// skipped (the validator reports them as missing).
+async fn existing_component_ids<'e, E>(exec: E, graph: &RuleGraph) -> AppResult<HashSet<Uuid>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let mut referenced: HashSet<Uuid> = HashSet::new();
+    for canvas in [&graph.anonymous, &graph.registered, &graph.customer] {
+        for node in &canvas.nodes {
+            if let Node::Expression { action, .. } = node {
+                if action.r#type != "apply_component" && action.r#type != "apply_component_json" {
+                    continue;
+                }
+                if let Some(serde_json::Value::String(s)) = action.fields.get("component_id") {
+                    if let Ok(id) = Uuid::parse_str(s) {
+                        referenced.insert(id);
+                    }
+                }
+            }
+        }
+    }
+    if referenced.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let ids: Vec<Uuid> = referenced.into_iter().collect();
+    let existing =
+        component_template_version_repository::existing_component_ids(exec, &ids).await?;
+    Ok(existing.into_iter().collect())
+}
+
 /// List versions for a feature, filtered + paginated.
 pub async fn list(
     pool: &PgPool,
@@ -383,7 +420,13 @@ pub async fn update(
             let outcomes = outcome_repository::list_for_version(pool, version.id).await?;
             let valid_outcome_ids: std::collections::HashSet<Uuid> =
                 outcomes.iter().map(|o| o.id).collect();
-            rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
+            let valid_component_ids = existing_component_ids(pool, &graph).await?;
+            rule_graph_service::validate(
+                &graph,
+                &valid_outcome_ids,
+                &valid_component_ids,
+                manifest,
+            )?;
             Some(serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)
         }
         None => None,

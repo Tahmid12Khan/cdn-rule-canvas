@@ -7,14 +7,24 @@
 use utoipa::OpenApi;
 
 use crate::{
-    api::v1::{components, features, health, node_types, outcomes, sites, test_presets, versions},
+    api::v1::{
+        component_templates, components, features, health, node_types, outcomes, sites,
+        test_presets, versions,
+    },
     error::{ErrorBody, ErrorEnvelope, ValidationDetail},
-    models::enums::{FeatureType, Placement, VersionStatus},
+    models::enums::{DefaultMode, FeatureType, Placement, VersionStatus},
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
         applicability::Applicability,
         component::{
             ComponentConfig, ComponentCreate, ComponentRead, ComponentUpdate, HtmlPlacementMode,
+        },
+        component_template::{
+            ComponentTemplateCreate, ComponentTemplateRead, ComponentTemplateSummary,
+            ComponentTemplateUpdate, ComponentTemplateVersionRead, ComponentTemplateVersionSummary,
+            ComponentVariable, ResolvedComponentRead,
+            VersionCreate as ComponentTemplateVersionCreate,
+            VersionUpdate as ComponentTemplateVersionUpdate,
         },
         feature::{FeatureCreate, FeatureRead, FeatureUpdate},
         health::HealthResponse,
@@ -78,6 +88,19 @@ use crate::{
         test_presets::get,
         test_presets::update,
         test_presets::delete,
+        component_templates::create,
+        component_templates::list,
+        component_templates::get_one,
+        component_templates::get_by_slug,
+        component_templates::update,
+        component_templates::delete,
+        component_templates::list_versions,
+        component_templates::create_version,
+        component_templates::get_version,
+        component_templates::update_version,
+        component_templates::delete_version,
+        component_templates::make_default,
+        component_templates::resolve,
     ),
     components(schemas(
         // Infra / error envelope
@@ -89,6 +112,7 @@ use crate::{
         FeatureType,
         VersionStatus,
         Placement,
+        DefaultMode,
         // Feature
         FeatureCreate,
         FeatureUpdate,
@@ -101,6 +125,17 @@ use crate::{
         TestPresetCreate,
         TestPresetUpdate,
         TestPresetRead,
+        // Component templates (Component Editor)
+        ComponentTemplateCreate,
+        ComponentTemplateUpdate,
+        ComponentTemplateRead,
+        ComponentTemplateSummary,
+        ComponentTemplateVersionRead,
+        ComponentTemplateVersionSummary,
+        ComponentVariable,
+        ComponentTemplateVersionCreate,
+        ComponentTemplateVersionUpdate,
+        ResolvedComponentRead,
         // Version
         VersionCreate,
         VersionUpdate,
@@ -149,6 +184,7 @@ use crate::{
         (name = "features", description = "Feature CRUD + active version"),
         (name = "sites", description = "Site (host config) CRUD"),
         (name = "test_presets", description = "Test-preset library CRUD"),
+        (name = "component_templates", description = "Component Editor library CRUD + resolve"),
         (name = "versions", description = "Version lifecycle"),
         (name = "outcomes", description = "Outcomes and their components"),
         (name = "components", description = "Flat component operations"),

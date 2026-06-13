@@ -85,6 +85,51 @@ export const JsonReplaceConfig = z.object({
 });
 export type JsonReplaceConfig = z.infer<typeof JsonReplaceConfig>;
 
+// ---- Component reference (library component, mustache-rendered) ------------
+//
+// References a GLOBAL library component (lib/api/componentTemplates.ts) by
+// `component_id` + `version`; the proxy resolves it at request time, renders
+// `html_body` with `variables` (mustache), ammonia-sanitizes, then injects
+// (HTML) / sets-at-path (JSON). The reference + values are stored — never frozen
+// HTML — so a "default"-following version auto-updates live (design §5.5).
+//
+// `version` is the string "default" (follows the component's movable default)
+// or a positive integer (a pinned version_number).
+
+const ComponentVersion = z.union([
+  z.literal("default"),
+  z.number().int().positive("Version must be a positive number"),
+]);
+export type ComponentVersion = z.infer<typeof ComponentVersion>;
+
+// name → value (literal string values; missing keys render empty in the proxy).
+const ComponentVariables = z.record(z.string(), z.string());
+
+// type = "component_ref" (HTML features): inject the rendered component at a CSS
+// selector with a placement mode (same injection core as html_injection).
+export const ComponentRefConfig = z.object({
+  type: z.literal("component_ref"),
+  component_id: z.guid("Pick a component"),
+  version: ComponentVersion,
+  variables: ComponentVariables,
+  target_selector: z
+    .string()
+    .min(1, "Enter a CSS selector (e.g. .article-body) for where to inject"),
+  placement_mode: HtmlPlacementMode,
+});
+export type ComponentRefConfig = z.infer<typeof ComponentRefConfig>;
+
+// type = "component_ref_json" (JSON features): the rendered HTML string is SET
+// at target_path (same set-at-path core as json_set).
+export const ComponentRefJsonConfig = z.object({
+  type: z.literal("component_ref_json"),
+  component_id: z.guid("Pick a component"),
+  version: ComponentVersion,
+  variables: ComponentVariables,
+  target_path: TargetPath,
+});
+export type ComponentRefJsonConfig = z.infer<typeof ComponentRefJsonConfig>;
+
 // ---- Discriminated union (mirrors BACKEND §5 ComponentConfig) --------------
 
 export const ComponentConfig = z.discriminatedUnion("type", [
@@ -93,17 +138,22 @@ export const ComponentConfig = z.discriminatedUnion("type", [
   JsonRemoveConfig,
   JsonSetConfig,
   JsonReplaceConfig,
+  ComponentRefConfig,
+  ComponentRefJsonConfig,
 ]);
 export type ComponentConfig = z.infer<typeof ComponentConfig>;
 
-// The creatable component types. HTML features use the first two; JSON features
-// use the json_* trio (the UI picks the tab set by feature type).
+// The creatable component types. HTML features use html_injection /
+// content_truncation / component_ref; JSON features use the json_* trio +
+// component_ref_json (the UI picks the tab set by feature type).
 export const ComponentType = z.enum([
   "html_injection",
   "content_truncation",
   "json_remove",
   "json_set",
   "json_replace",
+  "component_ref",
+  "component_ref_json",
 ]);
 export type ComponentType = z.infer<typeof ComponentType>;
 
@@ -139,6 +189,10 @@ export function defaultConfigFor(
 export function defaultConfigFor(type: "json_remove"): JsonRemoveConfig;
 export function defaultConfigFor(type: "json_set"): JsonSetConfig;
 export function defaultConfigFor(type: "json_replace"): JsonReplaceConfig;
+export function defaultConfigFor(type: "component_ref"): ComponentRefConfig;
+export function defaultConfigFor(
+  type: "component_ref_json",
+): ComponentRefJsonConfig;
 export function defaultConfigFor(type: ComponentType): ComponentConfig;
 export function defaultConfigFor(type: ComponentType): ComponentConfig {
   switch (type) {
@@ -173,6 +227,23 @@ export function defaultConfigFor(type: ComponentType): ComponentConfig {
         type: "json_replace",
         target_path: "",
         value: null,
+      };
+    case "component_ref":
+      return {
+        type: "component_ref",
+        component_id: "",
+        version: "default",
+        variables: {},
+        target_selector: "",
+        placement_mode: "append",
+      };
+    case "component_ref_json":
+      return {
+        type: "component_ref_json",
+        component_id: "",
+        version: "default",
+        variables: {},
+        target_path: "",
       };
   }
 }

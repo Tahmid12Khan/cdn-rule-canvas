@@ -24,6 +24,8 @@
 //! | `edge_source_kind` | edges originate only from start/decision/expression, never `end` |
 //! | `all_paths_reach_end` | every node reachable from the Start node can reach an `end` |
 //! | `apply_outcome_ref_exists` | an `apply_outcome` action's `outcome_id` exists for the version |
+//! | `apply_component_ref_exists` | an `apply_component`/`apply_component_json` action's `component_id` is a UUID present in `rre.component_templates` |
+//! | `apply_component_version_valid` | such an action's `version` is the string `"default"` or a positive integer (well-formedness only; drift is fail-open at the proxy) |
 //! | `processor_kind_known` | a Decision/Expression node's `type` is a manifest `kind` |
 //! | `processor_field_required` | each required field (incl. unsatisfied `required_unless`) is present and non-empty |
 //! | `processor_field_option` | a `select` field's value is one of its `options[].value` |
@@ -86,16 +88,19 @@ fn normalize_canvas(canvas: &mut CanvasGraph) {
 ///
 /// `valid_outcome_ids` is the set of `rre.outcomes.id` values that belong to the
 /// version being edited; it backs the `apply_outcome_ref_exists` rule.
+/// `valid_component_ids` is the set of `rre.component_templates.id` values that
+/// exist; it backs the `apply_component_ref_exists` rule (threaded the same way).
 /// `manifest` backs the processor rules (`processor_kind_known`,
 /// `processor_field_required`, `processor_field_option`). Callers (the version
-/// service) fetch the outcome-id set and supply the manifest from `AppState`
-/// before invoking validation.
+/// service) fetch both id sets and supply the manifest from `AppState` before
+/// invoking validation.
 ///
 /// Returns `Ok(())` when every canvas passes; otherwise an
 /// [`AppError::Validation`] carrying one [`ValidationDetail`] per violation.
 pub fn validate(
     graph: &RuleGraph,
     valid_outcome_ids: &HashSet<Uuid>,
+    valid_component_ids: &HashSet<Uuid>,
     manifest: &NodeManifest,
 ) -> AppResult<()> {
     let mut details: Vec<ValidationDetail> = Vec::new();
@@ -106,6 +111,7 @@ pub fn validate(
             canvas_name,
             canvas,
             valid_outcome_ids,
+            valid_component_ids,
             &spec_by_kind,
             &mut details,
         );
@@ -123,6 +129,7 @@ fn validate_canvas(
     canvas: &'static str,
     graph: &CanvasGraph,
     valid_outcome_ids: &HashSet<Uuid>,
+    valid_component_ids: &HashSet<Uuid>,
     spec_by_kind: &HashMap<&str, &NodeTypeSpec>,
     details: &mut Vec<ValidationDetail>,
 ) {
@@ -199,6 +206,8 @@ fn validate_canvas(
             } => {
                 validate_processor(canvas, idx, action, spec_by_kind, details);
                 validate_apply_outcome_ref(canvas, idx, action, valid_outcome_ids, details);
+                validate_apply_component_ref(canvas, idx, action, valid_component_ids, details);
+                validate_apply_component_version(canvas, idx, action, details);
                 validate_custom_label(canvas, id, custom_label.as_deref(), details);
             }
             Node::Start { .. } | Node::End { .. } => {}
@@ -451,6 +460,81 @@ fn validate_apply_outcome_ref(
             ));
         }
     }
+}
+
+/// `apply_component_ref_exists`: an expression node whose `action.type` is
+/// `apply_component` / `apply_component_json` must carry a `component_id` that is
+/// a UUID present in `valid_component_ids`. Other expression kinds are ignored.
+/// Mirrors [`validate_apply_outcome_ref`].
+fn validate_apply_component_ref(
+    canvas: &'static str,
+    idx: usize,
+    action: &ProcessorConfig,
+    valid_component_ids: &HashSet<Uuid>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if !is_apply_component(&action.r#type) {
+        return;
+    }
+    let loc = format!("rule_graph.{canvas}.nodes[{idx}]");
+
+    let raw = action.fields.get("component_id");
+    let parsed: Option<Uuid> = match raw {
+        Some(Value::String(s)) => Uuid::parse_str(s).ok(),
+        _ => None,
+    };
+    match parsed {
+        Some(id) if valid_component_ids.contains(&id) => {}
+        _ => {
+            let shown = match raw {
+                Some(Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => "<missing>".to_string(),
+            };
+            details.push(ValidationDetail::new(
+                loc,
+                format!("component_id '{shown}' not found in components"),
+                "apply_component_ref_exists",
+            ));
+        }
+    }
+}
+
+/// `apply_component_version_valid`: an `apply_component` / `apply_component_json`
+/// action's `version` must be the string `"default"` or a positive integer
+/// (well-formedness only). A pinned version number that no longer exists is NOT
+/// a save-time error — version drift is handled fail-open at the proxy.
+fn validate_apply_component_version(
+    canvas: &'static str,
+    idx: usize,
+    action: &ProcessorConfig,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if !is_apply_component(&action.r#type) {
+        return;
+    }
+    let loc = format!("rule_graph.{canvas}.nodes[{idx}]");
+
+    let valid = match action.fields.get("version") {
+        Some(Value::String(s)) => {
+            let s = s.trim();
+            s == "default" || s.parse::<i64>().is_ok_and(|n| n > 0)
+        }
+        Some(Value::Number(n)) => n.as_i64().is_some_and(|n| n > 0),
+        _ => false,
+    };
+    if !valid {
+        details.push(ValidationDetail::new(
+            loc,
+            "version must be 'default' or a positive integer".to_string(),
+            "apply_component_version_valid",
+        ));
+    }
+}
+
+/// Whether an action `type` is one of the Component-apply kinds.
+fn is_apply_component(action_type: &str) -> bool {
+    action_type == "apply_component" || action_type == "apply_component_json"
 }
 
 /// `expression_custom_label_invalid`: an expression node's optional
@@ -750,7 +834,12 @@ mod tests {
     // 1. Empty graph is valid.
     #[test]
     fn empty_graph_is_valid() {
-        let res = validate(&RuleGraph::default(), &HashSet::new(), &manifest());
+        let res = validate(
+            &RuleGraph::default(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        );
         assert!(res.is_ok());
     }
 
@@ -775,7 +864,12 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let res = validate(&graph_with_anonymous(canvas), &ids, &manifest());
+        let res = validate(
+            &graph_with_anonymous(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest(),
+        );
         assert!(res.is_ok(), "expected ok, got {res:?}");
     }
 
@@ -792,6 +886,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -811,6 +906,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -832,6 +928,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"branch_unique"));
@@ -849,7 +946,13 @@ mod tests {
             ],
             root_node_id: None,
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 7. no_cycles: a self-loop is a cycle.
@@ -865,6 +968,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -885,6 +989,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -911,7 +1016,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 10. end_terminal + edge_source_kind: an end node with an outgoing edge.
@@ -927,6 +1038,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -951,6 +1063,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"apply_outcome_ref_exists"));
@@ -966,6 +1079,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -990,7 +1104,12 @@ mod tests {
             registered: canvas,
             ..Default::default()
         };
-        let details = details_of(validate(&graph, &HashSet::new(), &manifest()));
+        let details = details_of(validate(
+            &graph,
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(details
             .iter()
             .any(|d| d.loc.starts_with("rule_graph.registered.")));
@@ -1012,7 +1131,12 @@ mod tests {
             registered: bad(),
             customer: CanvasGraph::default(),
         };
-        let details = details_of(validate(&graph, &HashSet::new(), &manifest()));
+        let details = details_of(validate(
+            &graph,
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        ));
         // Two canvases each contribute an endpoint error + a root error => >= 4.
         assert!(details.len() >= 4, "got {} details", details.len());
         assert!(rule_ids(&details).contains(&"edge_endpoint_exists"));
@@ -1040,7 +1164,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 16. processor_kind_known: an unknown processor `type` fails (no field checks).
@@ -1057,6 +1187,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1081,6 +1212,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1111,7 +1243,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 19. required_unless: meta_tags `value` is required when operator != "exists".
@@ -1131,6 +1269,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1153,6 +1292,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1180,7 +1320,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 22. all_paths_reach_end: a reachable dead-end decision fails (no path to end).
@@ -1193,6 +1339,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1214,7 +1361,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 24. start -> expression(apply_outcome) -> end passes (expression action
@@ -1232,7 +1385,13 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 25. start_present: a non-empty canvas without a start node fails.
@@ -1245,6 +1404,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1265,6 +1425,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_present"));
@@ -1280,6 +1441,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1301,6 +1463,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_no_incoming"));
@@ -1316,6 +1479,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1337,7 +1501,12 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        let details = details_of(validate(
+            &graph_with_anonymous(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(rule_ids(&details).contains(&"expression_single_out"));
     }
 
@@ -1364,6 +1533,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1394,6 +1564,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_anonymous(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"processor_field_required"));
@@ -1421,6 +1592,12 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_anonymous(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 }

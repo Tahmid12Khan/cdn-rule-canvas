@@ -9,6 +9,7 @@ pub mod pagination;
 pub mod active_version;
 pub mod applicability;
 pub mod component;
+pub mod component_template;
 pub mod feature;
 pub mod node_type;
 pub mod outcome;

@@ -19,6 +19,8 @@ const TYPE_LABELS: Record<ComponentConfig["type"], string> = {
   json_remove: "JSON Remove",
   json_set: "JSON Set",
   json_replace: "JSON Replace",
+  component_ref: "Component",
+  component_ref_json: "Component",
 };
 
 const PLACEMENT_MODE_LABELS: Record<string, string> = {
@@ -48,6 +50,18 @@ export function componentBadges(config: unknown): ComponentBadge[] {
     badges.push({ label: `${c.word_count} words`, tone: "info" });
     if (c.fade_out) {
       badges.push({ label: "Fade out", tone: "placement" });
+    }
+  } else if (c.type === "component_ref") {
+    // Library component → inject at a selector with a placement mode.
+    const mode = PLACEMENT_MODE_LABELS[c.placement_mode] ?? c.placement_mode;
+    badges.push({ label: mode, tone: "placement" });
+    if (c.target_selector) {
+      badges.push({ label: c.target_selector, tone: "info" });
+    }
+  } else if (c.type === "component_ref_json") {
+    // Library component → render to an HTML string set at a JSON path.
+    if (c.target_path) {
+      badges.push({ label: c.target_path, tone: "info" });
     }
   } else {
     // JSON mutation: summarize by the target path.

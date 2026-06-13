@@ -13,15 +13,24 @@
 // read-only summary of their contents.
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   GenericNodeForm,
   type OutcomeSelectOption,
 } from "@/components/canvas/config/GenericNodeForm";
 import { useNodeTypes } from "@/hooks/useNodeTypes";
+import {
+  componentKeys,
+  listComponentTemplates,
+} from "@/lib/api/componentTemplates";
 import { validateCustomLabel } from "@/lib/canvas/customLabel";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { CanvasKey, ProcessorConfig, RFNode } from "@/lib/canvas/types";
+
+// Action kinds whose chosen component's name is cached for canvas/journey
+// display (mirrors apply_outcome's outcomeTitle).
+const COMPONENT_KINDS = new Set(["apply_component", "apply_component_json"]);
 
 interface NodeConfigDrawerProps {
   canvasKey: CanvasKey;
@@ -53,6 +62,26 @@ export function NodeConfigDrawer({
     () => nodes.find((n) => n.id === configNodeId),
     [nodes, configNodeId],
   );
+
+  // Component library (shares GenericNodeForm's query key/cache) so on save we
+  // can denormalize the chosen component's NAME for canvas/journey display
+  // (mirrors apply_outcome's outcomeTitle). Only fetched when a component node
+  // is open in edit mode.
+  const isComponentAction =
+    node?.type === "expressionNode" &&
+    COMPONENT_KINDS.has(node.data.action.type);
+  const componentsQuery = useQuery({
+    queryKey: componentKeys.list({ page: 1, page_size: 100 }),
+    queryFn: () => listComponentTemplates({ page: 1, page_size: 100 }),
+    enabled: isComponentAction && isEditing,
+  });
+  const componentNameById = useMemo(() => {
+    const map = new Map(
+      (componentsQuery.data?.items ?? []).map((c) => [c.id, c.name]),
+    );
+    return (id: unknown) =>
+      typeof id === "string" ? map.get(id) : undefined;
+  }, [componentsQuery.data]);
 
   const isDecision = node?.type === "decisionNode";
   const isExpression = node?.type === "expressionNode";
@@ -127,7 +156,18 @@ export function NodeConfigDrawer({
         typeof outcomeId === "string"
           ? outcomes.find((o) => o.id === outcomeId)?.title
           : undefined;
-      updateNodeAction(canvasKey, node.id, draft, outcomeTitle, customLabel);
+      // For apply_component / apply_component_json, cache the component's name.
+      const componentName = COMPONENT_KINDS.has(draft.type)
+        ? componentNameById(draft.component_id)
+        : undefined;
+      updateNodeAction(
+        canvasKey,
+        node.id,
+        draft,
+        outcomeTitle,
+        customLabel,
+        componentName,
+      );
     } else {
       return;
     }

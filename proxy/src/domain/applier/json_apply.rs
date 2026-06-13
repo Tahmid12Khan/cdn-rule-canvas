@@ -15,17 +15,41 @@
 //! true iff some component changed the body. Idempotent: re-running set/replace
 //! with the same value is a no-op; remove on a missing path is a no-op.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::domain::applier::json_path::{self, Seg};
-use crate::domain::applier::{orchestrator, ApplyError, JsonModificationResult};
-use crate::infra::backend_client::{ActiveComponent, ActiveOutcome, Placement};
+use crate::domain::applier::{
+    component_ref, component_render, html_injection, html_sanitizer, orchestrator, ApplyError,
+    JsonModificationResult,
+};
+use crate::infra::backend_client::{
+    ActiveComponent, ActiveOutcome, Placement, ResolvedComponent, VersionSelector,
+};
+
+/// Map of PRE-RESOLVED Component templates for one feature's apply pass, keyed by
+/// the action's `(component_id, VersionSelector)`. Built on the async side
+/// (resolve is a cached await) BEFORE the sync `apply_action_*` runs, so the
+/// applier never does I/O in the request hot path. A missing key → the component
+/// is skipped (fail-open). Design §4.3.
+pub type ResolvedComponentMap = HashMap<(Uuid, VersionSelector), Arc<ResolvedComponent>>;
 
 /// Apply an outcome's components to `body`. Always returns `Ok` (per-component
 /// failures fail open). `applied` = any component mutated the body.
+///
+/// `components` is the per-feature PRE-RESOLVED map (design §4.3): a
+/// `component_ref_json` component looks up its `(component_id, version)` here on the
+/// SYNC side (the resolve `await` already happened async). `sanitizer` cleans the
+/// rendered Component HTML before it is set as a string. A `component_ref_json` with
+/// an absent key (unresolved) is skipped (fail-open).
 pub fn apply_outcome_json(
     body: Value,
     outcome: &ActiveOutcome,
+    components: &ResolvedComponentMap,
+    sanitizer: &ammonia::Builder<'static>,
 ) -> Result<JsonModificationResult, ApplyError> {
     let mut ordered: Vec<&ActiveComponent> = outcome.components.iter().collect();
     ordered.sort_by_key(|c| (placement_rank(c.placement), c.order_index));
@@ -34,7 +58,7 @@ pub fn apply_outcome_json(
     let mut applied = false;
 
     for component in ordered {
-        match apply_component(&mut current, component) {
+        match apply_component(&mut current, component, components, sanitizer) {
             Ok(changed) => applied |= changed,
             Err(e) => {
                 tracing::warn!(component_id = %component.id, error = %e, "json component skipped");
@@ -59,7 +83,12 @@ fn placement_rank(p: Placement) -> u8 {
 
 /// Dispatch a single component. Returns `Ok(true)` if it changed `root`.
 /// Unknown / HTML component types are no-ops (warn + `Ok(false)`).
-fn apply_component(root: &mut Value, component: &ActiveComponent) -> Result<bool, ApplyError> {
+fn apply_component(
+    root: &mut Value,
+    component: &ActiveComponent,
+    components: &ResolvedComponentMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> Result<bool, ApplyError> {
     match component.r#type.as_str() {
         "json_remove" => {
             let target = target_path(component)?;
@@ -89,6 +118,22 @@ fn apply_component(root: &mut Value, component: &ActiveComponent) -> Result<bool
                 return Ok(false);
             }
             Ok(set_path(root, &segs, value, false))
+        }
+        // `component_ref_json` (design §4): render a PRE-RESOLVED Component to a
+        // sanitized HTML STRING and SET it at `target_path` (json_set core). A
+        // missing resolution / render error skips it (fail-open, Ok(false)).
+        "component_ref_json" => {
+            let Some(target) = component.config.get("target_path").and_then(Value::as_str) else {
+                tracing::warn!(component_id = %component.id, "component_ref_json missing `target_path`, skipped");
+                return Ok(false);
+            };
+            let Some(sanitized) =
+                component_ref::render_json_string(component, components, sanitizer)
+            else {
+                return Ok(false); // unresolved / render error already logged.
+            };
+            let segs = json_path::parse(target)?;
+            Ok(set_path(root, &segs, Value::String(sanitized), true))
         }
         other => {
             tracing::warn!(component_type = %other, "non-json component type, skipped for JSON");
@@ -271,7 +316,13 @@ pub fn add_attribute(root: &mut Value, json_path: &str, value: Value) -> Result<
 ///
 /// Returns whether the body changed. An unknown type / missing config is a
 /// fail-open no-op (warn + `false`) — never a panic.
-pub fn apply_action_json(body: &mut Value, action: &Value, outcomes: &[ActiveOutcome]) -> bool {
+pub fn apply_action_json(
+    body: &mut Value,
+    action: &Value,
+    outcomes: &[ActiveOutcome],
+    components: &ResolvedComponentMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> bool {
     let Some(kind) = action.get("type").and_then(Value::as_str) else {
         tracing::warn!("expression action missing `type`, skipped");
         return false;
@@ -308,7 +359,7 @@ pub fn apply_action_json(body: &mut Value, action: &Value, outcomes: &[ActiveOut
         "apply_outcome" => match lookup_outcome(action, outcomes) {
             Some(outcome) => {
                 let taken = std::mem::replace(body, Value::Null);
-                match apply_outcome_json(taken, outcome) {
+                match apply_outcome_json(taken, outcome, components, sanitizer) {
                     Ok(m) => {
                         *body = m.json;
                         m.applied
@@ -324,6 +375,11 @@ pub fn apply_action_json(body: &mut Value, action: &Value, outcomes: &[ActiveOut
                 false
             }
         },
+        "apply_component_json" => apply_component_json(body, action, components, sanitizer),
+        "apply_component" => {
+            tracing::warn!("apply_component (html) action on JSON body, skipped");
+            false
+        }
         other => {
             tracing::warn!(action_type = %other, "unknown expression action type, skipped");
             false
@@ -331,13 +387,53 @@ pub fn apply_action_json(body: &mut Value, action: &Value, outcomes: &[ActiveOut
     }
 }
 
-/// Apply ONE matched expression action to an HTML body. Only `apply_outcome` is
-/// meaningful for HTML; `trim_json` / `add_attribute` are JSON-only (warn + no-op).
-/// Returns the (possibly modified) HTML and whether it changed.
+/// `apply_component_json`: render a PRE-RESOLVED Component to an HTML STRING (same
+/// render + ammonia sanitize as the HTML path) and set it at `target_path` via the
+/// `json_set` core (`add_attribute` = `set_path(create=true)`). Any missing
+/// resolution / render error / bad path skips the component (fail-open: body
+/// untouched). Returns true iff the body changed. Idempotent: re-setting the same
+/// rendered string at the same path is a `set_path` no-op.
+fn apply_component_json(
+    body: &mut Value,
+    action: &Value,
+    components: &ResolvedComponentMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> bool {
+    let Some(key) = component_ref(action) else {
+        tracing::warn!("apply_component_json action: bad/absent component_id, skipped");
+        return false;
+    };
+    let Some(resolved) = components.get(&key) else {
+        tracing::warn!("apply_component_json action: component not resolved, skipped");
+        return false;
+    };
+    let Some(target) = action.get("target_path").and_then(Value::as_str) else {
+        tracing::warn!("apply_component_json action missing `target_path`, skipped");
+        return false;
+    };
+    let Some(sanitized) = render_component(resolved, action, sanitizer) else {
+        return false; // render failure already logged.
+    };
+    match add_attribute(body, target, Value::String(sanitized)) {
+        Ok(changed) => changed,
+        Err(e) => {
+            tracing::warn!(error = %e, "apply_component_json set-at-path failed, skipped");
+            false
+        }
+    }
+}
+
+/// Apply ONE matched expression action to an HTML body. `apply_outcome` runs an
+/// outcome's components; `apply_component` renders a PRE-RESOLVED Component
+/// template and injects it; `trim_json` / `add_attribute` are JSON-only (warn +
+/// no-op). `components` is the per-feature pre-resolved map (design §4.3) — a
+/// missing key fails open (skip). Returns the (possibly modified) HTML and whether
+/// it changed.
 pub fn apply_action_html(
     body: String,
     action: &Value,
     outcomes: &[ActiveOutcome],
+    components: &ResolvedComponentMap,
     sanitizer: &ammonia::Builder<'static>,
 ) -> (String, bool) {
     let Some(kind) = action.get("type").and_then(Value::as_str) else {
@@ -351,7 +447,7 @@ pub fn apply_action_html(
             // the success path consumes the clone-free `ModificationResult`.
             Some(outcome) => {
                 let original = body.clone();
-                match orchestrator::apply_outcome(body, outcome, sanitizer) {
+                match orchestrator::apply_outcome(body, outcome, components, sanitizer) {
                     Ok(m) => (m.html, m.applied),
                     Err(e) => {
                         tracing::warn!(error = %e, "apply_outcome (html) failed, serving original");
@@ -364,6 +460,11 @@ pub fn apply_action_html(
                 (body, false)
             }
         },
+        "apply_component" => apply_component_html(body, action, components, sanitizer),
+        "apply_component_json" => {
+            tracing::warn!("apply_component_json action on HTML body, skipped");
+            (body, false)
+        }
         "trim_json" | "add_attribute" => {
             tracing::warn!(action_type = %kind, "json-only action on HTML body, skipped");
             (body, false)
@@ -371,6 +472,100 @@ pub fn apply_action_html(
         other => {
             tracing::warn!(action_type = %other, "unknown expression action type, skipped");
             (body, false)
+        }
+    }
+}
+
+/// `apply_component` (HTML): look up the PRE-RESOLVED Component, render its
+/// `html_body` against `action.variables`, ammonia-sanitize, then inject at
+/// `target_selector` per `placement_mode` (reusing the `html_injection` core +
+/// idempotency marker). Any missing resolution / render error / bad selector skips
+/// the component (fail-open: original body returned, never an empty body).
+/// Idempotent: a stable per-(component,version) marker makes a second pass a no-op.
+fn apply_component_html(
+    body: String,
+    action: &Value,
+    components: &ResolvedComponentMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> (String, bool) {
+    let Some(key) = component_ref(action) else {
+        tracing::warn!("apply_component action: bad/absent component_id, skipped");
+        return (body, false);
+    };
+    let Some(resolved) = components.get(&key) else {
+        tracing::warn!("apply_component action: component not resolved, skipped");
+        return (body, false);
+    };
+    let Some(sanitized) = render_component(resolved, action, sanitizer) else {
+        return (body, false); // render failure already logged.
+    };
+    let target_selector = action
+        .get("target_selector")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let placement_mode = action
+        .get("placement_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("append");
+    // Marker keys on (component, resolved version) so the same component injected
+    // by two rules at the same version dedupes, while different versions don't.
+    let marker = component_marker(key.0, resolved.version_number);
+    match html_injection::inject_html(&body, target_selector, placement_mode, &sanitized, &marker) {
+        Ok(next) => {
+            let changed = next != body;
+            (next, changed)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "apply_component inject failed, serving original");
+            (body, false)
+        }
+    }
+}
+
+/// Stable idempotency marker for an injected Component, keyed by component id +
+/// the RESOLVED version number (so `"default"` and a pin resolving to the same
+/// version dedupe, and distinct versions inject independently).
+fn component_marker(component_id: Uuid, version_number: i32) -> String {
+    format!("rc-{component_id}-{version_number}")
+}
+
+/// If `action` is an `apply_component` / `apply_component_json` action, return its
+/// `(component_id, VersionSelector)` reference for PRE-RESOLUTION on the async
+/// side. Returns `None` for any other action type or a malformed/absent
+/// `component_id` (which the apply branch then skips, fail-open). Shared by the
+/// forwarder, full-journey and eval pre-resolve passes (design §4.3) so the set of
+/// resolved refs always matches what the apply branches look up.
+pub fn component_ref(action: &Value) -> Option<(Uuid, VersionSelector)> {
+    let kind = action.get("type").and_then(Value::as_str)?;
+    if kind != "apply_component" && kind != "apply_component_json" {
+        return None;
+    }
+    let id_str = action.get("component_id").and_then(Value::as_str)?;
+    let id = Uuid::parse_str(id_str).ok()?;
+    let selector = VersionSelector::from_action_value(action.get("version"));
+    Some((id, selector))
+}
+
+/// Render a resolved Component's `html_body` against the action's `variables` and
+/// sanitize the result. `None` on render failure (fail-open). The flat `variables`
+/// object on the action holds `{ name: value }`; a missing/non-object `variables`
+/// is treated as empty. The rendered HTML is ALWAYS `ammonia`-sanitized before it
+/// leaves this function (raw `{{{x}}}` values included), so injection is safe.
+fn render_component(
+    resolved: &ResolvedComponent,
+    action: &Value,
+    sanitizer: &ammonia::Builder<'static>,
+) -> Option<String> {
+    static EMPTY: std::sync::OnceLock<serde_json::Map<String, Value>> = std::sync::OnceLock::new();
+    let values = action
+        .get("variables")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| EMPTY.get_or_init(serde_json::Map::new));
+    match component_render::render(&resolved.html_body, values) {
+        Ok(rendered) => Some(html_sanitizer::sanitize(sanitizer, &rendered)),
+        Err(e) => {
+            tracing::warn!(error = %e, "apply_component render failed, skipped");
+            None
         }
     }
 }

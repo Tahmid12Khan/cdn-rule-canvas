@@ -208,6 +208,17 @@ pub enum Control {
     /// the manifest; the client queries `GET /api/v1/sites?q=` and stores the
     /// selected site's slug on the processor config.
     SiteSelect,
+    /// Dynamic single-select of Component templates. Options are NOT in the
+    /// manifest; the client queries `GET /api/v1/component-templates` and stores
+    /// the selected component's UUID on the action config (the
+    /// `apply_component_ref_exists` rule covers membership). Skips option-
+    /// membership validation, like `OutcomeSelect`.
+    ComponentSelect,
+    /// Dynamic single-select of a chosen component's versions (plus a "default"
+    /// option that follows the component). Options are NOT in the manifest. Skips
+    /// option-membership validation; `apply_component_version_valid` covers
+    /// well-formedness.
+    ComponentVersionSelect,
 }
 
 /// Conditional-requirement clause: required unless a sibling field equals a value.
@@ -275,6 +286,8 @@ mod tests {
                 "trim_json",
                 "add_attribute",
                 "apply_outcome",
+                "apply_component",
+                "apply_component_json",
                 "site_match"
             ]
         );
@@ -290,6 +303,28 @@ mod tests {
         // `apply_outcome`'s outcome field uses the dynamic outcome_select control.
         let outcome_field = &by_kind["apply_outcome"].fields[0];
         assert_eq!(outcome_field.control, Control::OutcomeSelect);
+
+        // The two Component action nodes are expression-kind and gate by feature
+        // type; their component/version fields use the dynamic controls.
+        assert_eq!(by_kind["apply_component"].node_kind, NodeKind::Expression);
+        assert_eq!(by_kind["apply_component"].applies_to, AppliesTo::Html);
+        assert_eq!(
+            by_kind["apply_component"].fields[0].control,
+            Control::ComponentSelect
+        );
+        assert_eq!(
+            by_kind["apply_component"].fields[1].control,
+            Control::ComponentVersionSelect
+        );
+        assert_eq!(
+            by_kind["apply_component_json"].node_kind,
+            NodeKind::Expression
+        );
+        assert_eq!(by_kind["apply_component_json"].applies_to, AppliesTo::Json);
+        assert_eq!(
+            by_kind["apply_component_json"].fields[0].control,
+            Control::ComponentSelect
+        );
 
         // `site_match` is a decision node in the `request` category whose `site`
         // field uses the dynamic `site_select` control.

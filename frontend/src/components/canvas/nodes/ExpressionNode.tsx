@@ -31,13 +31,19 @@ function ExpressionNodeImpl({ id, data, selected }: NodeProps<RFExpressionNode>)
   const title = nodeTitle(spec, action);
 
   // apply_outcome shows the saved outcome's title (resolved on deserialize);
-  // other actions show the generic manifest summary (json_path/length, etc.).
+  // apply_component[_json] shows the chosen component's name (resolved on
+  // deserialize); other actions show the generic manifest summary.
+  const isComponent =
+    action.type === "apply_component" ||
+    action.type === "apply_component_json";
   const summary =
     action.type === "apply_outcome"
       ? data.outcomeTitle || "Pick an outcome…"
-      : spec
-        ? nodeSummary(spec, action, manifest?.display)
-        : "";
+      : isComponent
+        ? data.componentName || "Pick a component…"
+        : spec
+          ? nodeSummary(spec, action, manifest?.display)
+          : "";
 
   const [hovered, setHovered] = useState(false);
 
@@ -117,7 +123,9 @@ function ExpressionNodeImpl({ id, data, selected }: NodeProps<RFExpressionNode>)
                 <dd className="truncate text-[11px] font-medium text-nav">
                   {field.control === "outcome_select"
                     ? data.outcomeTitle || "—"
-                    : fieldDisplayValue(field, action)}
+                    : field.control === "component_select"
+                      ? data.componentName || "—"
+                      : fieldDisplayValue(field, action)}
                 </dd>
               </div>
             ))}

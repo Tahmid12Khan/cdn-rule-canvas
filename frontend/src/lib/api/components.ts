@@ -50,6 +50,24 @@ export const ComponentConfig = z.discriminatedUnion("type", [
     target_path: JsonTargetPath,
     value: z.unknown(),
   }),
+  // component_ref / component_ref_json reference a GLOBAL library component
+  // (componentTemplates.ts) by id + version; the proxy resolves + mustache-
+  // renders it at request time. Field names mirror the backend exactly.
+  z.object({
+    type: z.literal("component_ref"),
+    component_id: z.guid(),
+    version: z.union([z.literal("default"), z.number().int().positive()]),
+    variables: z.record(z.string(), z.string()),
+    target_selector: z.string().min(1),
+    placement_mode: HtmlPlacementMode,
+  }),
+  z.object({
+    type: z.literal("component_ref_json"),
+    component_id: z.guid(),
+    version: z.union([z.literal("default"), z.number().int().positive()]),
+    variables: z.record(z.string(), z.string()),
+    target_path: JsonTargetPath,
+  }),
 ]);
 export type ComponentConfig = z.infer<typeof ComponentConfig>;
 
@@ -59,6 +77,8 @@ export const ComponentType = z.enum([
   "json_remove",
   "json_set",
   "json_replace",
+  "component_ref",
+  "component_ref_json",
 ]);
 export type ComponentType = z.infer<typeof ComponentType>;
 

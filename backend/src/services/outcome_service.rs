@@ -16,7 +16,10 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult, ValidationDetail};
 use crate::models::enums::VersionStatus;
-use crate::repositories::{component_repository as components, outcome_repository as outcomes};
+use crate::repositories::{
+    component_repository as components, component_template_repository as component_templates,
+    outcome_repository as outcomes,
+};
 use crate::schemas::component::{ComponentConfig, ComponentCreate, ComponentRead, ComponentUpdate};
 use crate::schemas::outcome::{OutcomeCreate, OutcomeRead, OutcomeUpdate, ReorderItem};
 
@@ -72,6 +75,40 @@ fn validated_config_json(type_str: &str, config: &ComponentConfig) -> AppResult<
         )])
     })?;
     serde_json::to_value(config).map_err(|e| AppError::Internal(e.into()))
+}
+
+/// The library `component_id` referenced by a component-ref config, if any.
+/// `None` for non-reference config kinds (`html_injection`, `json_set`, …).
+fn referenced_component_id(config: &ComponentConfig) -> Option<Uuid> {
+    match config {
+        ComponentConfig::ComponentRef { component_id, .. }
+        | ComponentConfig::ComponentRefJson { component_id, .. } => Some(*component_id),
+        _ => None,
+    }
+}
+
+/// When `config` is a component-ref, assert the referenced library component
+/// exists in `rre.component_templates`. Runs inside the caller's transaction.
+/// Mirrors how rule_graph validation checks `apply_component_ref_exists`, but at
+/// the component-config layer (`config.component_id`, rule `component_ref_exists`).
+async fn ensure_component_ref_exists<'e, E>(exec: E, config: &ComponentConfig) -> AppResult<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let Some(component_id) = referenced_component_id(config) else {
+        return Ok(());
+    };
+    if component_templates::find(exec, component_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::validation(vec![ValidationDetail::new(
+            "config.component_id",
+            format!("library component {component_id} does not exist"),
+            "component_ref_exists",
+        )]));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +365,9 @@ pub async fn add_component(
         .ok_or_else(|| outcome_not_found(outcome_id))?;
     require_draft(status)?;
 
+    // For component-ref configs, the referenced library component must exist.
+    ensure_component_ref_exists(&mut *tx, &input.config).await?;
+
     let next = match input.order_index {
         Some(idx) => idx,
         None => components::max_order_index(&mut *tx, outcome_id)
@@ -370,11 +410,14 @@ pub async fn update_component(
     require_draft(status)?;
 
     // If config is being set, validate it against the effective type (new type
-    // if provided, else the existing type).
+    // if provided, else the existing type) and assert any referenced library
+    // component exists.
     let config_json = match &input.config {
         Some(cfg) => {
             let effective_type = input.r#type.as_deref().unwrap_or(&existing.r#type);
-            Some(validated_config_json(effective_type, cfg)?)
+            let json = validated_config_json(effective_type, cfg)?;
+            ensure_component_ref_exists(&mut *tx, cfg).await?;
+            Some(json)
         }
         None => None,
     };

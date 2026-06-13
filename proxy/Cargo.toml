@@ -58,6 +58,10 @@ scraper = "0.27"
 lol_html = "2"
 ammonia = "4"
 
+# mustache rendering for Component templates (flat interpolation; {{x}} escaped,
+# {{{x}}}/{{&x}} raw). Built from a dynamic MapBuilder of the rule's variable values.
+mustache = "0.9"
+
 # encoding
 flate2 = "1"
 
