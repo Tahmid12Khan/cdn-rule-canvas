@@ -353,7 +353,20 @@ async fn run_canvas_eval(
         .map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
     let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
 
-    Ok(build_response(state, canvas, inputs, trace, eval_ms))
+    // Pre-resolve component references on the async side so the journey's
+    // `body_after` reflects the rendered component (design §4.3). The single-canvas
+    // test panels apply no outcomes (`apply_outcome` is a no-op), so pass `&[]` —
+    // only direct apply_component* action refs are resolved here.
+    let components = forwarder::resolve_action_components(state, &trace.actions, &[]).await;
+
+    Ok(build_response(
+        state,
+        canvas,
+        inputs,
+        trace,
+        eval_ms,
+        &components,
+    ))
 }
 
 /// Derive the journey's starting body from a request `EvalContext` (the synthetic
@@ -439,6 +452,7 @@ fn build_response(
     inputs: &JourneyInputs,
     trace: EvalTrace,
     eval_ms: f64,
+    components: &json_apply::ResolvedComponentMap,
 ) -> EvalResponse {
     // trace.steps is ordered by zen's `order` field: each entry has the canvas
     // node id and the branch output.
@@ -460,7 +474,7 @@ fn build_response(
     // single-canvas path passes an empty outcomes slice and ignores `final_body`.
     let JourneyResult {
         journey, timings, ..
-    } = build_journey(state, canvas, inputs, &trace, &[]);
+    } = build_journey(state, canvas, inputs, &trace, &[], components);
 
     // Summary (spec §5/§8): built exactly like one feature's entry, for the
     // single canvas under test. `None` when no expression node matched. The test
@@ -522,6 +536,7 @@ pub(crate) fn build_journey(
     inputs: &JourneyInputs,
     trace: &EvalTrace,
     outcomes: &[ActiveOutcome],
+    components: &json_apply::ResolvedComponentMap,
 ) -> JourneyResult {
     let is_json = inputs.is_json;
     // Running JSON body (only meaningful for JSON features).
@@ -565,12 +580,19 @@ pub(crate) fn build_journey(
             if let Some(action) = action_for.get(step.node_id.as_str()) {
                 let t_node = std::time::Instant::now();
                 if is_json {
-                    json_apply::apply_action_json(&mut json_body, action, outcomes);
+                    json_apply::apply_action_json(
+                        &mut json_body,
+                        action,
+                        outcomes,
+                        components,
+                        &state.sanitizer,
+                    );
                 } else {
                     let (next, _) = json_apply::apply_action_html(
                         html_body,
                         action,
                         outcomes,
+                        components,
                         &state.sanitizer,
                     );
                     html_body = next;

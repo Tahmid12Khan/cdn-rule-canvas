@@ -4,6 +4,8 @@
 //! `mod.rs` owns the shared `ComponentRenderer` trait + result/error types; the
 //! orchestrator dispatches components to renderers and runs them in order.
 
+pub mod component_ref;
+pub mod component_render;
 pub mod content_truncation;
 pub mod html_injection;
 pub mod html_sanitizer;
@@ -35,6 +37,10 @@ pub enum ApplyError {
     Selector,
     #[error("invalid json path: {0}")]
     JsonPath(#[from] json_path::ParsePathError),
+    /// A Component template failed to compile/render (unbalanced mustache, etc.).
+    /// The caller fails open (skips the component, serves the body untouched).
+    #[error("component render failed")]
+    Render,
 }
 
 /// One component renderer. Pure + idempotent.
