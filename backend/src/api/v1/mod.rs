@@ -15,6 +15,7 @@ pub mod components;
 pub mod features;
 pub mod node_types;
 pub mod outcomes;
+pub mod products;
 pub mod sites;
 pub mod test_presets;
 pub mod versions;
@@ -34,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .merge(versions::router())
         .merge(outcomes::router())
         .merge(components::router())
+        .merge(products::router())
         .merge(sites::router())
         .merge(test_presets::router())
 }

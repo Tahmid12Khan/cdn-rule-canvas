@@ -7,6 +7,7 @@ pub mod enums;
 pub mod component;
 pub mod feature;
 pub mod outcome;
+pub mod product;
 pub mod site;
 pub mod test_preset;
 pub mod version;
