@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use http::HeaderMap;
 use rre_proxy::domain::context::EvaluationContextParts;
+use rre_proxy::domain::identity::Identity;
 use rre_proxy::domain::processors::{article_url::ArticleUrlProcessor, Branch, CanvasProcessor};
 use serde_json::json;
 
@@ -12,6 +13,7 @@ fn ctx_with_path(path: &str) -> rre_proxy::domain::context::EvaluationContext {
         &HashMap::new(),
         "<html></html>".to_string(),
         false,
+        Identity::default(),
     )
     .into_context()
 }

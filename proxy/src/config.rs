@@ -28,6 +28,10 @@ pub struct Settings {
     /// bytes), bounding decompression-bomb memory.
     pub max_decompressed_bytes: usize,
     pub sanitizer_config_path: String,
+    pub identity_user_cookie: String,
+    pub identity_products_cookie: String,
+    pub identity_user_header: String,
+    pub identity_products_header: String,
 }
 
 impl Settings {

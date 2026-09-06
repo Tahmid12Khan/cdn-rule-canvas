@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use http::HeaderMap;
 use rre_proxy::domain::context::{EvaluationContext, EvaluationContextParts};
+use rre_proxy::domain::identity::Identity;
 use rre_proxy::domain::processors::{
     json_expression::JsonExpressionProcessor, Branch, CanvasProcessor,
 };
@@ -18,6 +19,7 @@ fn ctx_json(body: &str) -> EvaluationContext {
         &HashMap::new(),
         body.to_string(),
         true,
+        Identity::default(),
     )
     .into_context()
 }
@@ -30,6 +32,7 @@ fn ctx_html() -> EvaluationContext {
         &HashMap::new(),
         "<html></html>".to_string(),
         false,
+        Identity::default(),
     )
     .into_context()
 }

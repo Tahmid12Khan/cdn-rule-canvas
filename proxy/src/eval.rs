@@ -67,6 +67,15 @@ pub struct EvalContext {
     /// Invalid header names/values are dropped by `headers_to_map`.
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
+    /// Simulated logged-in state for `logged_in`/`has_product` nodes. Bypasses
+    /// `identity::resolve`'s cookie/header parsing — the test panel supplies
+    /// the state directly.
+    #[serde(default)]
+    pub logged_in: bool,
+    /// Simulated held product labels for `has_product` nodes. Lower-cased to
+    /// match `identity::resolve`'s normalization.
+    #[serde(default)]
+    pub products: Vec<String>,
 }
 
 /// The wire `device_type` field on the request (matches frontend enum).
@@ -205,6 +214,15 @@ pub async fn eval_handler(
         meta_tags,
         response_json,
         site: req.context.site.clone(),
+        identity: crate::domain::identity::Identity {
+            logged_in: req.context.logged_in,
+            products: req
+                .context
+                .products
+                .iter()
+                .map(|s| s.to_lowercase())
+                .collect(),
+        },
     };
 
     let inputs = journey_inputs_from_context(&req.context);
@@ -274,13 +292,26 @@ pub async fn eval_url_handler(
     };
 
     // Build the rich eval context from the fetch (device from User-Agent, meta tags
-    // from the HTML, response_json for JSON, cookies, the matched Site slug).
+    // from the HTML, response_json for JSON, cookies, the matched Site slug,
+    // identity resolved from the fetched request's cookies/headers).
+    let identity_settings = crate::domain::identity::IdentitySettings {
+        user_cookie: state.settings.identity_user_cookie.clone(),
+        products_cookie: state.settings.identity_products_cookie.clone(),
+        user_header: state.settings.identity_user_header.clone(),
+        products_header: state.settings.identity_products_header.clone(),
+    };
+    let identity = crate::domain::identity::resolve(
+        &fetched.request_headers,
+        &fetched.request_cookies,
+        &identity_settings,
+    );
     let ctx = EvaluationContextParts::from_request(
         &fetched.request_headers,
         &fetched.request_path,
         &fetched.request_cookies,
         fetched.body_string.clone(),
         fetched.is_json,
+        identity,
     )
     .with_site(fetched.site.clone())
     .into_context();

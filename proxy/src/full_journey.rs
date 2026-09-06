@@ -194,6 +194,21 @@ async fn run_full_journey(
     let is_json = fetched.is_json;
     let content_kind = if is_json { "json" } else { "html" };
 
+    // Identity resolved ONCE from the real fetched request's cookies/headers
+    // (mirrors how `site` is resolved once and threaded through every feature's
+    // context below).
+    let identity_settings = crate::domain::identity::IdentitySettings {
+        user_cookie: state.settings.identity_user_cookie.clone(),
+        products_cookie: state.settings.identity_products_cookie.clone(),
+        user_header: state.settings.identity_user_header.clone(),
+        products_header: state.settings.identity_products_header.clone(),
+    };
+    let identity = crate::domain::identity::resolve(
+        &fetched.request_headers,
+        &fetched.request_cookies,
+        &identity_settings,
+    );
+
     // 4a. Parse the JSON body ONCE up front. On a parse failure mirror production
     //     (forwarder.rs serves the original untouched and runs ZERO features) —
     //     short-circuit with an empty feature list instead of iterating against
@@ -274,6 +289,7 @@ async fn run_full_journey(
             &fetched.request_cookies,
             ctx_body,
             is_json,
+            identity.clone(),
         )
         .with_site(fetched.site.clone())
         .into_context();

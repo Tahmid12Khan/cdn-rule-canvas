@@ -9,5 +9,9 @@
   "upstream_read_timeout_secs": 10,
   "max_upstream_body_bytes": 16777216,
   "max_decompressed_bytes": 16777216,
-  "sanitizer_config_path": "proxy/config/sanitizer.yaml"
+  "sanitizer_config_path": "proxy/config/sanitizer.yaml",
+  "identity_user_cookie": "rre_user",
+  "identity_products_cookie": "rre_products",
+  "identity_user_header": "x-rre-user",
+  "identity_products_header": "x-rre-products"
 }

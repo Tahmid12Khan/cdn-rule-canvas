@@ -4,7 +4,9 @@
 
 pub mod article_url;
 pub mod device_type;
+pub mod has_product;
 pub mod json_expression;
+pub mod logged_in;
 pub mod meta_tags;
 pub mod site_match;
 
@@ -108,5 +110,7 @@ pub fn default_registry() -> ProcessorRegistry {
     registry.register(Arc::new(article_url::ArticleUrlProcessor));
     registry.register(Arc::new(json_expression::JsonExpressionProcessor));
     registry.register(Arc::new(site_match::SiteMatchProcessor));
+    registry.register(Arc::new(logged_in::LoggedInProcessor));
+    registry.register(Arc::new(has_product::HasProductProcessor));
     registry
 }

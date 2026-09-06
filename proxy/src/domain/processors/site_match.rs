@@ -45,6 +45,7 @@ mod tests {
     use serde_json::json;
 
     use crate::domain::context::{DeviceType, EvaluationContext};
+    use crate::domain::identity::Identity;
 
     use super::*;
 
@@ -57,6 +58,7 @@ mod tests {
             meta_tags: HashMap::new(),
             response_json: None,
             site: site.map(str::to_string),
+            identity: Identity::default(),
         }
     }
 

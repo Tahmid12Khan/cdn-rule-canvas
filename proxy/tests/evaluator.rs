@@ -6,6 +6,7 @@ use http::HeaderMap;
 use rre_proxy::domain::context::EvaluationContextParts;
 use rre_proxy::domain::evaluator::{GraphEvaluator, MatchedAction};
 use rre_proxy::domain::graph::CanvasGraph;
+use rre_proxy::domain::identity::Identity;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::compiled_cache::CompiledCache;
 
@@ -61,6 +62,7 @@ fn parts(html: &str, ua: Option<&str>) -> EvaluationContextParts {
         &HashMap::new(),
         html.to_string(),
         false,
+        Identity::default(),
     )
 }
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use http::HeaderMap;
 use rre_proxy::domain::context::EvaluationContextParts;
+use rre_proxy::domain::identity::Identity;
 use rre_proxy::domain::processors::{meta_tags::MetaTagsProcessor, Branch, CanvasProcessor};
 use serde_json::json;
 
@@ -12,6 +13,7 @@ fn ctx(html: &str) -> rre_proxy::domain::context::EvaluationContext {
         &HashMap::new(),
         html.to_string(),
         false,
+        Identity::default(),
     )
     .into_context()
 }
@@ -83,6 +85,7 @@ fn needs_meta_tags_false_skips_parse() {
         &HashMap::new(),
         html.to_string(),
         false,
+        Identity::default(),
     );
     parts.needs_meta_tags = false;
     let ctx = parts.into_context();
@@ -98,6 +101,7 @@ fn needs_meta_tags_false_skips_parse() {
         &HashMap::new(),
         html.to_string(),
         false,
+        Identity::default(),
     );
     let ctx = parts.into_context();
     assert_eq!(

@@ -22,6 +22,10 @@ fn settings() -> Settings {
         max_upstream_body_bytes: 16 * 1024 * 1024,
         max_decompressed_bytes: 16 * 1024 * 1024,
         sanitizer_config_path: "config/sanitizer.yaml".to_string(),
+        identity_user_cookie: "rre_user".to_string(),
+        identity_products_cookie: "rre_products".to_string(),
+        identity_user_header: "x-rre-user".to_string(),
+        identity_products_header: "x-rre-products".to_string(),
     }
 }
 

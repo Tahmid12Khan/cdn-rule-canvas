@@ -83,6 +83,13 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     // Snapshot request context before consuming the request for upstream fetch.
     let headers = req.headers().clone();
     let cookies = parse_cookies(&headers);
+    let identity_settings = crate::domain::identity::IdentitySettings {
+        user_cookie: state.settings.identity_user_cookie.clone(),
+        products_cookie: state.settings.identity_products_cookie.clone(),
+        user_header: state.settings.identity_user_header.clone(),
+        products_header: state.settings.identity_products_header.clone(),
+    };
+    let identity = crate::domain::identity::resolve(&headers, &cookies, &identity_settings);
 
     // 3. Upstream fetch (once). On error -> typed ProxyError response.
     let upstream = match send_upstream(&state, &route, req).await {
@@ -158,6 +165,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
             &path,
             &cookies,
             route.site.as_deref(),
+            &identity,
             body_string,
         )
         .await
@@ -172,6 +180,7 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
                     &path,
                     &cookies,
                     route.site.as_deref(),
+                    &identity,
                     parsed,
                     &body_string,
                 )
@@ -238,6 +247,7 @@ async fn apply_features_html(
     path: &str,
     cookies: &HashMap<String, String>,
     site: Option<&str>,
+    identity: &crate::domain::identity::Identity,
     mut current: String,
 ) -> ApplyResult {
     let mut any_applied = false;
@@ -271,9 +281,15 @@ async fn apply_features_html(
         } else {
             String::new()
         };
-        let mut ctx =
-            EvaluationContextParts::from_request(headers, path, cookies, body_for_ctx, false)
-                .with_site(site.map(str::to_string));
+        let mut ctx = EvaluationContextParts::from_request(
+            headers,
+            path,
+            cookies,
+            body_for_ctx,
+            false,
+            identity.clone(),
+        )
+        .with_site(site.map(str::to_string));
         ctx.needs_meta_tags = needs_meta_tags;
         let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id).await;
         if actions.is_empty() {
@@ -408,6 +424,7 @@ async fn apply_features_json(
     path: &str,
     cookies: &HashMap<String, String>,
     site: Option<&str>,
+    identity: &crate::domain::identity::Identity,
     mut current: serde_json::Value,
     original: &str,
 ) -> ApplyResult {
@@ -436,8 +453,15 @@ async fn apply_features_json(
         // Eval reads response_json from the body string, so feed it the CURRENT
         // (already-chained) body — not the original — for correct chaining.
         let ctx_body = serde_json::to_string(&current).unwrap_or_default();
-        let ctx = EvaluationContextParts::from_request(headers, path, cookies, ctx_body, true)
-            .with_site(site.map(str::to_string));
+        let ctx = EvaluationContextParts::from_request(
+            headers,
+            path,
+            cookies,
+            ctx_body,
+            true,
+            identity.clone(),
+        )
+        .with_site(site.map(str::to_string));
         let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id).await;
         if actions.is_empty() {
             log_skipped(feature_id, eval_ms);

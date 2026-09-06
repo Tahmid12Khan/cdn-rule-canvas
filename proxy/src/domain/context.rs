@@ -62,6 +62,10 @@ pub struct EvaluationContext {
     /// back to `upstream_base_url` (no Site matched). Read by the `site_match`
     /// decision processor.
     pub site: Option<String>,
+    /// Visitor identity (logged-in status + held product labels), resolved
+    /// cookie-first with header fallback. Read by the `logged_in`/`has_product`
+    /// decision processors.
+    pub identity: crate::domain::identity::Identity,
 }
 
 /// `Send` carrier: everything in `EvaluationContext` except the `!Send`
@@ -84,6 +88,9 @@ pub struct EvaluationContextParts {
     /// The matched Site's slug (the routing source). `None` on fallback. Set by
     /// the forwarder via [`EvaluationContextParts::with_site`].
     pub site: Option<String>,
+    /// Visitor identity, resolved once per request by the caller (cookie-first,
+    /// header fallback) and threaded through unchanged.
+    pub identity: crate::domain::identity::Identity,
 }
 
 impl EvaluationContextParts {
@@ -95,6 +102,7 @@ impl EvaluationContextParts {
         cookies: &HashMap<String, String>,
         body: String,
         is_json: bool,
+        identity: crate::domain::identity::Identity,
     ) -> Self {
         let device = headers
             .get(http::header::USER_AGENT)
@@ -115,6 +123,7 @@ impl EvaluationContextParts {
             needs_meta_tags: true,
             // No Site by default; the forwarder sets it via `with_site`.
             site: None,
+            identity,
         }
     }
 
@@ -140,6 +149,7 @@ impl EvaluationContextParts {
                 meta_tags: HashMap::new(),
                 response_json,
                 site: self.site,
+                identity: self.identity,
             };
         }
         // Skip the full DOM parse when the canvas has no meta_tags node.
@@ -156,6 +166,7 @@ impl EvaluationContextParts {
             meta_tags,
             response_json: None,
             site: self.site,
+            identity: self.identity,
         }
     }
 
@@ -177,6 +188,10 @@ impl EvaluationContextParts {
             "device": self.device.as_str(),
             "cookies": self.request_cookies,
             "site": self.site,
+            "identity": {
+                "logged_in": self.identity.logged_in,
+                "products": self.identity.products.iter().cloned().collect::<Vec<_>>(),
+            },
         })
     }
 }
@@ -216,6 +231,10 @@ impl EvaluationContext {
             "device": self.device.as_str(),
             "cookies": self.request_cookies,
             "site": self.site,
+            "identity": {
+                "logged_in": self.identity.logged_in,
+                "products": self.identity.products.iter().cloned().collect::<Vec<_>>(),
+            },
         })
     }
 }
