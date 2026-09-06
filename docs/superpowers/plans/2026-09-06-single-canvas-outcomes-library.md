@@ -865,7 +865,7 @@ git commit -m "feat(backend): add logged_in/has_product decision nodes + validat
 ## Task 4: Backend — Outcomes Library (`rre.saved_outcomes`) + `apply_saved_outcome(_json)` nodes
 
 **Files:**
-- Create: `backend/migrations/0015_saved_outcomes.up.sql`, `.down.sql`, `backend/src/models/saved_outcome.rs`, `backend/src/schemas/saved_outcome.rs`, `backend/src/repositories/saved_outcome_repository.rs`, `backend/src/services/saved_outcome_service.rs`, `backend/src/api/v1/saved_outcomes.rs`
+- Create: `backend/migrations/0017_saved_outcomes.up.sql`, `.down.sql`, `backend/src/models/saved_outcome.rs`, `backend/src/schemas/saved_outcome.rs`, `backend/src/repositories/saved_outcome_repository.rs`, `backend/src/services/saved_outcome_service.rs`, `backend/src/api/v1/saved_outcomes.rs`
 - Modify: `backend/config/node_types.json`, `backend/src/schemas/mod.rs`, `backend/src/models/mod.rs`, `backend/src/repositories/mod.rs`, `backend/src/services/mod.rs`, `backend/src/api/v1/mod.rs`, `backend/src/error.rs`, `backend/src/services/rule_graph_service.rs`, `backend/Cargo.toml`
 - Test: `backend/tests/saved_outcomes.rs`, inline in `rule_graph_service.rs`
 
@@ -875,7 +875,7 @@ git commit -m "feat(backend): add logged_in/has_product decision nodes + validat
 
 - [ ] **Step 1: Migration**
 
-`backend/migrations/0015_saved_outcomes.up.sql`:
+`backend/migrations/0017_saved_outcomes.up.sql`:
 ```sql
 CREATE TABLE rre.saved_outcomes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1552,7 +1552,7 @@ Expected: clean.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/migrations/0015_saved_outcomes.up.sql backend/migrations/0015_saved_outcomes.down.sql \
+git add backend/migrations/0017_saved_outcomes.up.sql backend/migrations/0017_saved_outcomes.down.sql \
   backend/src/models/saved_outcome.rs backend/src/models/mod.rs \
   backend/src/schemas/saved_outcome.rs backend/src/schemas/mod.rs \
   backend/src/repositories/saved_outcome_repository.rs backend/src/repositories/mod.rs \
