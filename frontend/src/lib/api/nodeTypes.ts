@@ -19,6 +19,10 @@ import { apiGet } from "@/lib/api/client";
 // list and the chosen component's version numbers are fetched client-side, NOT
 // supplied by the manifest (like outcome_select, they skip option-membership
 // validation).
+// `product_select` is a searchable combobox of the configured Products (used by
+// the `has_product` decision node); it stores the selected product's LABEL.
+// Options are fetched at render time (searchProducts), NOT supplied by the
+// manifest.
 export const NodeFieldControl = z.enum([
   "select",
   "text",
@@ -27,6 +31,7 @@ export const NodeFieldControl = z.enum([
   "site_select",
   "component_select",
   "component_version_select",
+  "product_select",
 ]);
 export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 

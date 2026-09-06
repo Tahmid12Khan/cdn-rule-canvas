@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ThemeToggle } from "@/components/nav/ThemeToggle";
+import { UI } from "@/lib/uiCopy";
 
 // Server component: static top navigation bar + theme toggle + tenant pill.
 // ThemeToggle is the only client island; the bar itself stays server-rendered.
@@ -51,6 +52,12 @@ export function TopNav() {
           className="text-sm font-medium text-nav-muted hover:text-fg"
         >
           Test Full Journey
+        </Link>
+        <Link
+          href="/products/catalogue"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          {UI.catalogue}
         </Link>
       </div>
       <div className="flex items-center gap-3">
