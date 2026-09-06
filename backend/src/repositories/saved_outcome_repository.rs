@@ -8,7 +8,7 @@ use crate::models::saved_outcome::SavedOutcome;
 const COLS: &str =
     "id, slug, name, component_id, version_number, variables, created_at, updated_at";
 
-#[allow(clippy::too_many_arguments)]
+/// Inserts a new saved outcome and returns the persisted row.
 pub async fn insert(
     pool: &PgPool,
     slug: &str,

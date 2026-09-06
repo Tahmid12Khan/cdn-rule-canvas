@@ -28,7 +28,7 @@ describe("toUserError", () => {
   it("maps a 422 validation error to fix-the-fields guidance", () => {
     const ue = toUserError(
       new ApiError(422, "VALIDATION_ERROR", "invalid", [
-        { loc: "rule_graph.anonymous.nodes[0]", msg: "bad", rule_id: "x" },
+        { loc: "rule_graph.canvas.nodes[0]", msg: "bad", rule_id: "x" },
       ]),
       { surface: "save" },
     );

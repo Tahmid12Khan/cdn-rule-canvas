@@ -934,7 +934,10 @@ pub struct AppState {
 `upstream_connect_timeout_secs` (default 2), `upstream_read_timeout_secs` (default 10),
 `sanitizer_config_path` (default `proxy/config/sanitizer.yaml`), `identity_user_cookie`,
 `identity_products_cookie`, `identity_user_header`, `identity_products_header` (visitor-identity
-resolution — cookie name/header name pairs consumed by `domain::identity::resolve`, §1/§7).
+resolution — cookie name/header name pairs consumed by `domain::identity::resolve`, §1/§7); these
+values are trusted verbatim with no signature check, so they MUST be set by a trusted edge (a
+reverse proxy or CDN in front of this proxy that strips/overwrites them on inbound client requests),
+not read straight from the public internet.
 
 `SiteMap`: an in-memory `HashMap<String, Site>` keyed by normalized `source_host:source_port`
 (lowercase host). Cached with the same TTL mechanism as the active-version cache.
