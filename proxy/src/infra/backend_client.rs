@@ -15,7 +15,7 @@ use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::graph::{Canvas, CanvasGraph, RuleGraph};
+use crate::domain::graph::{CanvasGraph, RuleGraph};
 
 /// Placement mirror (BACKEND CONTRACT §2). snake_case wire form.
 #[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,9 +71,9 @@ pub struct ActiveComponent {
 }
 
 impl ActiveVersionRead {
-    /// The `CanvasGraph` for the classified user class (canvas isolation).
-    pub fn canvas(&self, c: Canvas) -> &CanvasGraph {
-        self.rule_graph.canvas(c)
+    /// The single Rule Canvas.
+    pub fn canvas(&self) -> &CanvasGraph {
+        &self.rule_graph.canvas
     }
 
     /// Find an outcome by id (the eval result `outcomeId`).
@@ -688,14 +688,12 @@ mod tests {
     }
 
     /// A minimal active-version body with the given version_number and an empty
-    /// 3-canvas rule_graph (enough to deserialize `ActiveVersionRead`).
+    /// rule_graph (enough to deserialize `ActiveVersionRead`).
     fn av_body(version_number: i32) -> serde_json::Value {
         serde_json::json!({
             "version_number": version_number,
             "rule_graph": {
-                "anonymous": { "root_node_id": null, "nodes": [], "edges": [] },
-                "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-                "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+                "canvas": { "root_node_id": null, "nodes": [], "edges": [] }
             },
             "applicability": {},
             "outcomes": []

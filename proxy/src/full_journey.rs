@@ -31,7 +31,6 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::domain::classifier;
 use crate::domain::context::EvaluationContextParts;
 use crate::domain::evaluator::GraphEvaluator;
 use crate::domain::features_matched::{self, FeatureEntry};
@@ -216,9 +215,6 @@ async fn run_full_journey(
         }
     }
 
-    // Canvas isolation: the same class for every feature (the request's session).
-    let canvas_class = classifier::classify(&fetched.request_headers);
-
     // 3. Ordered feature list, KEEP ONLY the matching content type. Preserve the
     //    backend order (execution_order asc within type).
     let features: Vec<FeatureListItem> = state
@@ -266,7 +262,7 @@ async fn run_full_journey(
         // 7. Build ctx from the CURRENT body (JSON re-serialized so later features'
         //    json_expression sees mutations), translate + eval + build journey,
         //    then chain `current` to the journey's final body.
-        let canvas = resolved.rule_graph.canvas(canvas_class).clone();
+        let canvas = resolved.rule_graph.canvas.clone();
         let ctx_body = if is_json {
             serde_json::to_string(&current_json).unwrap_or_default()
         } else {

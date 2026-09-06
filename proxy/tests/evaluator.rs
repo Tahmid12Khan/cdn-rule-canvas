@@ -5,7 +5,7 @@ use std::time::Instant;
 use http::HeaderMap;
 use rre_proxy::domain::context::EvaluationContextParts;
 use rre_proxy::domain::evaluator::{GraphEvaluator, MatchedAction};
-use rre_proxy::domain::graph::{Canvas, CanvasGraph};
+use rre_proxy::domain::graph::CanvasGraph;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::compiled_cache::CompiledCache;
 
@@ -84,9 +84,7 @@ async fn paywall_plus_mobile_routes_to_regwall() {
     let html = r#"<html><head><meta name="paywall" content="true"></head><body></body></html>"#;
     let ctx = parts(html, Some("iPhone Mobile"));
 
-    let actions = evaluator
-        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-        .await;
+    let actions = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
 
     assert_eq!(node_ids(&actions), vec!["n_regwall"]);
     assert_eq!(
@@ -105,9 +103,7 @@ async fn paywall_plus_desktop_routes_to_paywall() {
     let html = r#"<html><head><meta name="paywall" content="true"></head><body></body></html>"#;
     let ctx = parts(html, Some("Macintosh Desktop"));
 
-    let actions = evaluator
-        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-        .await;
+    let actions = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
 
     assert_eq!(node_ids(&actions), vec!["n_paywall"]);
     assert_eq!(
@@ -126,9 +122,7 @@ async fn no_paywall_routes_to_content() {
     let html = "<html><head></head><body></body></html>";
     let ctx = parts(html, Some("iPhone Mobile"));
 
-    let actions = evaluator
-        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-        .await;
+    let actions = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
 
     assert_eq!(node_ids(&actions), vec!["n_content"]);
     assert_eq!(
@@ -146,9 +140,7 @@ async fn empty_canvas_yields_no_actions() {
     let canvas = CanvasGraph::default();
     let ctx = parts("<html></html>", None);
 
-    let actions = evaluator
-        .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-        .await;
+    let actions = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
 
     assert!(actions.is_empty());
 }
@@ -167,9 +159,7 @@ async fn latency_smoke_100_concurrent() {
     {
         let evaluator = GraphEvaluator::new(registry.clone(), &cache);
         let ctx = parts(html, Some("iPhone Mobile"));
-        let _ = evaluator
-            .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-            .await;
+        let _ = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
     }
 
     let mut handles = Vec::new();
@@ -181,9 +171,7 @@ async fn latency_smoke_100_concurrent() {
             let evaluator = GraphEvaluator::new(registry, &cache);
             let ctx = parts(html, Some("iPhone Mobile"));
             let start = Instant::now();
-            let _ = evaluator
-                .evaluate(&canvas, ctx, "demo-article", 1, Canvas::Anonymous)
-                .await;
+            let _ = evaluator.evaluate(&canvas, ctx, "demo-article", 1).await;
             start.elapsed().as_secs_f64() * 1000.0
         }));
     }

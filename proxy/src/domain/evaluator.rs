@@ -30,7 +30,7 @@ thread_local! {
 
 use crate::domain::adapter::CanvasNodeAdapter;
 use crate::domain::context::{EvaluationContext, EvaluationContextParts};
-use crate::domain::graph::{Canvas, CanvasGraph, Node};
+use crate::domain::graph::{CanvasGraph, Node};
 use crate::domain::processors::ProcessorRegistry;
 use crate::domain::translator::to_decision_content;
 use crate::infra::compiled_cache::CompiledCache;
@@ -97,14 +97,11 @@ impl<'a> GraphEvaluator<'a> {
         ctx: EvaluationContextParts,
         feature_id: &str,
         version_number: i32,
-        canvas_class: Canvas,
     ) -> Vec<MatchedAction> {
         // 1. Compiled DecisionContent (cache hit -> Arc clone; miss -> compile).
-        let content =
-            self.compiled
-                .get_or_compile(feature_id, version_number, canvas_class, || {
-                    to_decision_content(canvas)
-                });
+        let content = self
+            .compiled
+            .get_or_compile(feature_id, version_number, || to_decision_content(canvas));
 
         // 2. Send-safe top-level input projection + the Arc'd registry.
         let input_value = ctx.to_input_value();

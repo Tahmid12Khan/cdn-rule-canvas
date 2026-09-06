@@ -12,11 +12,10 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
 use crate::domain::applier::json_apply;
-use crate::domain::classifier;
 use crate::domain::context::EvaluationContextParts;
 use crate::domain::evaluator::{GraphEvaluator, MatchedAction};
 use crate::domain::features_matched::{self, FeatureEntry, NodeTiming};
-use crate::domain::graph::{Canvas, CanvasGraph, Node};
+use crate::domain::graph::{CanvasGraph, Node};
 use crate::error::ProxyError;
 use crate::infra::backend_client::{ActiveVersionRead, Applicability, Env};
 use crate::infra::encoding;
@@ -80,10 +79,6 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
     if feature_list.is_empty() {
         return passthrough(&state, &route, req).await;
     }
-
-    // 2. Classify (canvas isolation source) — same canvas class for every feature.
-    let canvas_class = classifier::classify(req.headers());
-    let canvas_label = canvas_name(canvas_class);
 
     // Snapshot request context before consuming the request for upstream fetch.
     let headers = req.headers().clone();
@@ -159,8 +154,6 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
         apply_features_html(
             &state,
             &feature_ids,
-            canvas_class,
-            canvas_label,
             &headers,
             &path,
             &cookies,
@@ -175,8 +168,6 @@ pub async fn forward(State(state): State<AppState>, req: axum::extract::Request)
                 apply_features_json(
                     &state,
                     &feature_ids,
-                    canvas_class,
-                    canvas_label,
                     &headers,
                     &path,
                     &cookies,
@@ -237,14 +228,12 @@ struct ApplyResult {
 
 /// Apply every matching feature's actions to an HTML body, in order, chaining
 /// the result. Each feature: active-version lookup (None -> skip), html_selector
-/// applicability gate (no match -> skip), eval the classified canvas, fold its
+/// applicability gate (no match -> skip), eval the canvas, fold its
 /// matched actions. Returns the final body and whether ANY feature changed it.
 #[allow(clippy::too_many_arguments)]
 async fn apply_features_html(
     state: &AppState,
     feature_ids: &[String],
-    canvas_class: Canvas,
-    canvas_label: &str,
     headers: &HeaderMap,
     path: &str,
     cookies: &HashMap<String, String>,
@@ -268,7 +257,7 @@ async fn apply_features_html(
         };
         if !html_selector_matches(&av, &current) {
             tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label,
+                feature_id = %feature_id,
                 apply_status = "skipped", reason = "html_selector_no_match", "request"
             );
             continue;
@@ -276,7 +265,7 @@ async fn apply_features_html(
         // Only the HTML body needs parsing when the canvas has a meta_tags
         // node; otherwise skip the parse AND the full-body clone by passing
         // an empty body — the raw HTML is read only to extract meta tags.
-        let needs_meta_tags = canvas_has_meta_tags(av.canvas(canvas_class));
+        let needs_meta_tags = canvas_has_meta_tags(av.canvas());
         let body_for_ctx = if needs_meta_tags {
             current.clone()
         } else {
@@ -286,12 +275,12 @@ async fn apply_features_html(
             EvaluationContextParts::from_request(headers, path, cookies, body_for_ctx, false)
                 .with_site(site.map(str::to_string));
         ctx.needs_meta_tags = needs_meta_tags;
-        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
+        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id).await;
         if actions.is_empty() {
-            log_skipped(feature_id, canvas_label, eval_ms);
+            log_skipped(feature_id, eval_ms);
             continue;
         }
-        let canvas = av.canvas(canvas_class);
+        let canvas = av.canvas();
         // Pre-resolve every Component reference (apply_component* actions AND
         // component_ref* components inside applied outcomes) on the ASYNC side
         // (cached await) before the sync apply — no I/O in the apply path (§4.3).
@@ -323,7 +312,7 @@ async fn apply_features_html(
         metrics::histogram!("proxy_transform_ms").record(transform_ms);
         let status = if applied { "ok" } else { "skipped" };
         tracing::info!(
-            feature_id = %feature_id, canvas = canvas_label,
+            feature_id = %feature_id,
             actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
         );
         any_applied |= applied;
@@ -415,8 +404,6 @@ fn inject_html_feature_expressions(
 async fn apply_features_json(
     state: &AppState,
     feature_ids: &[String],
-    canvas_class: Canvas,
-    canvas_label: &str,
     headers: &HeaderMap,
     path: &str,
     cookies: &HashMap<String, String>,
@@ -441,7 +428,7 @@ async fn apply_features_json(
         };
         if !json_selector_matches(&av, &current) {
             tracing::info!(
-                feature_id = %feature_id, canvas = canvas_label,
+                feature_id = %feature_id,
                 apply_status = "skipped", reason = "json_selector_no_match", "request"
             );
             continue;
@@ -451,12 +438,12 @@ async fn apply_features_json(
         let ctx_body = serde_json::to_string(&current).unwrap_or_default();
         let ctx = EvaluationContextParts::from_request(headers, path, cookies, ctx_body, true)
             .with_site(site.map(str::to_string));
-        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id, canvas_class).await;
+        let (actions, eval_ms) = evaluate(state, &av, ctx, feature_id).await;
         if actions.is_empty() {
-            log_skipped(feature_id, canvas_label, eval_ms);
+            log_skipped(feature_id, eval_ms);
             continue;
         }
-        let canvas = av.canvas(canvas_class);
+        let canvas = av.canvas();
         // Pre-resolve component references on the async side (design §4.3):
         // apply_component* actions AND component_ref* components inside outcomes.
         let components = resolve_action_components(state, &actions, &av.outcomes).await;
@@ -486,7 +473,7 @@ async fn apply_features_json(
         metrics::histogram!("proxy_transform_ms").record(transform_ms);
         let status = if applied { "ok" } else { "skipped" };
         tracing::info!(
-            feature_id = %feature_id, canvas = canvas_label,
+            feature_id = %feature_id,
             actions = actions.len(), eval_ms, transform_ms, apply_status = status, "request"
         );
         any_applied |= applied;
@@ -576,26 +563,19 @@ fn inject_json_feature_expressions(
     );
 }
 
-/// Run the classified canvas through the evaluator, returning the ordered matched
+/// Run the canvas through the evaluator, returning the ordered matched
 /// expression actions and the eval duration in ms. Records `proxy_eval_ms`.
 async fn evaluate(
     state: &AppState,
     av: &ActiveVersionRead,
     ctx: EvaluationContextParts,
     feature_id: &str,
-    canvas_class: Canvas,
 ) -> (Vec<MatchedAction>, f64) {
-    let canvas_graph = av.canvas(canvas_class);
+    let canvas_graph = av.canvas();
     let eval_start = Instant::now();
     let evaluator = GraphEvaluator::new(state.registry.clone(), &state.compiled);
     let actions = evaluator
-        .evaluate(
-            canvas_graph,
-            ctx,
-            feature_id,
-            av.version_number,
-            canvas_class,
-        )
+        .evaluate(canvas_graph, ctx, feature_id, av.version_number)
         .await;
     let eval_ms = eval_start.elapsed().as_secs_f64() * 1000.0;
     metrics::histogram!("proxy_eval_ms").record(eval_ms);
@@ -677,10 +657,9 @@ fn lookup_applied_outcome<'a>(
 
 /// Structured "no modification" log shared by both content kinds (no matched
 /// expression actions on the routed path).
-fn log_skipped(feature_id: &str, canvas_label: &str, eval_ms: f64) {
+fn log_skipped(feature_id: &str, eval_ms: f64) {
     tracing::info!(
         feature_id = %feature_id,
-        canvas = canvas_label,
         actions = 0,
         eval_ms,
         apply_status = "skipped",
@@ -1091,14 +1070,6 @@ fn canvas_has_meta_tags(canvas: &CanvasGraph) -> bool {
             Node::Decision { processor, .. } if processor.kind == "meta_tags"
         )
     })
-}
-
-fn canvas_name(c: Canvas) -> &'static str {
-    match c {
-        Canvas::Anonymous => "anonymous",
-        Canvas::Registered => "registered",
-        Canvas::Customer => "customer",
-    }
 }
 
 /// Display label + custom label for an expression node (spec §4/v2.3): the

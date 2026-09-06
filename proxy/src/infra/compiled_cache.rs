@@ -1,5 +1,4 @@
-//! Compiled-graph cache. Keyed by `(feature_id, version_number, Canvas)` so the
-//! three canvases of one version are cached independently (canvas isolation).
+//! Compiled-graph cache. Keyed by `(feature_id, version_number)`.
 //! Bounded LRU (<= 256). Stores `Arc<DecisionContent>` post `.compile()`.
 
 use std::sync::Arc;
@@ -7,10 +6,8 @@ use std::sync::Arc;
 use moka::sync::Cache;
 use zen_engine::model::DecisionContent;
 
-use crate::domain::graph::Canvas;
-
 pub struct CompiledCache {
-    inner: Cache<(String, i32, Canvas), Arc<DecisionContent>>,
+    inner: Cache<(String, i32), Arc<DecisionContent>>,
 }
 
 impl CompiledCache {
@@ -27,10 +24,9 @@ impl CompiledCache {
         &self,
         feature_id: &str,
         version_number: i32,
-        canvas: Canvas,
         build: impl FnOnce() -> DecisionContent,
     ) -> Arc<DecisionContent> {
-        let key = (feature_id.to_string(), version_number, canvas);
+        let key = (feature_id.to_string(), version_number);
         if let Some(hit) = self.inner.get(&key) {
             return hit;
         }

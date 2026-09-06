@@ -64,7 +64,7 @@ fn active_version_body() -> serde_json::Value {
     json!({
         "version_number": 1,
         "rule_graph": {
-            "anonymous": {
+            "canvas": {
                 "root_node_id": "start",
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
@@ -90,8 +90,6 @@ fn active_version_body() -> serde_json::Value {
                     { "id": "e3", "source_node_id": "n_comp", "target_node_id": "end",    "branch": "yes" }
                 ]
             },
-            "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-            "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
         },
         "outcomes": []
     })

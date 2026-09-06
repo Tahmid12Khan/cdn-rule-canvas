@@ -103,7 +103,7 @@ fn json_active_version(
     json!({
         "version_number": vnum,
         "rule_graph": {
-            "anonymous": {
+            "canvas": {
                 "root_node_id": "start",
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
@@ -122,8 +122,6 @@ fn json_active_version(
                     { "id": "e3", "source_node_id": "a_set", "target_node_id": "end",   "branch": "yes" }
                 ]
             },
-            "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-            "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
         },
         "applicability": {},
         "outcomes": [
@@ -150,7 +148,7 @@ fn html_active_version(
     json!({
         "version_number": vnum,
         "rule_graph": {
-            "anonymous": {
+            "canvas": {
                 "root_node_id": "start",
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": -200.0, "y": 0.0 } },
@@ -164,8 +162,6 @@ fn html_active_version(
                     { "id": "e1", "source_node_id": "n_inject", "target_node_id": "end",      "branch": "yes" }
                 ]
             },
-            "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-            "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
         },
         "applicability": { "html_selector": html_selector },
         "outcomes": [
@@ -695,7 +691,7 @@ async fn json_full_journey_eval_failure_skips_and_continues() {
     let bad_av = json!({
         "version_number": 1,
         "rule_graph": {
-            "anonymous": {
+            "canvas": {
                 "root_node_id": "start",
                 "nodes": [
                     { "kind": "start", "id": "start", "position": { "x": 0.0, "y": 0.0 } },
@@ -714,8 +710,6 @@ async fn json_full_journey_eval_failure_skips_and_continues() {
                     { "id": "e3", "source_node_id": "a_set", "target_node_id": "end",   "branch": "yes" }
                 ]
             },
-            "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-            "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
         },
         "applicability": {},
         "outcomes": [

@@ -11,12 +11,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// One `CanvasGraph` per user class.
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct RuleGraph {
-    pub anonymous: CanvasGraph,
-    pub registered: CanvasGraph,
-    pub customer: CanvasGraph,
+    pub canvas: CanvasGraph,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -116,23 +113,4 @@ pub enum Branch {
 pub struct Position {
     pub x: f64,
     pub y: f64,
-}
-
-/// User-class selector. Part of the compiled-cache key (canvas isolation).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Canvas {
-    Anonymous,
-    Registered,
-    Customer,
-}
-
-impl RuleGraph {
-    /// The `CanvasGraph` for the given user class.
-    pub fn canvas(&self, c: Canvas) -> &CanvasGraph {
-        match c {
-            Canvas::Anonymous => &self.anonymous,
-            Canvas::Registered => &self.registered,
-            Canvas::Customer => &self.customer,
-        }
-    }
 }
