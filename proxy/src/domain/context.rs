@@ -190,10 +190,20 @@ impl EvaluationContextParts {
             "site": self.site,
             "identity": {
                 "logged_in": self.identity.logged_in,
-                "products": self.identity.products.iter().cloned().collect::<Vec<_>>(),
+                "products": sorted_products(&self.identity.products),
             },
         })
     }
+}
+
+/// Project the identity's product-label set into a deterministically ordered
+/// `Vec`. `HashSet` iteration order is randomized per-instance, so this keeps
+/// `to_input_value`'s JSON stable across otherwise-identical requests (eval
+/// purity: same context must project to the same JSON every time).
+fn sorted_products(products: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut v: Vec<String> = products.iter().cloned().collect();
+    v.sort();
+    v
 }
 
 /// Parse `html` and collect every `<meta name="X" content="Y">` into a
@@ -233,7 +243,7 @@ impl EvaluationContext {
             "site": self.site,
             "identity": {
                 "logged_in": self.identity.logged_in,
-                "products": self.identity.products.iter().cloned().collect::<Vec<_>>(),
+                "products": sorted_products(&self.identity.products),
             },
         })
     }
