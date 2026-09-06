@@ -2,8 +2,8 @@
 
 // Full-screen Compare modal (version-diff-compare spec §6). Base = the version
 // the user is on; they pick another version to compare against. Computes a pure
-// rule-graph diff and renders the left change list + the three diff canvases.
-// Clicking a change-list item pans/centres the matching canvas on the node.
+// rule-graph diff and renders the left change list + the diff canvas.
+// Clicking a change-list item pans/centres the canvas on the node.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
@@ -15,14 +15,6 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { getVersion, type VersionRead } from "@/lib/api/canvasVersions";
 import { listVersions } from "@/lib/api/versions";
 import { diffRuleGraph } from "@/lib/canvas/diff";
-import { CANVAS_KEYS } from "@/state/ruleBuilderStore";
-import type { CanvasKey } from "@/lib/canvas/types";
-
-const CANVAS_LABELS: Record<CanvasKey, string> = {
-  anonymous: "Anonymous",
-  registered: "Registered",
-  customer: "Customer",
-};
 
 interface CompareDialogProps {
   fid: string;
@@ -39,12 +31,10 @@ export function CompareDialog({
 }: CompareDialogProps) {
   const [compareVnum, setCompareVnum] = useState<number | null>(null);
   const [swap, setSwap] = useState(false);
-  const [focused, setFocused] = useState<{ canvas: CanvasKey; nodeId: string | null }>(
-    { canvas: "anonymous", nodeId: null },
-  );
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
 
-  const rfInstances = useRef<Partial<Record<CanvasKey, ReactFlowInstance>>>({});
-  const sectionRefs = useRef<Partial<Record<CanvasKey, HTMLElement | null>>>({});
+  const rfInstance = useRef<ReactFlowInstance | undefined>(undefined);
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   // All other versions of this feature, newest first.
   const { data: versionsPage, isLoading: versionsLoading } = useQuery({
@@ -92,10 +82,10 @@ export function CompareDialog({
   );
 
   const onSelect = useCallback(
-    (canvasKey: CanvasKey, nodeId: string | null, point: { x: number; y: number }) => {
-      setFocused({ canvas: canvasKey, nodeId });
-      sectionRefs.current[canvasKey]?.scrollIntoView({ behavior: "smooth", block: "start" });
-      rfInstances.current[canvasKey]?.setCenter(point.x, point.y, {
+    (nodeId: string | null, point: { x: number; y: number }) => {
+      setFocusedNodeId(nodeId);
+      sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      rfInstance.current?.setCenter(point.x, point.y, {
         zoom: 1.2,
         duration: 400,
       });
@@ -201,32 +191,28 @@ export function CompareDialog({
                     </div>
                   )}
 
-                  {diff &&
-                    CANVAS_KEYS.map((key) => (
-                      <section
-                        key={key}
-                        ref={(el) => {
-                          sectionRefs.current[key] = el;
+                  {diff && (
+                    <section
+                      ref={sectionRef}
+                      className="mb-6 scroll-mt-4"
+                    >
+                      <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-nav">
+                        Rule canvas
+                        <span className="rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] font-medium text-fg-muted">
+                          {diff.changeCount} change
+                          {diff.changeCount === 1 ? "" : "s"}
+                        </span>
+                      </h3>
+                      <DiffCanvas
+                        key={pairKey}
+                        diff={diff}
+                        focusedNodeId={focusedNodeId}
+                        onReady={(inst) => {
+                          rfInstance.current = inst;
                         }}
-                        className="mb-6 scroll-mt-4"
-                      >
-                        <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-nav">
-                          {CANVAS_LABELS[key]}
-                          <span className="rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] font-medium text-fg-muted">
-                            {diff[key].changeCount} change
-                            {diff[key].changeCount === 1 ? "" : "s"}
-                          </span>
-                        </h3>
-                        <DiffCanvas
-                          key={`${key}-${pairKey}`}
-                          diff={diff[key]}
-                          focusedNodeId={focused.canvas === key ? focused.nodeId : null}
-                          onReady={(inst) => {
-                            rfInstances.current[key] = inst;
-                          }}
-                        />
-                      </section>
-                    ))}
+                      />
+                    </section>
+                  )}
                 </div>
               </>
             )}

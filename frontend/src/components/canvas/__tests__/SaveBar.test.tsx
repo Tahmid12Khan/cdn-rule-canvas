@@ -17,9 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const emptyGraph: RuleGraph = {
-  anonymous: { nodes: [], edges: [], root_node_id: null },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
+  canvas: { nodes: [], edges: [], root_node_id: null },
 };
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -143,7 +141,7 @@ describe("SaveBar — Save as New Version", () => {
     // A decision node with no outgoing edge -> it can't reach an outcome. The
     // client pre-flight should block before any POST.
     const deadEnd: RuleGraph = {
-      anonymous: {
+      canvas: {
         root_node_id: "d1",
         nodes: [
           {
@@ -155,8 +153,6 @@ describe("SaveBar — Save as New Version", () => {
         ],
         edges: [],
       },
-      registered: { nodes: [], edges: [], root_node_id: null },
-      customer: { nodes: [], edges: [], root_node_id: null },
     };
     useRuleBuilderStore.getState().seedFromRuleGraph(deadEnd, "live", () => "X");
 
@@ -181,13 +177,13 @@ describe("SaveBar — Save as New Version", () => {
     ).toContain("d1");
   });
 
-  it("names the offending node + canvas on a 422 validation failure", async () => {
+  it("names the offending node on a 422 validation failure", async () => {
     const user = userEvent.setup();
-    // Seed a valid start -> apply_outcome -> end graph on the Anonymous canvas
-    // (passes the client pre-flight) so the 422 loc resolves to the expression
-    // node we can name in the banner.
+    // Seed a valid start -> apply_outcome -> end graph (passes the client
+    // pre-flight) so the 422 loc resolves to the expression node we can name
+    // in the banner.
     const seeded: RuleGraph = {
-      anonymous: {
+      canvas: {
         root_node_id: "start",
         nodes: [
           { kind: "start", id: "start", position: { x: 0, y: 0 } },
@@ -207,8 +203,6 @@ describe("SaveBar — Save as New Version", () => {
           { id: "e1", source_node_id: "n_act", target_node_id: "end", branch: "yes" },
         ],
       },
-      registered: { nodes: [], edges: [], root_node_id: null },
-      customer: { nodes: [], edges: [], root_node_id: null },
     };
     useRuleBuilderStore
       .getState()
@@ -223,7 +217,7 @@ describe("SaveBar — Save as New Version", () => {
               message: "invalid graph",
               details: [
                 {
-                  loc: "rule_graph.anonymous.nodes[1]",
+                  loc: "rule_graph.canvas.nodes[1]",
                   msg: "outcome ref missing",
                   rule_id: "apply_outcome_ref_exists",
                 },
@@ -241,7 +235,6 @@ describe("SaveBar — Save as New Version", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/1 rule node needs attention/i);
-    expect(alert).toHaveTextContent(/Anonymous canvas/i);
     expect(alert).toHaveTextContent(/Show Content/);
     // The offending node is highlighted via the store's nodeErrors.
     expect(useRuleBuilderStore.getState().nodeErrors).toEqual({

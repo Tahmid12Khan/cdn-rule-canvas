@@ -50,18 +50,16 @@ function edge(id: string, source: string, target: string): RFEdge {
 }
 
 const emptyGraph: RuleGraph = {
-  anonymous: { nodes: [], edges: [], root_node_id: null },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
+  canvas: { nodes: [], edges: [], root_node_id: null },
 };
 
-// The store injects a start + end node into a canvas the first time a real node
-// is added (one each per non-empty canvas — expression-nodes-spec §1/§3);
-// helpers here count only the real (non-bookend) nodes.
-function realNodes(k: "anonymous" | "registered" | "customer") {
+// The store injects a start + end node into the canvas the first time a real
+// node is added (expression-nodes-spec §1/§3); this helper counts only the
+// real (non-bookend) nodes.
+function realNodes() {
   return useRuleBuilderStore
     .getState()
-    .canvases[k].nodes.filter(
+    .canvas.nodes.filter(
       (n) => n.type !== "startNode" && n.type !== "endNode",
     );
 }
@@ -73,13 +71,13 @@ beforeEach(() => {
 describe("ruleBuilderStore", () => {
   it("addNode increments the canvas node count", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("n1"));
-    expect(realNodes("anonymous")).toHaveLength(1);
+    s.addNode(decision("n1"));
+    expect(realNodes()).toHaveLength(1);
   });
 
   it("empty-canvas factory yields start + end + e_start_end with spec positions (spec §6)", () => {
-    // The store initialises each canvas via emptyCanvas() — verify directly.
-    const canvas = useRuleBuilderStore.getState().canvases.anonymous;
+    // The store initialises the canvas via emptyCanvas() — verify directly.
+    const canvas = useRuleBuilderStore.getState().canvas;
     expect(canvas.rootNodeId).toBe(START_NODE_ID);
     expect(canvas.nodes.find((n) => n.id === START_NODE_ID)?.position).toEqual({
       x: 40,
@@ -96,27 +94,25 @@ describe("ruleBuilderStore", () => {
   });
 
   it("a seeded EMPTY canvas has the default start -> end graph (spec §6)", () => {
-    for (const k of ["anonymous", "registered", "customer"] as const) {
-      const canvas = useRuleBuilderStore.getState().canvases[k];
-      const starts = canvas.nodes.filter((n) => n.type === "startNode");
-      const ends = canvas.nodes.filter((n) => n.type === "endNode");
-      expect(starts).toHaveLength(1);
-      expect(starts[0].id).toBe(START_NODE_ID);
-      expect(starts[0].position).toEqual({ x: 40, y: 160 });
-      expect(ends).toHaveLength(1);
-      expect(ends[0].id).toBe(END_NODE_ID);
-      expect(ends[0].position).toEqual({ x: 940, y: 160 });
-      expect(canvas.edges).toHaveLength(1);
-      expect(canvas.edges[0].id).toBe("e_start_end");
-      expect(canvas.edges[0].source).toBe(START_NODE_ID);
-      expect(canvas.edges[0].target).toBe(END_NODE_ID);
-      expect(canvas.rootNodeId).toBe(START_NODE_ID);
-    }
+    const canvas = useRuleBuilderStore.getState().canvas;
+    const starts = canvas.nodes.filter((n) => n.type === "startNode");
+    const ends = canvas.nodes.filter((n) => n.type === "endNode");
+    expect(starts).toHaveLength(1);
+    expect(starts[0].id).toBe(START_NODE_ID);
+    expect(starts[0].position).toEqual({ x: 40, y: 160 });
+    expect(ends).toHaveLength(1);
+    expect(ends[0].id).toBe(END_NODE_ID);
+    expect(ends[0].position).toEqual({ x: 940, y: 160 });
+    expect(canvas.edges).toHaveLength(1);
+    expect(canvas.edges[0].id).toBe("e_start_end");
+    expect(canvas.edges[0].source).toBe(START_NODE_ID);
+    expect(canvas.edges[0].target).toBe(END_NODE_ID);
+    expect(canvas.rootNodeId).toBe(START_NODE_ID);
   });
 
   it("adding the first real node injects one non-deletable start + end node", () => {
-    useRuleBuilderStore.getState().addNode("anonymous", decision("n1"));
-    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
+    useRuleBuilderStore.getState().addNode(decision("n1"));
+    const nodes = useRuleBuilderStore.getState().canvas.nodes;
     const starts = nodes.filter((n) => n.type === "startNode");
     const ends = nodes.filter((n) => n.type === "endNode");
     expect(starts).toHaveLength(1);
@@ -129,19 +125,19 @@ describe("ruleBuilderStore", () => {
 
   it("removeNode is a no-op for the start + end nodes", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("n1"));
-    s.removeNode("anonymous", START_NODE_ID);
-    s.removeNode("anonymous", END_NODE_ID);
-    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
+    s.addNode(decision("n1"));
+    s.removeNode(START_NODE_ID);
+    s.removeNode(END_NODE_ID);
+    const nodes = useRuleBuilderStore.getState().canvas.nodes;
     expect(nodes.filter((n) => n.type === "startNode")).toHaveLength(1);
     expect(nodes.filter((n) => n.type === "endNode")).toHaveLength(1);
   });
 
   it("removing the last real node resets the canvas to default start -> end (spec §6)", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.removeNode("anonymous", "d1");
-    const canvas = useRuleBuilderStore.getState().canvases.anonymous;
+    s.addNode(decision("d1"));
+    s.removeNode("d1");
+    const canvas = useRuleBuilderStore.getState().canvas;
     const starts = canvas.nodes.filter((n) => n.type === "startNode");
     const ends = canvas.nodes.filter((n) => n.type === "endNode");
     expect(starts).toHaveLength(1);
@@ -152,57 +148,46 @@ describe("ruleBuilderStore", () => {
 
   it("addEdge rejects an edge sourced from the end node", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    const edgesBefore = useRuleBuilderStore.getState().canvases.anonymous.edges.length;
+    s.addNode(decision("d1"));
+    const edgesBefore = useRuleBuilderStore.getState().canvas.edges.length;
     const ok = useRuleBuilderStore
       .getState()
-      .addEdge("anonymous", edge("e1", END_NODE_ID, "d1"));
+      .addEdge(edge("e1", END_NODE_ID, "d1"));
     expect(ok).toBe(false);
     // No edge added — edge count is unchanged (default e_start_end is present).
     expect(
-      useRuleBuilderStore.getState().canvases.anonymous.edges,
+      useRuleBuilderStore.getState().canvas.edges,
     ).toHaveLength(edgesBefore);
   });
 
   it("addEdge accepts an edge sourced from a decision node", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.addNode("anonymous", expression("o1"));
-    const edgesBefore = useRuleBuilderStore.getState().canvases.anonymous.edges.length;
+    s.addNode(decision("d1"));
+    s.addNode(expression("o1"));
+    const edgesBefore = useRuleBuilderStore.getState().canvas.edges.length;
     const ok = useRuleBuilderStore
       .getState()
-      .addEdge("anonymous", edge("e1", "d1", "o1"));
+      .addEdge(edge("e1", "d1", "o1"));
     expect(ok).toBe(true);
     // One new edge added on top of any pre-existing edges.
     expect(
-      useRuleBuilderStore.getState().canvases.anonymous.edges,
+      useRuleBuilderStore.getState().canvas.edges,
     ).toHaveLength(edgesBefore + 1);
   });
 
   it("removeNode also removes connected edges", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.addNode("anonymous", expression("o1"));
-    s.addEdge("anonymous", edge("e1", "d1", "o1"));
-    s.removeNode("anonymous", "d1");
-    const canvas = useRuleBuilderStore.getState().canvases.anonymous;
+    s.addNode(decision("d1"));
+    s.addNode(expression("o1"));
+    s.addEdge(edge("e1", "d1", "o1"));
+    s.removeNode("d1");
+    const canvas = useRuleBuilderStore.getState().canvas;
     // o1 remains (start + end nodes also remain, but realNodes excludes them).
-    expect(realNodes("anonymous")).toHaveLength(1);
+    expect(realNodes()).toHaveLength(1);
     // Only e1 (d1→o1) was removed; e_start_end survives (not connected to d1).
     const edgeIds = canvas.edges.map((e) => e.id);
     expect(edgeIds).not.toContain("e1");
     expect(edgeIds).toContain("e_start_end");
-  });
-
-  it("switching selected canvas keeps both canvases unchanged", () => {
-    const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.setSelected("registered");
-    s.addNode("registered", decision("d2"));
-    const state = useRuleBuilderStore.getState();
-    expect(realNodes("anonymous")).toHaveLength(1);
-    expect(realNodes("registered")).toHaveLength(1);
-    expect(state.selected).toBe("registered");
   });
 
   it("toggleEdit flips the flag for a DRAFT version", () => {
@@ -222,15 +207,15 @@ describe("ruleBuilderStore", () => {
 
   it("updateNodeProcessor updates a decision node's processor", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.updateNodeProcessor("anonymous", "d1", {
+    s.addNode(decision("d1"));
+    s.updateNodeProcessor("d1", {
       type: "device_type",
       operator: "equals",
       value: "mobile",
     });
     const node = useRuleBuilderStore
       .getState()
-      .canvases.anonymous.nodes.find((n) => n.id === "d1");
+      .canvas.nodes.find((n) => n.id === "d1");
     expect(node?.type).toBe("decisionNode");
     expect(node && "processor" in node.data && node.data.processor.type).toBe(
       "device_type",
@@ -239,9 +224,8 @@ describe("ruleBuilderStore", () => {
 
   it("updateNodeAction updates an expression node's action + outcome title", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", expression("a1"));
+    s.addNode(expression("a1"));
     s.updateNodeAction(
-      "anonymous",
       "a1",
       {
         type: "apply_outcome",
@@ -251,7 +235,7 @@ describe("ruleBuilderStore", () => {
     );
     const node = useRuleBuilderStore
       .getState()
-      .canvases.anonymous.nodes.find((n) => n.id === "a1");
+      .canvas.nodes.find((n) => n.id === "a1");
     expect(node?.type).toBe("expressionNode");
     expect(node && "action" in node.data && node.data.action.outcome_id).toBe(
       "22222222-2222-2222-2222-222222222222",
@@ -263,17 +247,17 @@ describe("ruleBuilderStore", () => {
 
   it("isDirty becomes true after adding a node and false after markSaved", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
+    s.addNode(decision("d1"));
     expect(isDirty(useRuleBuilderStore.getState())).toBe(true);
     // The saved baseline = the current serialized graph.
-    s.markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvases));
+    s.markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvas));
     expect(isDirty(useRuleBuilderStore.getState())).toBe(false);
   });
 
   it("dirty flag flips true on addNode and resets on markSaved/seed", () => {
     const s = useRuleBuilderStore.getState();
     expect(useRuleBuilderStore.getState().dirty).toBe(false);
-    s.addNode("anonymous", decision("d1"));
+    s.addNode(decision("d1"));
     expect(useRuleBuilderStore.getState().dirty).toBe(true);
     useRuleBuilderStore.getState().seedFromRuleGraph(emptyGraph, "draft", () => "X");
     expect(useRuleBuilderStore.getState().dirty).toBe(false);
@@ -281,12 +265,12 @@ describe("ruleBuilderStore", () => {
 
   it("a pure selection change does not mark the canvas dirty", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
+    s.addNode(decision("d1"));
     useRuleBuilderStore.getState().markSaved(emptyGraph);
     expect(useRuleBuilderStore.getState().dirty).toBe(false);
     useRuleBuilderStore
       .getState()
-      .onNodesChange("anonymous", [{ id: "d1", type: "select", selected: true }]);
+      .onNodesChange([{ id: "d1", type: "select", selected: true }]);
     expect(useRuleBuilderStore.getState().dirty).toBe(false);
   });
 
@@ -315,19 +299,18 @@ describe("ruleBuilderStore", () => {
 
   it("setNodePositions bulk-updates positions and flips dirty", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.addNode("anonymous", expression("o1"));
+    s.addNode(decision("d1"));
+    s.addNode(expression("o1"));
     useRuleBuilderStore.getState().markSaved(emptyGraph);
     expect(useRuleBuilderStore.getState().dirty).toBe(false);
 
     useRuleBuilderStore.getState().setNodePositions(
-      "anonymous",
       new Map([
         ["d1", { x: 100, y: 200 }],
         ["o1", { x: 300, y: 400 }],
       ]),
     );
-    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
+    const nodes = useRuleBuilderStore.getState().canvas.nodes;
     expect(nodes.find((n) => n.id === "d1")?.position).toEqual({ x: 100, y: 200 });
     expect(nodes.find((n) => n.id === "o1")?.position).toEqual({ x: 300, y: 400 });
     expect(useRuleBuilderStore.getState().dirty).toBe(true);
@@ -337,12 +320,12 @@ describe("ruleBuilderStore", () => {
 describe("computeJourneyPath", () => {
   it("includes nodes/edges on any start->end path", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
+    s.addNode(decision("d1"));
     // bookends now exist (start + end); wire start -> d1 -> end.
-    s.addEdge("anonymous", edge("e0", START_NODE_ID, "d1"));
-    s.addEdge("anonymous", edge("e1", "d1", END_NODE_ID));
+    s.addEdge(edge("e0", START_NODE_ID, "d1"));
+    s.addEdge(edge("e1", "d1", END_NODE_ID));
     const journey = computeJourneyPath(
-      useRuleBuilderStore.getState().canvases.anonymous,
+      useRuleBuilderStore.getState().canvas,
     );
     expect(journey.nodeIds.has(START_NODE_ID)).toBe(true);
     expect(journey.nodeIds.has("d1")).toBe(true);
@@ -353,12 +336,12 @@ describe("computeJourneyPath", () => {
 
   it("excludes a dead-end branch that never reaches an end", () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", decision("d1"));
-    s.addNode("anonymous", decision("dead"));
-    s.addEdge("anonymous", edge("e0", START_NODE_ID, "d1"));
-    s.addEdge("anonymous", edge("e_yes", "d1", END_NODE_ID));
+    s.addNode(decision("d1"));
+    s.addNode(decision("dead"));
+    s.addEdge(edge("e0", START_NODE_ID, "d1"));
+    s.addEdge(edge("e_yes", "d1", END_NODE_ID));
     // a "no" branch into a dead-end decision with no outgoing edge.
-    s.addEdge("anonymous", {
+    s.addEdge({
       id: "e_no",
       source: "d1",
       target: "dead",
@@ -367,7 +350,7 @@ describe("computeJourneyPath", () => {
       data: { branch: "no" },
     });
     const journey = computeJourneyPath(
-      useRuleBuilderStore.getState().canvases.anonymous,
+      useRuleBuilderStore.getState().canvas,
     );
     expect(journey.nodeIds.has(END_NODE_ID)).toBe(true);
     expect(journey.nodeIds.has("dead")).toBe(false);

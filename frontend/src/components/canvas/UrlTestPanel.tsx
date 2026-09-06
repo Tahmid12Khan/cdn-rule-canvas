@@ -49,11 +49,10 @@ export function UrlTestPanel({
   outcomeTitleById,
   featureType,
 }: UrlTestPanelProps) {
-  const selected = useRuleBuilderStore((s) => s.selected);
   const highlight = useRuleBuilderStore((s) => s.testHighlight);
-  // Live (selected) canvas nodes — passed to the journey so each step can look
-  // up its node's config (inputs + plain-English description).
-  const canvasNodes = useRuleBuilderStore((s) => s.canvases[s.selected].nodes);
+  // Live canvas nodes — passed to the journey so each step can look up its
+  // node's config (inputs + plain-English description).
+  const canvasNodes = useRuleBuilderStore((s) => s.canvas.nodes);
 
   // Per-run highlight lifecycle, shared with TestPanel so both highlight
   // identically.
@@ -66,16 +65,15 @@ export function UrlTestPanel({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { canvases } = useRuleBuilderStore.getState();
-      const c = canvases[selected];
+      const c = useRuleBuilderStore.getState().canvas;
       const canvas = serializeCanvas(c.nodes, c.edges, c.rootNodeId);
       // Collapse the rows into a header map (drop blank names; last write wins).
       const { headers } = validateHeaderRows(headerRows);
       return postEvalUrlTest({ canvas, url: url.trim(), headers });
     },
     onSuccess: (res) => {
-      const { canvases } = useRuleBuilderStore.getState();
-      applyResult(res, canvases[selected].edges);
+      const { canvas } = useRuleBuilderStore.getState();
+      applyResult(res, canvas.edges);
     },
   });
 
@@ -141,9 +139,8 @@ export function UrlTestPanel({
         )}
       </div>
       <p className="mt-1 text-xs text-status-prevFg">
-        Enter a full URL to fetch the real page through the proxy and run the{" "}
-        <span className="font-semibold">{selected}</span> canvas against the live
-        response.
+        Enter a full URL to fetch the real page through the proxy and run the
+        canvas against the live response.
       </p>
 
       <div className="mt-3">

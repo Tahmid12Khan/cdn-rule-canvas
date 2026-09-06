@@ -26,14 +26,13 @@ import {
 } from "@/lib/api/componentTemplates";
 import { validateCustomLabel } from "@/lib/canvas/customLabel";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
-import type { CanvasKey, ProcessorConfig, RFNode } from "@/lib/canvas/types";
+import type { ProcessorConfig, RFNode } from "@/lib/canvas/types";
 
 // Action kinds whose chosen component's name is cached for canvas/journey
 // display (mirrors apply_outcome's outcomeTitle).
 const COMPONENT_KINDS = new Set(["apply_component", "apply_component_json"]);
 
 interface NodeConfigDrawerProps {
-  canvasKey: CanvasKey;
   // The version's outcomes — options for an apply_outcome expression node's
   // outcome_select dropdown (expression-nodes-spec §2).
   outcomes?: OutcomeSelectOption[];
@@ -43,12 +42,9 @@ function sameProcessor(a: ProcessorConfig, b: ProcessorConfig): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-export function NodeConfigDrawer({
-  canvasKey,
-  outcomes = [],
-}: NodeConfigDrawerProps) {
+export function NodeConfigDrawer({ outcomes = [] }: NodeConfigDrawerProps) {
   const configNodeId = useRuleBuilderStore((s) => s.configNodeId);
-  const nodes = useRuleBuilderStore((s) => s.canvases[canvasKey].nodes);
+  const nodes = useRuleBuilderStore((s) => s.canvas.nodes);
   const isEditing = useRuleBuilderStore((s) => s.isEditing);
   const openNodeConfig = useRuleBuilderStore((s) => s.openNodeConfig);
   const updateNodeProcessor = useRuleBuilderStore(
@@ -146,7 +142,7 @@ export function NodeConfigDrawer({
   function onSave() {
     if (readOnly || !node || !draft || !valid) return;
     if (isDecision) {
-      updateNodeProcessor(canvasKey, node.id, draft);
+      updateNodeProcessor(node.id, draft);
     } else if (isExpression) {
       // Block save on an invalid custom name (spec §v2.3).
       if (customLabelError) return;
@@ -161,7 +157,6 @@ export function NodeConfigDrawer({
         ? componentNameById(draft.component_id)
         : undefined;
       updateNodeAction(
-        canvasKey,
         node.id,
         draft,
         outcomeTitle,
@@ -176,7 +171,7 @@ export function NodeConfigDrawer({
 
   function onDelete() {
     if (readOnly || !node) return;
-    removeNode(canvasKey, node.id);
+    removeNode(node.id);
     close();
   }
 

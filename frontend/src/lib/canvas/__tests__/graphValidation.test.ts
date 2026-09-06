@@ -7,7 +7,6 @@ import {
   computeRoot,
   findCycle,
   findUnreachableEndNodes,
-  validateAllCanvases,
   validateCanvasGraph,
 } from "@/lib/canvas/graphValidation";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
@@ -139,7 +138,7 @@ describe("findUnreachableEndNodes", () => {
   });
 });
 
-// --- validateCanvasGraph / validateAllCanvases -----------------------------
+// --- validateCanvasGraph ----------------------------------------------------
 
 describe("validateCanvasGraph", () => {
   it("returns no errors for a valid start -> decision -> end graph", () => {
@@ -193,33 +192,6 @@ describe("validateCanvasGraph", () => {
     expect(
       result.problems.some((p) => p.includes("at least one end node")),
     ).toBe(true);
-  });
-});
-
-describe("validateAllCanvases", () => {
-  it("aggregates and labels per-canvas problems", () => {
-    const bad = canvas(
-      [start(), decision("a"), decision("c"), end()],
-      [
-        edge(START_NODE_ID, "a"),
-        edge("a", "c"),
-        edge("c", "a"),
-        edge("a", END_NODE_ID),
-      ],
-    );
-    const good = canvas(
-      [start(), decision("x"), end()],
-      [edge(START_NODE_ID, "x"), edge("x", END_NODE_ID)],
-    );
-    const result = validateAllCanvases({
-      anonymous: bad,
-      registered: good,
-      customer: good,
-    });
-    expect(result.problems.some((p) => p.startsWith("On the Anonymous canvas,"))).toBe(
-      true,
-    );
-    expect(result.nodeErrors["a"]).toBe(CYCLE_MESSAGE);
   });
 });
 

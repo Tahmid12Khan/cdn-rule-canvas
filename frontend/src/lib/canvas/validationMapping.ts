@@ -1,23 +1,16 @@
 // Maps backend 422 validation details (BACKEND CONTRACT §1/§6) to per-node
 // errors keyed by React Flow node id (Task 14). The backend `loc` is
 // index-based against the EXACT serialized payload that was sent, e.g.
-// `rule_graph.anonymous.edges[3]` / `rule_graph.anonymous.nodes[1]`. We resolve
+// `rule_graph.canvas.edges[3]` / `rule_graph.canvas.nodes[1]`. We resolve
 // the index against the same RuleGraph we just serialized, then attribute the
 // message to the node (an edge maps to its source node).
 import type { ApiErrorDetail } from "@/lib/api/client";
 import type { RuleGraph } from "@/lib/api/ruleGraph";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
-import type { CanvasKey, RFNode } from "@/lib/canvas/types";
+import type { RFNode } from "@/lib/canvas/types";
 import type { UserError } from "@/lib/errors/userError";
 
-const LOC_RE =
-  /^rule_graph\.(anonymous|registered|customer)\.(nodes|edges)\[(\d+)\]/;
-
-const CANVAS_LABEL: Record<CanvasKey, string> = {
-  anonymous: "Anonymous",
-  registered: "Registered",
-  customer: "Customer",
-};
+const LOC_RE = /^rule_graph\.canvas\.(nodes|edges)\[(\d+)\]/;
 
 export function mapValidationErrors(
   details: ApiErrorDetail[] | undefined,
@@ -29,10 +22,9 @@ export function mapValidationErrors(
   for (const detail of details) {
     const match = LOC_RE.exec(detail.loc);
     if (!match) continue;
-    const canvas = match[1] as keyof RuleGraph;
-    const collection = match[2] as "nodes" | "edges";
-    const idx = Number(match[3]);
-    const graph = sentGraph[canvas];
+    const collection = match[1] as "nodes" | "edges";
+    const idx = Number(match[2]);
+    const graph = sentGraph.canvas;
 
     if (collection === "nodes") {
       const node = graph.nodes[idx];
@@ -69,17 +61,13 @@ function nodeLabel(node: RFNode | undefined): string {
   return "a node";
 }
 
-// Resolve which canvas a node id lives on + its RF node, from the store
-// canvases (the sent RuleGraph carries ids/processor only, not display titles).
+// Resolve a node id to its RF node, from the store canvas (the sent RuleGraph
+// carries ids/processor only, not display titles).
 function findNode(
-  canvases: Record<CanvasKey, CanvasWorkingState>,
+  canvas: CanvasWorkingState,
   nodeId: string,
-): { canvas: CanvasKey; node: RFNode } | null {
-  for (const key of Object.keys(canvases) as CanvasKey[]) {
-    const node = canvases[key].nodes.find((n) => n.id === nodeId);
-    if (node) return { canvas: key, node };
-  }
-  return null;
+): RFNode | undefined {
+  return canvas.nodes.find((n) => n.id === nodeId);
 }
 
 // Derive a short human reason from the backend rule_id / msg
@@ -114,13 +102,13 @@ function reasonFor(detail: ApiErrorDetail): string {
 
 /**
  * Build a DESCRIPTIVE UserError from a 422 payload: names the offending nodes
- * by their on-canvas label, groups them by canvas, and explains how to fix.
- * Falls back to a generic message when no node loc resolves.
+ * by their on-canvas label, grouped by reason, and explains how to fix. Falls
+ * back to a generic message when no node loc resolves.
  */
 export function buildValidationUserError(
   details: ApiErrorDetail[] | undefined,
   sentGraph: RuleGraph,
-  canvases: Record<CanvasKey, CanvasWorkingState>,
+  canvas: CanvasWorkingState,
 ): UserError {
   const nodeErrors = mapValidationErrors(details, sentGraph);
   const nodeIds = Object.keys(nodeErrors);
@@ -135,42 +123,41 @@ export function buildValidationUserError(
     };
   }
 
-  // Group node labels + reasons by canvas, preserving the dominant reason per
-  // canvas (first resolved). msg is keyed by rule_id via reasonFor.
+  // Preserve the dominant reason per node (first resolved). msg is keyed by
+  // rule_id via reasonFor.
   const detailById = new Map<string, ApiErrorDetail>();
   if (details) {
     for (const d of details) {
       const match = LOC_RE.exec(d.loc);
       if (!match) continue;
-      const canvas = match[1] as keyof RuleGraph;
-      const collection = match[2] as "nodes" | "edges";
-      const idx = Number(match[3]);
+      const collection = match[1] as "nodes" | "edges";
+      const idx = Number(match[2]);
       const id =
         collection === "nodes"
-          ? sentGraph[canvas].nodes[idx]?.id
-          : sentGraph[canvas].edges[idx]?.source_node_id;
+          ? sentGraph.canvas.nodes[idx]?.id
+          : sentGraph.canvas.edges[idx]?.source_node_id;
       if (id && !detailById.has(id)) detailById.set(id, d);
     }
   }
 
-  const byCanvas = new Map<CanvasKey, { labels: string[]; reason: string }>();
+  // Group node labels by reason.
+  const byReason = new Map<string, string[]>();
   for (const id of nodeIds) {
-    const found = findNode(canvases, id);
-    const canvas = found?.canvas ?? "anonymous";
-    const label = nodeLabel(found?.node);
+    const node = findNode(canvas, id);
+    const label = nodeLabel(node);
     const detail = detailById.get(id);
     const reason = detail ? reasonFor(detail) : "are invalid";
-    const entry = byCanvas.get(canvas);
-    if (entry) {
-      if (!entry.labels.includes(label)) entry.labels.push(label);
+    const labels = byReason.get(reason);
+    if (labels) {
+      if (!labels.includes(label)) labels.push(label);
     } else {
-      byCanvas.set(canvas, { labels: [label], reason });
+      byReason.set(reason, [label]);
     }
   }
 
-  const sentences = [...byCanvas.entries()].map(([canvas, { labels, reason }]) => {
+  const sentences = [...byReason.entries()].map(([reason, labels]) => {
     const quoted = labels.map((l) => `'${l}'`).join(", ");
-    return `On the ${CANVAS_LABEL[canvas]} canvas: ${quoted} ${reason}.`;
+    return `${quoted} ${reason}.`;
   });
 
   return {

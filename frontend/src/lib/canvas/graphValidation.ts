@@ -7,14 +7,8 @@
 // holds). Start / End are now REAL persisted nodes (not stripped), so they are
 // part of every rule: root = the start node; reachability = "can reach an end".
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
-import type { CanvasKey, RFEdge, RFNode } from "@/lib/canvas/types";
+import type { RFEdge, RFNode } from "@/lib/canvas/types";
 import type { UserError } from "@/lib/errors/userError";
-
-const CANVAS_LABEL: Record<CanvasKey, string> = {
-  anonymous: "Anonymous",
-  registered: "Registered",
-  customer: "Customer",
-};
 
 // Message copy kept byte-aligned with the SERVER (validationMapping.reasonFor):
 // the substrings "form a cycle" / "reach an end" must match so the client and
@@ -216,28 +210,8 @@ export function validateCanvasGraph(
   return { nodeErrors, problems };
 }
 
-// Validate all three canvases. Aggregates node errors across canvases (ids are
-// unique per canvas, so a flat merge is safe) and prefixes each problem with
-// its canvas label so the SaveBar banner can name the offending canvas.
-export function validateAllCanvases(
-  canvases: Record<CanvasKey, CanvasWorkingState>,
-): CanvasValidation {
-  const nodeErrors: Record<string, string> = {};
-  const problems: string[] = [];
-
-  for (const key of Object.keys(canvases) as CanvasKey[]) {
-    const result = validateCanvasGraph(canvases[key]);
-    Object.assign(nodeErrors, result.nodeErrors);
-    for (const p of result.problems) {
-      problems.push(`On the ${CANVAS_LABEL[key]} canvas, ${p}.`);
-    }
-  }
-
-  return { nodeErrors, problems };
-}
-
 // Build a DESCRIPTIVE UserError for the SaveBar pre-flight gate (req 2). The
-// `problems` sentences come from validateAllCanvases.
+// `problems` sentences come from validateCanvasGraph.
 export function buildClientValidationUserError(problems: string[]): UserError {
   return {
     title: "Fix the rule graph before saving",

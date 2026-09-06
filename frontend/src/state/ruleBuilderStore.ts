@@ -1,10 +1,10 @@
 "use client";
 
 // Zustand store for the rule-builder canvas (FRONTEND CONTRACT §4). Client-only.
-// Owns ONLY canvas working state (the three in-memory canvases, selection, edit
-// mode, dirty tracking, per-node validation errors) + ephemeral UI. It does NOT
-// cache server entities — it is seeded once from a Query result and persisted
-// back via a mutation.
+// Owns ONLY canvas working state (the single in-memory canvas, edit mode, dirty
+// tracking, per-node validation errors) + ephemeral UI. It does NOT cache
+// server entities — it is seeded once from a Query result and persisted back
+// via a mutation.
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -24,13 +24,10 @@ import {
 import {
   END_NODE_ID,
   START_NODE_ID,
-  type CanvasKey,
   type ProcessorConfig,
   type RFEdge,
   type RFNode,
 } from "@/lib/canvas/types";
-
-const CANVAS_KEYS: CanvasKey[] = ["anonymous", "registered", "customer"];
 
 // The auto-injected start + end nodes (expression-nodes-spec §1/§8). One each
 // per non-empty canvas, both non-deletable, both PERSISTED. Injected on
@@ -101,14 +98,6 @@ function withStartEnd(canvas: CanvasWorkingState): CanvasWorkingState {
   return { ...canvas, nodes };
 }
 
-function emptyCanvases(): Record<CanvasKey, CanvasWorkingState> {
-  return {
-    anonymous: emptyCanvas(),
-    registered: emptyCanvas(),
-    customer: emptyCanvas(),
-  };
-}
-
 // root = the start node (expression-nodes-spec §3). For a non-empty canvas the
 // root is the unique `start` node. An empty canvas (no real nodes) has no root.
 export function computeRootNodeId(
@@ -136,14 +125,13 @@ export interface TestHighlight {
 }
 
 export interface RuleBuilderState {
-  // --- canvas data (3 independent graphs) ---
-  canvases: Record<CanvasKey, CanvasWorkingState>;
-  selected: CanvasKey;
-  // Memoized always-on journey path for the SELECTED canvas (req 1 perf). The
-  // two-BFS computation runs ONCE inside each reducer that can change
-  // reachability or selection — NOT per node/edge on every selector call. Node
-  // and edge renderers read journeyPath.nodeIds/edgeIds.has(id) (a stable
-  // boolean), so a drag frame no longer re-runs BFS for every element.
+  // --- canvas data (single graph) ---
+  canvas: CanvasWorkingState;
+  // Memoized always-on journey path (req 1 perf). The two-BFS computation runs
+  // ONCE inside each reducer that can change reachability — NOT per node/edge
+  // on every selector call. Node and edge renderers read
+  // journeyPath.nodeIds/edgeIds.has(id) (a stable boolean), so a drag frame no
+  // longer re-runs BFS for every element.
   journeyPath: JourneyPath;
   // --- editor mode / status ---
   isEditing: boolean;
@@ -168,58 +156,34 @@ export interface RuleBuilderState {
     componentNameById?: (id: string) => string | undefined,
   ) => void;
 
-  // --- selection / mode ---
-  setSelected: (k: CanvasKey) => void;
+  // --- mode ---
   toggleEdit: () => void;
 
   // --- canvas mutations ---
-  addNode: (k: CanvasKey, node: RFNode) => void;
-  removeNode: (k: CanvasKey, nodeId: string) => void;
-  updateNodePosition: (
-    k: CanvasKey,
-    nodeId: string,
-    pos: { x: number; y: number },
-  ) => void;
+  addNode: (node: RFNode) => void;
+  removeNode: (nodeId: string) => void;
+  updateNodePosition: (nodeId: string, pos: { x: number; y: number }) => void;
   // Bulk position set for auto-layout ("Tidy layout"). Flips dirty (positions
   // are part of the serialized hash). Does NOT clear testHighlight.
-  setNodePositions: (
-    k: CanvasKey,
-    positions: Map<string, { x: number; y: number }>,
-  ) => void;
-  // Auto-layout-on-seed variant: applies positions across ALL canvases and
-  // RE-TAKES the baseline hash so the freshly-laid-out graph is NOT reported as
-  // dirty (it is the new "saved" baseline). Used once after seeding a graph
-  // whose nodes lack a meaningful layout. Does NOT set lastSavedAt.
-  applySeedLayout: (
-    positionsByCanvas: Record<
-      CanvasKey,
-      Map<
-        string,
-        {
-          x: number;
-          y: number;
-        }
-      >
-    >,
-  ) => void;
-  addEdge: (k: CanvasKey, edge: RFEdge) => boolean;
-  removeEdge: (k: CanvasKey, edgeId: string) => void;
-  onNodesChange: (k: CanvasKey, changes: NodeChange[]) => void;
-  onEdgesChange: (k: CanvasKey, changes: EdgeChange[]) => void;
+  setNodePositions: (positions: Map<string, { x: number; y: number }>) => void;
+  // Auto-layout-on-seed variant: applies positions and RE-TAKES the baseline
+  // hash so the freshly-laid-out graph is NOT reported as dirty (it is the new
+  // "saved" baseline). Used once after seeding a graph whose nodes lack a
+  // meaningful layout. Does NOT set lastSavedAt.
+  applySeedLayout: (positions: Map<string, { x: number; y: number }>) => void;
+  addEdge: (edge: RFEdge) => boolean;
+  removeEdge: (edgeId: string) => void;
+  onNodesChange: (changes: NodeChange[]) => void;
+  onEdgesChange: (changes: EdgeChange[]) => void;
 
   // --- processor / action config ---
   openNodeConfig: (nodeId: string | null) => void;
-  updateNodeProcessor: (
-    k: CanvasKey,
-    nodeId: string,
-    processor: ProcessorConfig,
-  ) => void;
+  updateNodeProcessor: (nodeId: string, processor: ProcessorConfig) => void;
   // Update an expression node's action config (+ optional resolved outcome
   // title for apply_outcome display, + optional resolved component name for
   // apply_component / apply_component_json display, + optional custom_label —
   // spec §v2.3).
   updateNodeAction: (
-    k: CanvasKey,
     nodeId: string,
     action: ProcessorConfig,
     outcomeTitle?: string,
@@ -238,12 +202,11 @@ export interface RuleBuilderState {
 }
 
 export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
-  canvases: emptyCanvases(),
-  selected: "anonymous",
+  canvas: emptyCanvas(),
   journeyPath: computeJourneyPath(emptyCanvas()),
   isEditing: false,
   versionStatus: "draft",
-  baselineHash: hashRuleGraph(serializeRuleGraph(emptyCanvases())),
+  baselineHash: hashRuleGraph(serializeRuleGraph(emptyCanvas())),
   dirty: false,
   nodeErrors: {},
   configNodeId: null,
@@ -256,33 +219,23 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       outcomeTitleById,
       componentNameById,
     );
-    // Guard each non-empty canvas to carry a start + end node (legacy graphs).
-    const canvases = {
-      anonymous: withStartEnd(deserialized.anonymous),
-      registered: withStartEnd(deserialized.registered),
-      customer: withStartEnd(deserialized.customer),
-    };
+    // Guard the non-empty canvas to carry a start + end node (legacy graphs).
+    const canvas = withStartEnd(deserialized);
     set({
-      canvases,
-      journeyPath: computeJourneyPath(canvases[get().selected]),
+      canvas,
+      journeyPath: computeJourneyPath(canvas),
       versionStatus: status,
       isEditing: false,
       dirty: false,
       nodeErrors: {},
       configNodeId: null,
       testHighlight: null,
-      baselineHash: hashRuleGraph(serializeRuleGraph(canvases)),
+      baselineHash: hashRuleGraph(serializeRuleGraph(canvas)),
       // Reset so the SaveBar's lastSavedAt-driven "Saved" indicator doesn't
       // carry over from a prior version into this freshly-seeded baseline.
       lastSavedAt: null,
     });
   },
-
-  setSelected: (k) =>
-    set((state) => ({
-      selected: k,
-      journeyPath: computeJourneyPath(state.canvases[k]),
-    })),
 
   toggleEdit: () => {
     // Edit mode can be entered on ANY version status (W1). For a non-draft
@@ -293,34 +246,31 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
     set((s) => ({ isEditing: !s.isEditing }));
   },
 
-  addNode: (k, node) =>
+  addNode: (node) =>
     set((state) => {
-      const canvas = state.canvases[k];
+      const canvas = state.canvas;
       // First real node on an empty canvas auto-injects the start + end pair
       // (one per non-empty canvas — expression-nodes-spec §1/§3).
       const needsBookends = canvas.nodes.length === 0;
       const nodes = needsBookends
         ? [startNode(), node, endNode()]
         : [...canvas.nodes, node];
-      const canvases = {
-        ...state.canvases,
-        [k]: {
-          ...canvas,
-          nodes,
-          rootNodeId: computeRootNodeId(nodes, canvas.edges),
-        },
+      const nextCanvas = {
+        ...canvas,
+        nodes,
+        rootNodeId: computeRootNodeId(nodes, canvas.edges),
       };
       return {
         dirty: true,
         testHighlight: null,
-        canvases,
-        journeyPath: computeJourneyPath(canvases[state.selected]),
+        canvas: nextCanvas,
+        journeyPath: computeJourneyPath(nextCanvas),
       };
     }),
 
-  removeNode: (k, nodeId) =>
+  removeNode: (nodeId) =>
     set((state) => {
-      const canvas = state.canvases[k];
+      const canvas = state.canvas;
       // The start + end nodes are non-deletable.
       const target = canvas.nodes.find((n) => n.id === nodeId);
       if (target?.type === "startNode" || target?.type === "endNode") return {};
@@ -340,83 +290,67 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       }
       const nextErrors = { ...state.nodeErrors };
       delete nextErrors[nodeId];
-      const canvases = {
-        ...state.canvases,
-        [k]: { nodes, edges, rootNodeId: computeRootNodeId(nodes, edges) },
+      const nextCanvas = {
+        nodes,
+        edges,
+        rootNodeId: computeRootNodeId(nodes, edges),
       };
       return {
         dirty: true,
         testHighlight: null,
-        canvases,
-        journeyPath: computeJourneyPath(canvases[state.selected]),
+        canvas: nextCanvas,
+        journeyPath: computeJourneyPath(nextCanvas),
         nodeErrors: nextErrors,
         configNodeId: state.configNodeId === nodeId ? null : state.configNodeId,
       };
     }),
 
-  updateNodePosition: (k, nodeId, pos) =>
-    set((state) => {
-      const canvas = state.canvases[k];
-      return {
-        dirty: true,
-        canvases: {
-          ...state.canvases,
-          [k]: {
-            ...canvas,
-            nodes: canvas.nodes.map((n) =>
-              n.id === nodeId ? { ...n, position: pos } : n,
-            ),
-          },
-        },
-      };
-    }),
+  updateNodePosition: (nodeId, pos) =>
+    set((state) => ({
+      dirty: true,
+      canvas: {
+        ...state.canvas,
+        nodes: state.canvas.nodes.map((n) =>
+          n.id === nodeId ? { ...n, position: pos } : n,
+        ),
+      },
+    })),
 
-  setNodePositions: (k, positions) =>
-    set((state) => {
-      const canvas = state.canvases[k];
-      return {
-        dirty: true,
-        canvases: {
-          ...state.canvases,
-          [k]: {
-            ...canvas,
-            nodes: canvas.nodes.map((n) => {
-              const pos = positions.get(n.id);
-              return pos ? { ...n, position: pos } : n;
-            }),
-          },
-        },
-      };
-    }),
+  setNodePositions: (positions) =>
+    set((state) => ({
+      dirty: true,
+      canvas: {
+        ...state.canvas,
+        nodes: state.canvas.nodes.map((n) => {
+          const pos = positions.get(n.id);
+          return pos ? { ...n, position: pos } : n;
+        }),
+      },
+    })),
 
-  applySeedLayout: (positionsByCanvas) =>
+  applySeedLayout: (positions) =>
     set((state) => {
-      const canvases = {} as Record<CanvasKey, CanvasWorkingState>;
-      for (const key of CANVAS_KEYS) {
-        const canvas = state.canvases[key];
-        const positions = positionsByCanvas[key];
-        canvases[key] = {
-          ...canvas,
-          nodes: canvas.nodes.map((n) => {
-            const pos = positions?.get(n.id);
-            return pos ? { ...n, position: pos } : n;
-          }),
-        };
-      }
+      const canvas = {
+        ...state.canvas,
+        nodes: state.canvas.nodes.map((n) => {
+          const pos = positions.get(n.id);
+          return pos ? { ...n, position: pos } : n;
+        }),
+      };
       // Re-take the baseline so the laid-out graph is the new "saved" state
       // (not an unsaved edit). dirty stays false; lastSavedAt is untouched.
       // Positions don't change reachability, but this runs once on seed (not
       // per-frame) so recomputing the journey path keeps it trivially correct.
       return {
-        canvases,
-        journeyPath: computeJourneyPath(canvases[state.selected]),
+        canvas,
+        journeyPath: computeJourneyPath(canvas),
         dirty: false,
-        baselineHash: hashRuleGraph(serializeRuleGraph(canvases)),
+        baselineHash: hashRuleGraph(serializeRuleGraph(canvas)),
       };
     }),
 
-  addEdge: (k, edge) => {
-    const canvas = get().canvases[k];
+  addEdge: (edge) => {
+    const canvas = get().canvas;
     const sourceNode = canvas.nodes.find((n) => n.id === edge.source);
     // End nodes are terminals — reject outgoing edges (end_terminal /
     // edge_source_kind, expression-nodes-spec §3).
@@ -434,47 +368,41 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       )
       .concat(edge);
     set((state) => {
-      const canvases = {
-        ...state.canvases,
-        [k]: {
-          ...state.canvases[k],
-          edges,
-          rootNodeId: computeRootNodeId(state.canvases[k].nodes, edges),
-        },
+      const nextCanvas = {
+        ...state.canvas,
+        edges,
+        rootNodeId: computeRootNodeId(state.canvas.nodes, edges),
       };
       return {
         dirty: true,
         testHighlight: null,
-        canvases,
-        journeyPath: computeJourneyPath(canvases[state.selected]),
+        canvas: nextCanvas,
+        journeyPath: computeJourneyPath(nextCanvas),
       };
     });
     return true;
   },
 
-  removeEdge: (k, edgeId) =>
+  removeEdge: (edgeId) =>
     set((state) => {
-      const canvas = state.canvases[k];
+      const canvas = state.canvas;
       const edges = canvas.edges.filter((e) => e.id !== edgeId);
-      const canvases = {
-        ...state.canvases,
-        [k]: {
-          ...canvas,
-          edges,
-          rootNodeId: computeRootNodeId(canvas.nodes, edges),
-        },
+      const nextCanvas = {
+        ...canvas,
+        edges,
+        rootNodeId: computeRootNodeId(canvas.nodes, edges),
       };
       return {
         dirty: true,
         testHighlight: null,
-        canvases,
-        journeyPath: computeJourneyPath(canvases[state.selected]),
+        canvas: nextCanvas,
+        journeyPath: computeJourneyPath(nextCanvas),
       };
     }),
 
-  onNodesChange: (k, changes) =>
+  onNodesChange: (changes) =>
     set((state) => {
-      const canvas = state.canvases[k];
+      const canvas = state.canvas;
       const nodes = applyNodeChanges(
         changes,
         canvas.nodes as Node[],
@@ -484,13 +412,10 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       const mutated = changes.some(
         (c) => c.type !== "select" && c.type !== "dimensions",
       );
-      const canvases = {
-        ...state.canvases,
-        [k]: {
-          ...canvas,
-          nodes,
-          rootNodeId: computeRootNodeId(nodes, canvas.edges),
-        },
+      const nextCanvas = {
+        ...canvas,
+        nodes,
+        rootNodeId: computeRootNodeId(nodes, canvas.edges),
       };
       // Only node add/remove can move journey membership — NOT position/select/
       // dimension ticks. Recompute only then so drag frames stay cheap.
@@ -499,60 +424,50 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       );
       return {
         dirty: state.dirty || mutated,
-        canvases,
+        canvas: nextCanvas,
         journeyPath: structural
-          ? computeJourneyPath(canvases[state.selected])
+          ? computeJourneyPath(nextCanvas)
           : state.journeyPath,
       };
     }),
 
-  onEdgesChange: (k, changes) =>
+  onEdgesChange: (changes) =>
     set((state) => {
-      const canvas = state.canvases[k];
+      const canvas = state.canvas;
       const edges = applyEdgeChanges(changes, canvas.edges) as RFEdge[];
       const mutated = changes.some((c) => c.type !== "select");
-      const canvases = {
-        ...state.canvases,
-        [k]: {
-          ...canvas,
-          edges,
-          rootNodeId: computeRootNodeId(canvas.nodes, edges),
-        },
+      const nextCanvas = {
+        ...canvas,
+        edges,
+        rootNodeId: computeRootNodeId(canvas.nodes, edges),
       };
       return {
         dirty: state.dirty || mutated,
-        canvases,
+        canvas: nextCanvas,
         // Edge add/remove changes reachability; selection ticks don't.
         journeyPath: mutated
-          ? computeJourneyPath(canvases[state.selected])
+          ? computeJourneyPath(nextCanvas)
           : state.journeyPath,
       };
     }),
 
   openNodeConfig: (nodeId) => set({ configNodeId: nodeId }),
 
-  updateNodeProcessor: (k, nodeId, processor) =>
-    set((state) => {
-      const canvas = state.canvases[k];
-      return {
-        dirty: true,
-        testHighlight: null,
-        canvases: {
-          ...state.canvases,
-          [k]: {
-            ...canvas,
-            nodes: canvas.nodes.map((n) =>
-              n.id === nodeId && n.type === "decisionNode"
-                ? { ...n, data: { ...n.data, processor } }
-                : n,
-            ),
-          },
-        },
-      };
-    }),
+  updateNodeProcessor: (nodeId, processor) =>
+    set((state) => ({
+      dirty: true,
+      testHighlight: null,
+      canvas: {
+        ...state.canvas,
+        nodes: state.canvas.nodes.map((n) =>
+          n.id === nodeId && n.type === "decisionNode"
+            ? { ...n, data: { ...n.data, processor } }
+            : n,
+        ),
+      },
+    })),
 
   updateNodeAction: (
-    k,
     nodeId,
     action,
     outcomeTitle,
@@ -560,31 +475,27 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
     componentName,
   ) =>
     set((state) => {
-      const canvas = state.canvases[k];
       // Persist a trimmed custom_label; "" / blank => undefined (no custom name).
       const custom_label = customLabel?.trim() ? customLabel.trim() : undefined;
       return {
         dirty: true,
         testHighlight: null,
-        canvases: {
-          ...state.canvases,
-          [k]: {
-            ...canvas,
-            nodes: canvas.nodes.map((n) =>
-              n.id === nodeId && n.type === "expressionNode"
-                ? {
-                    ...n,
-                    data: {
-                      ...n.data,
-                      action,
-                      outcomeTitle,
-                      componentName,
-                      custom_label,
-                    },
-                  }
-                : n,
-            ),
-          },
+        canvas: {
+          ...state.canvas,
+          nodes: state.canvas.nodes.map((n) =>
+            n.id === nodeId && n.type === "expressionNode"
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    action,
+                    outcomeTitle,
+                    componentName,
+                    custom_label,
+                  },
+                }
+              : n,
+          ),
         },
       };
     }),
@@ -608,12 +519,12 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
 
 // isDirty = current serialized graph hash !== last-saved baseline hash.
 export function isDirty(state: RuleBuilderState): boolean {
-  const current = hashRuleGraph(serializeRuleGraph(state.canvases));
+  const current = hashRuleGraph(serializeRuleGraph(state.canvas));
   return current !== state.baselineHash;
 }
 
 export function selectCurrentRuleGraph(state: RuleBuilderState): RuleGraph {
-  return serializeRuleGraph(state.canvases);
+  return serializeRuleGraph(state.canvas);
 }
 
 // --- always-on journey path (expression-nodes-spec §3 / req 1) ---
@@ -691,11 +602,9 @@ export function computeJourneyPath(canvas: CanvasWorkingState): JourneyPath {
   return { nodeIds, edgeIds };
 }
 
-// Selector form for the currently-selected canvas. Returns the MEMOIZED field
-// (recomputed inside the structural reducers) — it does NOT re-run the two BFS
-// per call, so node/edge renderers can read it on every render frame cheaply.
+// Selector form for the canvas. Returns the MEMOIZED field (recomputed inside
+// the structural reducers) — it does NOT re-run the two BFS per call, so
+// node/edge renderers can read it on every render frame cheaply.
 export function selectJourneyPath(state: RuleBuilderState): JourneyPath {
   return state.journeyPath;
 }
-
-export { CANVAS_KEYS };

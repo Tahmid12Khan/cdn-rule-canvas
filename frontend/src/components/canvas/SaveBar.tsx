@@ -30,7 +30,7 @@ import type { Applicability } from "@/lib/api/ruleGraph";
 import { publishVersion } from "@/lib/api/versions";
 import {
   buildClientValidationUserError,
-  validateAllCanvases,
+  validateCanvasGraph,
 } from "@/lib/canvas/graphValidation";
 import {
   buildValidationUserError,
@@ -72,7 +72,7 @@ export function SaveBar({
 
   const isEditing = useRuleBuilderStore((s) => s.isEditing);
   const versionStatus = useRuleBuilderStore((s) => s.versionStatus);
-  // NOTE: do NOT subscribe to s.canvases — it churns identity on every drag
+  // NOTE: do NOT subscribe to s.canvas — it churns identity on every drag
   // frame and would re-render the SaveBar continuously (WS2). The canvas is
   // only needed at mutate time, so read it lazily via getState().
   const lastSavedAt = useRuleBuilderStore((s) => s.lastSavedAt);
@@ -99,8 +99,8 @@ export function SaveBar({
   // is clean (proceed), false when blocked (markers + banner set, do NOT mutate).
   // The server stays authoritative on 422.
   function preflight(): boolean {
-    const canvases = useRuleBuilderStore.getState().canvases;
-    const result = validateAllCanvases(canvases);
+    const canvas = useRuleBuilderStore.getState().canvas;
+    const result = validateCanvasGraph(canvas);
     if (result.problems.length > 0) {
       setNodeErrors(result.nodeErrors);
       setError(buildClientValidationUserError(result.problems));
@@ -119,7 +119,7 @@ export function SaveBar({
 
   const save = useMutation({
     mutationFn: () => {
-      const rg = serializeRuleGraph(useRuleBuilderStore.getState().canvases);
+      const rg = serializeRuleGraph(useRuleBuilderStore.getState().canvas);
       return patchRuleGraph(fid, vnum, rg).then((res) => ({ res, rg }));
     },
     onSuccess: ({ rg }) => {
@@ -133,10 +133,10 @@ export function SaveBar({
     onError: (err) => {
       setRawResponse(err instanceof ApiError ? err.rawBody : undefined);
       if (err instanceof ApiError && err.isValidation) {
-        const canvases = useRuleBuilderStore.getState().canvases;
-        const sent = serializeRuleGraph(canvases);
+        const canvas = useRuleBuilderStore.getState().canvas;
+        const sent = serializeRuleGraph(canvas);
         setNodeErrors(mapValidationErrors(err.details, sent));
-        setError(buildValidationUserError(err.details, sent, canvases));
+        setError(buildValidationUserError(err.details, sent, canvas));
       } else {
         setError(toUserError(err, { surface: "save" }));
       }
@@ -145,7 +145,7 @@ export function SaveBar({
 
   const saveAsNew = useMutation({
     mutationFn: async (status: NewVersionStatus) => {
-      const rg = serializeRuleGraph(useRuleBuilderStore.getState().canvases);
+      const rg = serializeRuleGraph(useRuleBuilderStore.getState().canvas);
       const created = await createVersionFromGraph(
         fid,
         descriptionRef.current,
@@ -170,7 +170,7 @@ export function SaveBar({
       clearNodeErrors();
       setError(null);
       setRawResponse(undefined);
-      markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvases));
+      markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvas));
       refreshVersionCaches();
       router.push(`${featureBase}/${created.version_number}`);
     },
@@ -179,7 +179,7 @@ export function SaveBar({
       if (err instanceof PublishAfterCreateError) {
         // The draft exists — navigate to it and explain the publish failure.
         setDialogOpen(false);
-        markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvases));
+        markSaved(serializeRuleGraph(useRuleBuilderStore.getState().canvas));
         refreshVersionCaches();
         setError({
           title: "Version created as draft, but publishing to live failed",
@@ -197,10 +197,10 @@ export function SaveBar({
       // can fix them, then re-open "Save as New Version" to retry.
       if (err instanceof ApiError && err.isValidation) {
         setDialogOpen(false);
-        const canvases = useRuleBuilderStore.getState().canvases;
-        const sentGraph = serializeRuleGraph(canvases);
+        const canvas = useRuleBuilderStore.getState().canvas;
+        const sentGraph = serializeRuleGraph(canvas);
         setNodeErrors(mapValidationErrors(err.details, sentGraph));
-        setError(buildValidationUserError(err.details, sentGraph, canvases));
+        setError(buildValidationUserError(err.details, sentGraph, canvas));
         return;
       }
       setError(toUserError(err, { surface: "create" }));

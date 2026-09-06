@@ -53,8 +53,8 @@ const empty: CanvasGraph = { nodes: [], edges: [], root_node_id: null };
 function canvas(nodes: GraphNode[], edges: Edge[]): CanvasGraph {
   return { nodes, edges, root_node_id: nodes.length ? "start" : null };
 }
-function rg(anon: CanvasGraph): RuleGraph {
-  return { anonymous: anon, registered: empty, customer: empty };
+function rg(canvas: CanvasGraph): RuleGraph {
+  return { canvas };
 }
 const findNode = (cd: CanvasDiff, id: string) =>
   cd.nodes.find((n) => n.id === id)!;
@@ -65,24 +65,22 @@ describe("diffRuleGraph", () => {
     const b = rg(
       canvas([start(pos(99, 99)), decision("d1", undefined, pos(50, 999)), end()], []),
     );
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     expect(d.changeCount).toBe(0);
     expect(findNode(d, "d1").status).toBe("unchanged");
     expect(findNode(d, "start").status).toBe("unchanged");
   });
 
-  it("identical graphs produce zero changes on every canvas", () => {
+  it("identical graphs produce zero changes", () => {
     const a = rg(canvas([start(), decision("d1"), end()], [edge("e1", "start", "d1", "yes")]));
     const diff = diffRuleGraph(a, a);
-    expect(diff.anonymous.changeCount).toBe(0);
-    expect(diff.registered.changeCount).toBe(0);
-    expect(diff.customer.changeCount).toBe(0);
+    expect(diff.changeCount).toBe(0);
   });
 
   it("flags an added node (only in new)", () => {
     const a = rg(canvas([start(), end()], []));
     const b = rg(canvas([start(), decision("d2"), end()], []));
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     expect(findNode(d, "d2").status).toBe("added");
     expect(d.changeCount).toBe(1);
   });
@@ -90,7 +88,7 @@ describe("diffRuleGraph", () => {
   it("flags a removed node (only in old) and renders the old copy", () => {
     const a = rg(canvas([start(), decision("d2", undefined, pos(7, 7)), end()], []));
     const b = rg(canvas([start(), end()], []));
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     const removed = findNode(d, "d2");
     expect(removed.status).toBe("removed");
     expect(removed.node.position).toEqual(pos(7, 7));
@@ -99,7 +97,7 @@ describe("diffRuleGraph", () => {
   it("flags a modified node with the changed field + old/new values", () => {
     const a = rg(canvas([decision("d1", { operator: "equals", value: "mobile" })], []));
     const b = rg(canvas([decision("d1", { operator: "equals", value: "desktop" })], []));
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     const m = findNode(d, "d1");
     expect(m.status).toBe("modified");
     expect(m.changes).toContainEqual({ field: "value", old: "mobile", new: "desktop" });
@@ -111,7 +109,7 @@ describe("diffRuleGraph", () => {
     const b = rg(
       canvas([{ kind: "decision", id: "d1", processor: { type: "meta_tags", operator: "equals" }, position: pos() }], []),
     );
-    const m = findNode(diffRuleGraph(a, b).anonymous, "d1");
+    const m = findNode(diffRuleGraph(a, b), "d1");
     expect(m.status).toBe("modified");
     expect(m.changes).toContainEqual({ field: "type", old: "device_type", new: "meta_tags" });
   });
@@ -119,7 +117,7 @@ describe("diffRuleGraph", () => {
   it("flags a custom_label change on an expression (absent → set)", () => {
     const a = rg(canvas([expression("x1")], []));
     const b = rg(canvas([expression("x1", "paywall_block")], []));
-    const m = findNode(diffRuleGraph(a, b).anonymous, "x1");
+    const m = findNode(diffRuleGraph(a, b), "x1");
     expect(m.status).toBe("modified");
     expect(m.changes).toContainEqual({ field: "custom_label", old: null, new: "paywall_block" });
   });
@@ -127,7 +125,7 @@ describe("diffRuleGraph", () => {
   it("treats a whitespace-only custom_label as absent (no change)", () => {
     const a = rg(canvas([expression("x1")], []));
     const b = rg(canvas([expression("x1", "   ")], []));
-    expect(findNode(diffRuleGraph(a, b).anonymous, "x1").status).toBe("unchanged");
+    expect(findNode(diffRuleGraph(a, b), "x1").status).toBe("unchanged");
   });
 
   it("flags added and removed edges by semantic key", () => {
@@ -138,7 +136,7 @@ describe("diffRuleGraph", () => {
         [edge("e1", "start", "d1", "yes"), edge("e2", "d1", "end", "yes")],
       ),
     );
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     const added = d.edges.find((e) => e.status === "added")!;
     expect(added.source).toBe("d1");
     expect(added.target).toBe("end");
@@ -148,14 +146,14 @@ describe("diffRuleGraph", () => {
   it("treats a branch flip as one removed + one added edge", () => {
     const a = rg(canvas([decision("d1"), end()], [edge("e1", "d1", "end", "yes")]));
     const b = rg(canvas([decision("d1"), end()], [edge("e1", "d1", "end", "no")]));
-    const d = diffRuleGraph(a, b).anonymous;
+    const d = diffRuleGraph(a, b);
     expect(d.edges.find((e) => e.branch === "yes")?.status).toBe("removed");
     expect(d.edges.find((e) => e.branch === "no")?.status).toBe("added");
   });
 
   it("two empty canvases yield no changes", () => {
     const diff = diffRuleGraph(rg(empty), rg(empty));
-    expect(diff.anonymous.nodes).toHaveLength(0);
-    expect(diff.anonymous.changeCount).toBe(0);
+    expect(diff.nodes).toHaveLength(0);
+    expect(diff.changeCount).toBe(0);
   });
 });

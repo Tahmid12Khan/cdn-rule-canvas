@@ -68,9 +68,7 @@ export const CanvasGraph = z.object({
 export type CanvasGraph = z.infer<typeof CanvasGraph>;
 
 export const RuleGraph = z.object({
-  anonymous: CanvasGraph,
-  registered: CanvasGraph,
-  customer: CanvasGraph,
+  canvas: CanvasGraph,
 });
 export type RuleGraph = z.infer<typeof RuleGraph>;
 

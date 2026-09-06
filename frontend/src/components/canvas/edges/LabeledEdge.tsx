@@ -128,9 +128,8 @@ function LabeledEdgeImpl({
   const onJourney = useRuleBuilderStore((s) => s.journeyPath.edgeIds.has(id));
   const journeyBaseline = onJourney && !testActive;
 
-  // Inline delete affordance: only while editing the currently-rendered canvas.
+  // Inline delete affordance: only while editing.
   const isEditing = useRuleBuilderStore((s) => s.isEditing);
-  const activeCanvas = useRuleBuilderStore((s) => s.selected);
   const removeEdge = useRuleBuilderStore((s) => s.removeEdge);
   const showDelete = selected && isEditing;
 
@@ -188,7 +187,7 @@ function LabeledEdgeImpl({
                 title="Delete this connection"
                 onClick={(e) => {
                   e.stopPropagation();
-                  removeEdge(activeCanvas, id);
+                  removeEdge(id);
                 }}
               >
                 ×

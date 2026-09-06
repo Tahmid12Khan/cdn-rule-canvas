@@ -12,9 +12,7 @@ import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import type { RuleGraph } from "@/lib/api/ruleGraph";
 
 const graph: RuleGraph = {
-  anonymous: { nodes: [], edges: [], root_node_id: null },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
+  canvas: { nodes: [], edges: [], root_node_id: null },
 };
 
 function wrapper({ children }: { children: ReactNode }) {

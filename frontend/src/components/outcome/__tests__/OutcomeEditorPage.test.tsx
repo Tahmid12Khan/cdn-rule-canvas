@@ -63,9 +63,7 @@ function versionPayload(status: string) {
     description: null,
     status,
     rule_graph: {
-      anonymous: emptyCanvas,
-      registered: emptyCanvas,
-      customer: emptyCanvas,
+      canvas: emptyCanvas,
     },
     created_by: "tester",
     last_updated_by: "tester",

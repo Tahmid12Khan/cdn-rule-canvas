@@ -1,5 +1,5 @@
-// Pure rule-graph diff (version-diff-compare spec §4). Compares two RuleGraphs
-// and reports, per canvas, which nodes were added / removed / modified and which
+// Pure rule-graph diff (version-diff-compare spec §4). Compares two RuleGraphs'
+// canvases and reports which nodes were added / removed / modified and which
 // edges were added / removed. Node x/y `position` is NEVER a change. No React, no
 // manifest, no store — trivially unit-testable.
 import type {
@@ -10,7 +10,6 @@ import type {
   RuleGraph,
 } from "@/lib/api/ruleGraph";
 import type { ProcessorConfig } from "@/lib/canvas/types";
-import type { CanvasKey } from "@/lib/canvas/types";
 
 export type NodeStatus = "added" | "removed" | "modified" | "unchanged";
 export type EdgeStatus = "added" | "removed" | "unchanged";
@@ -46,8 +45,6 @@ export interface CanvasDiff {
   edges: EdgeDiff[];
   changeCount: number; // nodes + edges whose status !== "unchanged"
 }
-
-export type RuleGraphDiff = Record<CanvasKey, CanvasDiff>;
 
 // Order-independent deep equality for JSON values (objects, arrays, primitives).
 function stableEqual(a: unknown, b: unknown): boolean {
@@ -171,13 +168,6 @@ function diffCanvas(o: CanvasGraph, n: CanvasGraph): CanvasDiff {
   return { nodes, edges, changeCount };
 }
 
-export function diffRuleGraph(
-  oldRg: RuleGraph,
-  newRg: RuleGraph,
-): RuleGraphDiff {
-  return {
-    anonymous: diffCanvas(oldRg.anonymous, newRg.anonymous),
-    registered: diffCanvas(oldRg.registered, newRg.registered),
-    customer: diffCanvas(oldRg.customer, newRg.customer),
-  };
+export function diffRuleGraph(oldRg: RuleGraph, newRg: RuleGraph): CanvasDiff {
+  return diffCanvas(oldRg.canvas, newRg.canvas);
 }

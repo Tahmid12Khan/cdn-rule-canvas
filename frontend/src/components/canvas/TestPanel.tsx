@@ -63,11 +63,10 @@ function metaRowsFromMap(meta: Record<string, string>): MetaRow[] {
 
 export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   const isJson = featureType === "json";
-  const selected = useRuleBuilderStore((s) => s.selected);
   const highlight = useRuleBuilderStore((s) => s.testHighlight);
-  // Live (selected) canvas nodes — passed to the journey so each step can look
-  // up its node's config (inputs + plain-English description).
-  const canvasNodes = useRuleBuilderStore((s) => s.canvases[s.selected].nodes);
+  // Live canvas nodes — passed to the journey so each step can look up its
+  // node's config (inputs + plain-English description).
+  const canvasNodes = useRuleBuilderStore((s) => s.canvas.nodes);
 
   // Per-run highlight lifecycle (apply on success / restore on journey collapse /
   // clear), shared with UrlTestPanel so both highlight identically.
@@ -92,16 +91,16 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   // for html it's a raw HTML string passed straight to the evaluator.
   const [rawBody, setRawBody] = useState("");
 
-  // Introspect the selected canvas's decision processors so we can hint which
-  // inputs actually matter (meta_tags vs device_type).
+  // Introspect the canvas's decision processors so we can hint which inputs
+  // actually matter (meta_tags vs device_type).
   const usesDevice = useRuleBuilderStore((s) =>
-    s.canvases[s.selected].nodes.some(
+    s.canvas.nodes.some(
       (n) =>
         n.type === "decisionNode" && n.data.processor.type === "device_type",
     ),
   );
   const usesMetaTags = useRuleBuilderStore((s) =>
-    s.canvases[s.selected].nodes.some(
+    s.canvas.nodes.some(
       (n) => n.type === "decisionNode" && n.data.processor.type === "meta_tags",
     ),
   );
@@ -111,8 +110,7 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { canvases } = useRuleBuilderStore.getState();
-      const c = canvases[selected];
+      const c = useRuleBuilderStore.getState().canvas;
       const canvas = serializeCanvas(c.nodes, c.edges, c.rootNodeId);
 
       let context: EvalContext;
@@ -168,8 +166,8 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       // Highlight the FULL start→END path for this run (the hook remembers it so
       // stepping the journey can restore it). A path is a dead-end only when it
       // never reaches an END node — the proxy appends the END step when it does.
-      const { canvases } = useRuleBuilderStore.getState();
-      applyResult(res, canvases[selected].edges);
+      const { canvas } = useRuleBuilderStore.getState();
+      applyResult(res, canvas.edges);
     },
   });
 
@@ -303,8 +301,7 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
         )}
       </div>
       <p className="mt-1 text-xs text-status-prevFg">
-        Enter a {isJson ? "response body" : "request context"} for the{" "}
-        <span className="font-semibold">{selected}</span> canvas and run it
+        Enter a {isJson ? "response body" : "request context"} and run it
         through the evaluator to highlight the path.
       </p>
 

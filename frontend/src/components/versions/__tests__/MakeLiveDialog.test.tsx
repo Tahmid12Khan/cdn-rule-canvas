@@ -30,9 +30,7 @@ const publishedResponse = {
   description: null,
   status: "live",
   rule_graph: {
-    anonymous: { nodes: [], edges: [], root_node_id: null },
-    registered: { nodes: [], edges: [], root_node_id: null },
-    customer: { nodes: [], edges: [], root_node_id: null },
+    canvas: { nodes: [], edges: [], root_node_id: null },
   },
   created_by: "alice",
   last_updated_by: "alice",

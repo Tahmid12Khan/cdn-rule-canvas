@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { RuleGraph } from "@/lib/api/ruleGraph";
 import type { CanvasWorkingState } from "@/lib/canvas/serialize";
-import type { CanvasKey, RFNode } from "@/lib/canvas/types";
+import type { RFNode } from "@/lib/canvas/types";
 import {
   buildValidationUserError,
   mapValidationErrors,
 } from "@/lib/canvas/validationMapping";
 
 const graph: RuleGraph = {
-  anonymous: {
+  canvas: {
     root_node_id: "n_meta",
     nodes: [
       {
@@ -42,8 +42,6 @@ const graph: RuleGraph = {
       },
     ],
   },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
 };
 
 describe("mapValidationErrors", () => {
@@ -51,7 +49,7 @@ describe("mapValidationErrors", () => {
     const errors = mapValidationErrors(
       [
         {
-          loc: "rule_graph.anonymous.nodes[0]",
+          loc: "rule_graph.canvas.nodes[0]",
           msg: "outcome ref missing",
           rule_id: "apply_outcome_ref_exists",
         },
@@ -65,7 +63,7 @@ describe("mapValidationErrors", () => {
     const errors = mapValidationErrors(
       [
         {
-          loc: "rule_graph.anonymous.edges[0]",
+          loc: "rule_graph.canvas.edges[0]",
           msg: "cycle detected",
           rule_id: "no_cycles",
         },
@@ -86,66 +84,61 @@ describe("mapValidationErrors", () => {
   });
 });
 
-// RF canvases (store shape) used to resolve human node labels.
+// RF canvas (store shape) used to resolve human node labels.
 function canvas(nodes: RFNode[], rootNodeId: string | null): CanvasWorkingState {
   return { nodes, edges: [], rootNodeId };
 }
 
-const storeCanvases: Record<CanvasKey, CanvasWorkingState> = {
-  anonymous: canvas(
-    [
-      {
-        id: "n_meta",
-        type: "decisionNode",
-        position: { x: 0, y: 0 },
-        data: {
-          processor: {
-            type: "meta_tags",
-            tag_name: "Reg Wall",
-            operator: "exists",
-            value: null,
-          },
+const storeCanvas: CanvasWorkingState = canvas(
+  [
+    {
+      id: "n_meta",
+      type: "decisionNode",
+      position: { x: 0, y: 0 },
+      data: {
+        processor: {
+          type: "meta_tags",
+          tag_name: "Reg Wall",
+          operator: "exists",
+          value: null,
         },
       },
-      {
-        id: "n_act",
-        type: "expressionNode",
-        position: { x: 100, y: 0 },
-        data: {
-          action: {
-            type: "apply_outcome",
-            outcome_id: "33333333-3333-3333-3333-333333333333",
-          },
-          outcomeTitle: "Show Content",
+    },
+    {
+      id: "n_act",
+      type: "expressionNode",
+      position: { x: 100, y: 0 },
+      data: {
+        action: {
+          type: "apply_outcome",
+          outcome_id: "33333333-3333-3333-3333-333333333333",
         },
+        outcomeTitle: "Show Content",
       },
-    ],
-    "n_meta",
-  ),
-  registered: canvas([], null),
-  customer: canvas([], null),
-};
+    },
+  ],
+  "n_meta",
+);
 
 describe("buildValidationUserError", () => {
-  it("names the failing nodes by label and groups them by canvas", () => {
+  it("names the failing nodes by label and groups them by reason", () => {
     const err = buildValidationUserError(
       [
         {
-          loc: "rule_graph.anonymous.nodes[0]",
+          loc: "rule_graph.canvas.nodes[0]",
           msg: "outcome ref missing",
           rule_id: "apply_outcome_ref_exists",
         },
         {
-          loc: "rule_graph.anonymous.nodes[1]",
+          loc: "rule_graph.canvas.nodes[1]",
           msg: "outcome ref missing",
           rule_id: "apply_outcome_ref_exists",
         },
       ],
       graph,
-      storeCanvases,
+      storeCanvas,
     );
     expect(err.title).toBe("2 rule nodes need attention");
-    expect(err.why).toContain("Anonymous canvas");
     // Decision nodes are named by their processor kind (manifest unavailable
     // in the pure error-mapping path); apply_outcome by its resolved title.
     expect(err.why).toContain("'meta_tags'");
@@ -159,13 +152,13 @@ describe("buildValidationUserError", () => {
     const err = buildValidationUserError(
       [
         {
-          loc: "rule_graph.anonymous.nodes[0]",
+          loc: "rule_graph.canvas.nodes[0]",
           msg: "outcome ref missing",
           rule_id: "apply_outcome_ref_exists",
         },
       ],
       graph,
-      storeCanvases,
+      storeCanvas,
     );
     expect(err.title).toBe("1 rule node needs attention");
   });
@@ -174,7 +167,7 @@ describe("buildValidationUserError", () => {
     const err = buildValidationUserError(
       [{ loc: "body", msg: "bad", rule_id: "x" }],
       graph,
-      storeCanvases,
+      storeCanvas,
     );
     expect(err.title).toMatch(/invalid/i);
     expect(err.why).toMatch(/couldn't pinpoint/i);

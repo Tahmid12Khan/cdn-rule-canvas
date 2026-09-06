@@ -12,28 +12,9 @@ import {
 
 const OUTCOME_ID = "33333333-3333-3333-3333-333333333333";
 
-// Canonical backend form of an empty canvas (spec §6): start -> end.
-// Under the new spec the backend normalizes empty canvases to this shape.
-const emptyCanonical = {
-  root_node_id: "start",
-  nodes: [
-    { kind: "start" as const, id: "start", position: { x: 40, y: 160 } },
-    { kind: "end" as const, id: "end", position: { x: 940, y: 160 } },
-  ],
-  edges: [
-    {
-      id: "e_start_end",
-      source_node_id: "start",
-      target_node_id: "end",
-      branch: "yes" as const,
-    },
-  ],
-};
-
-// A start -> decision -> expression(apply_outcome) -> end fixture in one
-// canvas; the other two canvases in canonical empty form.
+// A start -> decision -> expression(apply_outcome) -> end fixture.
 const fixture: RuleGraph = {
-  anonymous: {
+  canvas: {
     root_node_id: "start",
     nodes: [
       {
@@ -80,33 +61,31 @@ const fixture: RuleGraph = {
       },
     ],
   },
-  registered: emptyCanonical,
-  customer: emptyCanonical,
 };
 
 describe("serialize / deserialize round-trip", () => {
-  it("deserialize(serialize(g)) === g across all canvases", () => {
-    const canvases = deserializeRuleGraph(fixture, () => "Show Content");
-    const back = serializeRuleGraph(canvases);
+  it("deserialize(serialize(g)) === g", () => {
+    const canvas = deserializeRuleGraph(fixture, () => "Show Content");
+    const back = serializeRuleGraph(canvas);
     expect(back).toEqual(fixture);
   });
 
   it("round-trips position as numbers", () => {
-    const canvases = deserializeRuleGraph(fixture, () => "Show Content");
-    const back = serializeRuleGraph(canvases);
-    expect(back.anonymous.nodes[0].position).toEqual({ x: 260, y: 0 });
+    const canvas = deserializeRuleGraph(fixture, () => "Show Content");
+    const back = serializeRuleGraph(canvas);
+    expect(back.canvas.nodes[0].position).toEqual({ x: 260, y: 0 });
   });
 
   it("does not serialize the apply_outcome title (re-resolved on deserialize)", () => {
-    const canvases = deserializeRuleGraph(fixture, () => "Resolved Title");
-    const exprNode = canvases.anonymous.nodes.find(
+    const canvas = deserializeRuleGraph(fixture, () => "Resolved Title");
+    const exprNode = canvas.nodes.find(
       (n) => n.type === "expressionNode",
     );
     expect(
       exprNode && "outcomeTitle" in exprNode.data && exprNode.data.outcomeTitle,
     ).toBe("Resolved Title");
-    const back = serializeRuleGraph(canvases);
-    const serializedExpr = back.anonymous.nodes.find(
+    const back = serializeRuleGraph(canvas);
+    const serializedExpr = back.canvas.nodes.find(
       (n) => n.kind === "expression",
     );
     // The wire action carries only outcome_id, never the resolved title.
@@ -118,29 +97,27 @@ describe("serialize / deserialize round-trip", () => {
 
 describe("deserialize of empty backend canvas (spec §6)", () => {
   const emptyBackend: RuleGraph = {
-    anonymous: { nodes: [], edges: [], root_node_id: null },
-    registered: { nodes: [], edges: [], root_node_id: null },
-    customer: { nodes: [], edges: [], root_node_id: null },
+    canvas: { nodes: [], edges: [], root_node_id: null },
   };
 
   it("yields start node with spec position {x:40,y:160}", () => {
-    const canvases = deserializeRuleGraph(emptyBackend, () => "");
-    const s = canvases.anonymous.nodes.find((n) => n.id === START_NODE_ID);
+    const canvas = deserializeRuleGraph(emptyBackend, () => "");
+    const s = canvas.nodes.find((n) => n.id === START_NODE_ID);
     expect(s?.type).toBe("startNode");
     expect(s?.position).toEqual({ x: 40, y: 160 });
   });
 
   it("yields end node with spec position {x:940,y:160}", () => {
-    const canvases = deserializeRuleGraph(emptyBackend, () => "");
-    const e = canvases.anonymous.nodes.find((n) => n.id === END_NODE_ID);
+    const canvas = deserializeRuleGraph(emptyBackend, () => "");
+    const e = canvas.nodes.find((n) => n.id === END_NODE_ID);
     expect(e?.type).toBe("endNode");
     expect(e?.position).toEqual({ x: 940, y: 160 });
   });
 
   it("yields a single edge e_start_end source=start target=end branch=yes", () => {
-    const canvases = deserializeRuleGraph(emptyBackend, () => "");
-    expect(canvases.anonymous.edges).toHaveLength(1);
-    const edge = canvases.anonymous.edges[0];
+    const canvas = deserializeRuleGraph(emptyBackend, () => "");
+    expect(canvas.edges).toHaveLength(1);
+    const edge = canvas.edges[0];
     expect(edge.id).toBe("e_start_end");
     expect(edge.source).toBe(START_NODE_ID);
     expect(edge.target).toBe(END_NODE_ID);
@@ -148,16 +125,14 @@ describe("deserialize of empty backend canvas (spec §6)", () => {
   });
 
   it("yields rootNodeId = 'start'", () => {
-    const canvases = deserializeRuleGraph(emptyBackend, () => "");
-    expect(canvases.anonymous.rootNodeId).toBe(START_NODE_ID);
-    expect(canvases.registered.rootNodeId).toBe(START_NODE_ID);
-    expect(canvases.customer.rootNodeId).toBe(START_NODE_ID);
+    const canvas = deserializeRuleGraph(emptyBackend, () => "");
+    expect(canvas.rootNodeId).toBe(START_NODE_ID);
   });
 });
 
 describe("custom_label round-trip (spec §v2.3)", () => {
   const withCustomLabel: RuleGraph = {
-    anonymous: {
+    canvas: {
       root_node_id: "start",
       nodes: [
         { kind: "start", id: "start", position: { x: 0, y: 0 } },
@@ -175,27 +150,25 @@ describe("custom_label round-trip (spec §v2.3)", () => {
         { id: "e1", source_node_id: "n_act", target_node_id: "end", branch: "yes" },
       ],
     },
-    registered: emptyCanonical,
-    customer: emptyCanonical,
   };
 
   it("round-trips custom_label on an expression node", () => {
-    const canvases = deserializeRuleGraph(withCustomLabel, () => "Paywall");
-    const exprNode = canvases.anonymous.nodes.find(
+    const canvas = deserializeRuleGraph(withCustomLabel, () => "Paywall");
+    const exprNode = canvas.nodes.find(
       (n) => n.type === "expressionNode",
     );
     expect(
       exprNode && "custom_label" in exprNode.data && exprNode.data.custom_label,
     ).toBe("show_paywall");
-    const back = serializeRuleGraph(canvases);
+    const back = serializeRuleGraph(canvas);
     expect(back).toEqual(withCustomLabel);
   });
 
   it("omits custom_label on the wire when unset (matches backend skip)", () => {
     // The base fixture has NO custom_label — serialize must not emit the key.
-    const canvases = deserializeRuleGraph(fixture, () => "X");
-    const back = serializeRuleGraph(canvases);
-    const serializedExpr = back.anonymous.nodes.find(
+    const canvas = deserializeRuleGraph(fixture, () => "X");
+    const back = serializeRuleGraph(canvas);
+    const serializedExpr = back.canvas.nodes.find(
       (n) => n.kind === "expression",
     );
     expect(serializedExpr && "custom_label" in serializedExpr).toBe(false);

@@ -14,7 +14,7 @@ import type { RuleGraph } from "@/lib/api/ruleGraph";
 const OUTCOME_UUID = "11111111-1111-1111-1111-111111111111";
 
 const graph: RuleGraph = {
-  anonymous: {
+  canvas: {
     nodes: [
       { kind: "start", id: "start", position: { x: 0, y: 0 } },
       {
@@ -38,8 +38,6 @@ const graph: RuleGraph = {
     ],
     root_node_id: "start",
   },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
 };
 
 function wrapper({ children }: { children: ReactNode }) {

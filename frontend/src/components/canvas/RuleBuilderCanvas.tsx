@@ -1,7 +1,7 @@
 "use client";
 
 // The React Flow canvas (Tasks 11/12). Controlled mode: nodes/edges come from
-// canvases[selected] in the Zustand store; all RF callbacks dispatch to store
+// the single `canvas` in the Zustand store; all RF callbacks dispatch to store
 // setters. Loaded via next/dynamic({ ssr:false }) by RuleBuilderClient to avoid
 // hydration mismatch. Drag-drop from the palette + edge connect land here.
 import { useCallback, useEffect, useRef } from "react";
@@ -31,12 +31,11 @@ import { StartNode } from "@/components/canvas/nodes/StartNode";
 import { LabeledEdge } from "@/components/canvas/edges/LabeledEdge";
 import { autoLayout, needsLayout } from "@/lib/canvas/layout";
 import { CHIP_MIME, type ChipPayload } from "@/lib/canvas/nodeTemplates";
-import { CANVAS_KEYS, useRuleBuilderStore } from "@/state/ruleBuilderStore";
+import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
 import {
   END_NODE_ID,
   START_NODE_ID,
   type Branch,
-  type CanvasKey,
   type RFEdge,
   type RFNode,
 } from "@/lib/canvas/types";
@@ -60,15 +59,14 @@ function nextId(prefix: string): string {
 }
 
 interface RuleBuilderCanvasProps {
-  canvasKey: CanvasKey;
   editable: boolean;
 }
 
-function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
+function CanvasInner({ editable }: RuleBuilderCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
 
-  const canvas = useRuleBuilderStore((s) => s.canvases[canvasKey]);
+  const canvas = useRuleBuilderStore((s) => s.canvas);
   const onNodesChange = useRuleBuilderStore((s) => s.onNodesChange);
   const onEdgesChange = useRuleBuilderStore((s) => s.onEdgesChange);
   const addNode = useRuleBuilderStore((s) => s.addNode);
@@ -86,20 +84,13 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
   const baselineHash = useRuleBuilderStore((s) => s.baselineHash);
   useEffect(() => {
     if (laidOutForBaseline.current === baselineHash) return;
-    const { canvases } = useRuleBuilderStore.getState();
-    if (!CANVAS_KEYS.some((k) => needsLayout(canvases[k].nodes))) {
+    const { canvas: current } = useRuleBuilderStore.getState();
+    if (!needsLayout(current.nodes)) {
       laidOutForBaseline.current = baselineHash;
       return;
     }
-    const positionsByCanvas = {} as Record<
-      (typeof CANVAS_KEYS)[number],
-      Map<string, { x: number; y: number }>
-    >;
-    for (const k of CANVAS_KEYS) {
-      const c = canvases[k];
-      positionsByCanvas[k] = autoLayout(c.nodes, c.edges);
-    }
-    applySeedLayout(positionsByCanvas);
+    const positions = autoLayout(current.nodes, current.edges);
+    applySeedLayout(positions);
     laidOutForBaseline.current =
       useRuleBuilderStore.getState().baselineHash;
     window.requestAnimationFrame(() => fitView({ duration: 200 }));
@@ -109,9 +100,9 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
   // user edit, so it flips dirty via setNodePositions) and re-fit the view.
   const handleTidyLayout = useCallback(() => {
     const positions = autoLayout(canvas.nodes, canvas.edges);
-    setNodePositions(canvasKey, positions);
+    setNodePositions(positions);
     window.requestAnimationFrame(() => fitView({ duration: 200 }));
-  }, [canvas.nodes, canvas.edges, setNodePositions, canvasKey, fitView]);
+  }, [canvas.nodes, canvas.edges, setNodePositions, fitView]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -125,13 +116,13 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
             (c.id === START_NODE_ID || c.id === END_NODE_ID)
           ),
       );
-      onNodesChange(canvasKey, filtered);
+      onNodesChange(filtered);
     },
-    [onNodesChange, canvasKey],
+    [onNodesChange],
   );
   const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => onEdgesChange(canvasKey, changes),
-    [onEdgesChange, canvasKey],
+    (changes: EdgeChange[]) => onEdgesChange(changes),
+    [onEdgesChange],
   );
 
   const onConnect = useCallback(
@@ -150,9 +141,9 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
         type: "labeledEdge",
         data: { branch },
       };
-      addEdge(canvasKey, edge);
+      addEdge(edge);
     },
-    [editable, addEdge, canvasKey],
+    [editable, addEdge],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -188,9 +179,9 @@ function CanvasInner({ canvasKey, editable }: RuleBuilderCanvasProps) {
               position,
               data: { action: payload.action },
             };
-      addNode(canvasKey, node);
+      addNode(node);
     },
-    [editable, screenToFlowPosition, addNode, canvasKey],
+    [editable, screenToFlowPosition, addNode],
   );
 
   // Double-click opens an editable config (edit mode) for nodes that carry a

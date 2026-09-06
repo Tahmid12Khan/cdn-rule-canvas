@@ -10,9 +10,7 @@ import type { RFNode } from "@/lib/canvas/types";
 import type { RuleGraph } from "@/lib/api/ruleGraph";
 
 const emptyGraph: RuleGraph = {
-  anonymous: { nodes: [], edges: [], root_node_id: null },
-  registered: { nodes: [], edges: [], root_node_id: null },
-  customer: { nodes: [], edges: [], root_node_id: null },
+  canvas: { nodes: [], edges: [], root_node_id: null },
 };
 
 const decisionNode: RFNode = {
@@ -25,7 +23,7 @@ const decisionNode: RFNode = {
 beforeEach(() => {
   const s = useRuleBuilderStore.getState();
   s.seedFromRuleGraph(emptyGraph, "draft", () => "X");
-  s.addNode("anonymous", decisionNode);
+  s.addNode(decisionNode);
   s.openNodeConfig("d1");
 });
 
@@ -37,14 +35,14 @@ describe("NodeConfigDrawer (edit mode)", () => {
   });
 
   it("renders the manifest-driven Meta Tags form for a meta_tags node", async () => {
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     expect(await screen.findByLabelText(/Tag name/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Operator/)).toBeInTheDocument();
   });
 
   it("disables Save until the form is valid, then persists on Save", async () => {
     const user = userEvent.setup();
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     const saveBtn = screen.getByRole("button", { name: "Save" });
     await screen.findByLabelText(/Tag name/);
     expect(saveBtn).toBeDisabled();
@@ -56,7 +54,7 @@ describe("NodeConfigDrawer (edit mode)", () => {
     await user.click(saveBtn);
     const node = useRuleBuilderStore
       .getState()
-      .canvases.anonymous.nodes.find((n) => n.id === "d1");
+      .canvas.nodes.find((n) => n.id === "d1");
     expect(
       node && "processor" in node.data
         ? node.data.processor.tag_name
@@ -68,11 +66,11 @@ describe("NodeConfigDrawer (edit mode)", () => {
 
   it("Delete node removes the node and its edges from the store", async () => {
     const user = userEvent.setup();
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     await user.click(screen.getByRole("button", { name: "Delete node" }));
     // d1 is gone. Deleting the last real node resets the canvas to the default
     // start → end state (spec §6), so only the start + end bookends remain.
-    const nodes = useRuleBuilderStore.getState().canvases.anonymous.nodes;
+    const nodes = useRuleBuilderStore.getState().canvas.nodes;
     expect(
       nodes.filter((n) => n.type !== "startNode" && n.type !== "endNode"),
     ).toHaveLength(0);
@@ -83,21 +81,21 @@ describe("NodeConfigDrawer (edit mode)", () => {
 describe("NodeConfigDrawer (view-only mode)", () => {
   // seedFromRuleGraph leaves isEditing=false, so the drawer is read-only.
   it("shows a Close button and no Save / Delete for a decision node", () => {
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete node" })).toBeNull();
   });
 
   it("renders the decision form disabled (inspect, not edit)", async () => {
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     expect(await screen.findByLabelText(/Tag name/)).toBeDisabled();
     expect(screen.getByLabelText(/Operator/)).toBeDisabled();
   });
 
   it("renders the apply_outcome form (outcome dropdown) for an expression node", async () => {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", {
+    s.addNode({
       id: "a1",
       type: "expressionNode",
       position: { x: 0, y: 0 },
@@ -108,7 +106,6 @@ describe("NodeConfigDrawer (view-only mode)", () => {
     s.openNodeConfig("a1");
     renderWithQuery(
       <NodeConfigDrawer
-        canvasKey="anonymous"
         outcomes={[
           { id: "11111111-1111-1111-1111-111111111111", title: "Show Paywall" },
         ]}
@@ -124,13 +121,13 @@ describe("NodeConfigDrawer (view-only mode)", () => {
   it("surfaces the start node's contents when inspected", () => {
     // start node only exists once a real node is added.
     useRuleBuilderStore.getState().openNodeConfig("start");
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     expect(screen.getByTestId("start-inspect")).toBeInTheDocument();
   });
 
   it("surfaces the end node's contents when inspected", () => {
     useRuleBuilderStore.getState().openNodeConfig("end");
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     expect(screen.getByTestId("end-inspect")).toBeInTheDocument();
   });
 });
@@ -142,7 +139,7 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
 
   function openExpression() {
     const s = useRuleBuilderStore.getState();
-    s.addNode("anonymous", {
+    s.addNode({
       id: "a1",
       type: "expressionNode",
       position: { x: 0, y: 0 },
@@ -156,7 +153,6 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
     openExpression();
     renderWithQuery(
       <NodeConfigDrawer
-        canvasKey="anonymous"
         outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
       />,
     );
@@ -168,7 +164,6 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
     openExpression();
     renderWithQuery(
       <NodeConfigDrawer
-        canvasKey="anonymous"
         outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
       />,
     );
@@ -183,7 +178,7 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
     await user.click(saveBtn);
     const node = useRuleBuilderStore
       .getState()
-      .canvases.anonymous.nodes.find((n) => n.id === "a1");
+      .canvas.nodes.find((n) => n.id === "a1");
     expect(
       node && "custom_label" in node.data && node.data.custom_label,
     ).toBe("show_paywall");
@@ -194,7 +189,6 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
     openExpression();
     renderWithQuery(
       <NodeConfigDrawer
-        canvasKey="anonymous"
         outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
       />,
     );
@@ -218,7 +212,6 @@ describe("NodeConfigDrawer custom name (spec §v2.3)", () => {
     openExpression();
     renderWithQuery(
       <NodeConfigDrawer
-        canvasKey="anonymous"
         outcomes={[{ id: OUTCOME_ID, title: "Show Paywall" }]}
       />,
     );
@@ -239,7 +232,7 @@ describe("NodeConfigDrawer required_unless", () => {
 
   it("allows save with empty value once operator is 'exists' (required_unless)", async () => {
     const user = userEvent.setup();
-    renderWithQuery(<NodeConfigDrawer canvasKey="anonymous" />);
+    renderWithQuery(<NodeConfigDrawer />);
     await user.type(await screen.findByLabelText(/Tag name/), "paywall");
     // value is still empty -> invalid until operator becomes "exists".
     const saveBtn = screen.getByRole("button", { name: "Save" });

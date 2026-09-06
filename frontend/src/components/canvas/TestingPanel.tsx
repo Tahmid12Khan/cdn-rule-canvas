@@ -6,8 +6,7 @@
 // (~360–420px), independently scrollable, md:sticky aside hosting the two test
 // panels as side-by-side tabs: "Test with live URL" (default) and "Test a
 // rule". Only the active tab's body renders. Tabs are a custom role=tablist
-// with arrow-key nav + aria-selected, mirroring CanvasSlider (there is no Radix
-// tabs dependency).
+// with arrow-key nav + aria-selected (there is no Radix tabs dependency).
 import { useRef, useState } from "react";
 import clsx from "clsx";
 

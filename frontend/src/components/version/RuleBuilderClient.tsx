@@ -9,7 +9,6 @@ import dynamic from "next/dynamic";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 
-import { CanvasSlider } from "@/components/canvas/CanvasSlider";
 import { CompareDialog } from "@/components/canvas/compare/CompareDialog";
 import { NodeConfigDrawer } from "@/components/canvas/config/NodeConfigDrawer";
 import { NodePalette } from "@/components/canvas/palette/NodePalette";
@@ -86,12 +85,10 @@ export function RuleBuilderClient({
   });
 
   const seedFromRuleGraph = useRuleBuilderStore((s) => s.seedFromRuleGraph);
-  const selected = useRuleBuilderStore((s) => s.selected);
-  const setSelected = useRuleBuilderStore((s) => s.setSelected);
   const isEditing = useRuleBuilderStore((s) => s.isEditing);
   const toggleEdit = useRuleBuilderStore((s) => s.toggleEdit);
-  const selectedCanvasEmpty = useRuleBuilderStore(
-    (s) => s.canvases[s.selected].nodes.length === 0,
+  const canvasEmpty = useRuleBuilderStore(
+    (s) => s.canvas.nodes.length === 0,
   );
 
   // Onboarding: tick the "edit" step the first time the user enters edit mode.
@@ -263,9 +260,7 @@ export function RuleBuilderClient({
           editable={isDraft}
         />
 
-        <CanvasSlider selected={selected} onSelect={setSelected} />
-
-        {isEditing && selectedCanvasEmpty && (
+        {isEditing && canvasEmpty && (
           <p className="rounded-lg border border-dashed border-brand-400 bg-brand-50 px-4 py-2 text-sm text-accent-onMuted">
             Step 4 of 5:{" "}
             {featureType === "json"
@@ -290,12 +285,9 @@ export function RuleBuilderClient({
               />
             )}
 
-            <RuleBuilderCanvas canvasKey={selected} editable={isEditing} />
+            <RuleBuilderCanvas editable={isEditing} />
 
-            <NodeConfigDrawer
-              canvasKey={selected}
-              outcomes={paletteOutcomes}
-            />
+            <NodeConfigDrawer outcomes={paletteOutcomes} />
           </div>
 
           <TestingPanel

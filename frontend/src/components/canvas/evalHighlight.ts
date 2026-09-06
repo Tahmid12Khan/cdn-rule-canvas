@@ -88,8 +88,6 @@ export function useMatchedOutcome(
   data: EvalResponse | undefined,
   outcomeTitleById: (id: string) => string,
 ): { matchedTitle: string | null; reachedEnd: boolean } {
-  const selected = useRuleBuilderStore((s) => s.selected);
-
   const reachedEnd = useMemo(() => {
     const j = data?.journey;
     return Boolean(j && j.length > 0 && j[j.length - 1].kind === "end");
@@ -98,8 +96,8 @@ export function useMatchedOutcome(
   const matchedTitle = useMemo(() => {
     const matchedNodeId = data?.matched_node_id;
     if (!matchedNodeId) return null;
-    const { canvases } = useRuleBuilderStore.getState();
-    const node = canvases[selected].nodes.find((n) => n.id === matchedNodeId);
+    const { canvas } = useRuleBuilderStore.getState();
+    const node = canvas.nodes.find((n) => n.id === matchedNodeId);
     if (node?.type !== "expressionNode") return null;
     const { action, outcomeTitle } = node.data;
     if (action.type !== "apply_outcome") return null;
@@ -107,7 +105,7 @@ export function useMatchedOutcome(
     const outcomeId = action.outcome_id;
     if (typeof outcomeId !== "string" || !outcomeId) return null;
     return outcomeTitleById(outcomeId);
-  }, [data, selected, outcomeTitleById]);
+  }, [data, outcomeTitleById]);
 
   return { matchedTitle, reachedEnd };
 }

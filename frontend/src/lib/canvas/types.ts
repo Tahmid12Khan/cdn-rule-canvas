@@ -1,7 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
 
-export type CanvasKey = "anonymous" | "registered" | "customer";
-
 // ---- processor config (mirrors BACKEND CONTRACT §6 ProcessorConfig) ----
 // Generic, manifest-validated shape: one snake_case `type` discriminator (the
 // canonical node-type kind) plus an open map of snake_case config fields. The

@@ -1,7 +1,7 @@
 // React Flow graph <-> backend RuleGraph (BACKEND CONTRACT §6 ⇄
 // expression-nodes-spec §1/§3). Pure functions; no React.
 import type { CanvasGraph, RuleGraph } from "@/lib/api/ruleGraph";
-import { type Branch, type CanvasKey, type RFEdge, type RFNode } from "@/lib/canvas/types";
+import { type Branch, type RFEdge, type RFNode } from "@/lib/canvas/types";
 
 export interface CanvasWorkingState {
   nodes: RFNode[];
@@ -64,26 +64,10 @@ export function serializeCanvas(
   };
 }
 
-// store.canvases -> RuleGraph { anonymous, registered, customer }.
-export function serializeRuleGraph(
-  canvases: Record<CanvasKey, CanvasWorkingState>,
-): RuleGraph {
+// store.canvas -> RuleGraph { canvas }.
+export function serializeRuleGraph(canvas: CanvasWorkingState): RuleGraph {
   return {
-    anonymous: serializeCanvas(
-      canvases.anonymous.nodes,
-      canvases.anonymous.edges,
-      canvases.anonymous.rootNodeId,
-    ),
-    registered: serializeCanvas(
-      canvases.registered.nodes,
-      canvases.registered.edges,
-      canvases.registered.rootNodeId,
-    ),
-    customer: serializeCanvas(
-      canvases.customer.nodes,
-      canvases.customer.edges,
-      canvases.customer.rootNodeId,
-    ),
+    canvas: serializeCanvas(canvas.nodes, canvas.edges, canvas.rootNodeId),
   };
 }
 

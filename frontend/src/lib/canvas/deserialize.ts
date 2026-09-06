@@ -1,15 +1,14 @@
 // Backend RuleGraph -> React Flow graph (BACKEND CONTRACT §6 ⇄
 // expression-nodes-spec §1). Inverse of serialize.ts.
 //
-// Invariant (unit test): deserialize(serialize(g)) === g for all three
-// canvases. The apply_outcome action's outcome title is NOT serialized (server
+// Invariant (unit test): deserialize(serialize(g)) === g. The apply_outcome
+// action's outcome title is NOT serialized (server
 // state) — it is re-resolved here from the outcomes query via outcomeTitleById
 // and cached on the expression node's data.
 import type { CanvasGraph, RuleGraph } from "@/lib/api/ruleGraph";
 import {
   END_NODE_ID,
   START_NODE_ID,
-  type CanvasKey,
   type RFEdge,
   type RFNode,
 } from "@/lib/canvas/types";
@@ -130,22 +129,6 @@ export function deserializeRuleGraph(
   rg: RuleGraph,
   outcomeTitleById: (id: string) => string,
   componentNameById: (id: string) => string | undefined = () => undefined,
-): Record<CanvasKey, CanvasWorkingState> {
-  return {
-    anonymous: deserializeCanvas(
-      rg.anonymous,
-      outcomeTitleById,
-      componentNameById,
-    ),
-    registered: deserializeCanvas(
-      rg.registered,
-      outcomeTitleById,
-      componentNameById,
-    ),
-    customer: deserializeCanvas(
-      rg.customer,
-      outcomeTitleById,
-      componentNameById,
-    ),
-  };
+): CanvasWorkingState {
+  return deserializeCanvas(rg.canvas, outcomeTitleById, componentNameById);
 }
