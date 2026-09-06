@@ -11,7 +11,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
-    error::{AppError, AppResult},
+    error::{AppError, AppResult, ValidationDetail},
     repositories::{component_template_repository, saved_outcome_repository as repo},
     schemas::{
         pagination::{Page, PageParams},
@@ -30,8 +30,27 @@ fn variables_to_json(vars: &HashMap<String, String>) -> serde_json::Value {
     serde_json::json!(vars)
 }
 
+/// Assert `component_id` exists in `rre.component_templates`. Mirrors
+/// `outcome_service::ensure_component_ref_exists` (422 `component_ref_exists`),
+/// run BEFORE the insert so a bad reference is a validation error, not the
+/// FK-violation 409 reserved for the delete-time "still referenced" conflict.
+async fn ensure_component_exists(pool: &PgPool, component_id: Uuid) -> AppResult<()> {
+    if component_template_repository::find(pool, component_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::validation(vec![ValidationDetail::new(
+            "component_id",
+            format!("library component {component_id} does not exist"),
+            "component_ref_exists",
+        )]));
+    }
+    Ok(())
+}
+
 pub async fn create(pool: &PgPool, input: SavedOutcomeCreate) -> AppResult<SavedOutcomeRead> {
     input.validate().map_err(AppError::from)?;
+    ensure_component_exists(pool, input.component_id).await?;
     let variables_json = variables_to_json(&input.variables);
     let row = repo::insert(
         pool,
@@ -126,12 +145,11 @@ pub async fn resolve(pool: &PgPool, id: Uuid) -> AppResult<ResolvedSavedOutcomeR
         }
     }
     let data = builder.build();
-    let template = mustache::compile_str(&resolved.html_body).map_err(|_| {
-        AppError::Internal(anyhow::anyhow!("saved outcome template failed to compile"))
-    })?;
-    let html_body = template.render_data_to_string(&data).map_err(|_| {
-        AppError::Internal(anyhow::anyhow!("saved outcome template failed to render"))
-    })?;
+    let template = mustache::compile_str(&resolved.html_body)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    let html_body = template
+        .render_data_to_string(&data)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(ResolvedSavedOutcomeRead { html_body })
 }

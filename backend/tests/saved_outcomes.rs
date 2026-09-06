@@ -168,7 +168,7 @@ async fn create_duplicate_name_returns_409() {
 }
 
 #[tokio::test]
-async fn create_with_unknown_component_id_returns_409_component_in_use() {
+async fn create_with_unknown_component_id_returns_422() {
     let db = common::setup().await;
     let ghost = uuid::Uuid::new_v4().to_string();
 
@@ -179,8 +179,15 @@ async fn create_with_unknown_component_id_returns_409_component_in_use() {
         Some(saved_outcome_payload("ghost-outcome", "Ghost", &ghost)),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["error"]["code"], "COMPONENT_IN_USE");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+    let rule_ids: Vec<&str> = body["error"]["details"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["rule_id"].as_str().unwrap())
+        .collect();
+    assert!(rule_ids.contains(&"component_ref_exists"), "{rule_ids:?}");
 }
 
 #[tokio::test]
