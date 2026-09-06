@@ -37,9 +37,16 @@ export function ProductCreateModal() {
       resetAndClose();
     },
     onError: (err: unknown) => {
-      if (err instanceof ApiError && err.code === "LABEL_CONFLICT") {
-        const ue = toUserError(err, { surface: "create" });
-        setErrors({ label: `${ue.title} — ${ue.howToFix}` });
+      // The backend returns 409 SLUG_CONFLICT for a duplicate product label OR
+      // name (see product_service::map_conflict_error) — not just the label.
+      // The generic version-centric SLUG_CONFLICT copy ("kebab-case") doesn't
+      // fit a snake_case product label, so use product-aware copy instead,
+      // anchored to the Label field since it's the most common collision
+      // (mirrors SiteFormModal's site-aware 409 handling).
+      if (err instanceof ApiError && err.code === "SLUG_CONFLICT") {
+        setErrors({
+          label: "A product with this label or name already exists",
+        });
         return;
       }
       const ue = toUserError(err, { surface: "create" });
