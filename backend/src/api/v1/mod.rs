@@ -11,6 +11,7 @@ use crate::state::AppState;
 pub mod health;
 
 // Domain-owned handler modules (each exposes `pub fn router() -> Router<AppState>`):
+pub mod component_templates;
 pub mod components;
 pub mod features;
 pub mod node_types;
@@ -36,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .merge(outcomes::router())
         .merge(components::router())
         .merge(products::router())
+        .merge(component_templates::router())
         .merge(sites::router())
         .merge(test_presets::router())
 }

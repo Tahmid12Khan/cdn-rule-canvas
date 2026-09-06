@@ -26,52 +26,67 @@ impl ComponentRenderer for HtmlInjectionRenderer {
         let placement_mode = str_field(cfg, "placement_mode").unwrap_or("append");
         let html_body = str_field(cfg, "html_body").unwrap_or("");
 
-        validate_selector(target_selector)?;
-
-        let marker = component_marker(component);
-        // Idempotency: if our marker is already present anywhere, skip.
-        if html.contains(&marker) {
-            return Ok(html.to_string());
-        }
-
         let sanitized = sanitize(sanitizer, html_body);
-        let wrapped = format!(r#"<div {MARKER_ATTR}="{marker}">{sanitized}</div>"#);
-
-        // lol_html 2 requires element handlers to be `'static`, so the closure
-        // must OWN everything it touches (it can't borrow these locals). Move the
-        // owned `wrapped` String in and own the placement mode.
-        let placement_mode = placement_mode.to_string();
-        let element_handler = element!(target_selector, move |el| {
-            match placement_mode.as_str() {
-                "replace" => {
-                    el.set_inner_content(&wrapped, lol_html::html_content::ContentType::Html);
-                }
-                "prepend" => {
-                    el.prepend(&wrapped, lol_html::html_content::ContentType::Html);
-                }
-                "before" => {
-                    el.before(&wrapped, lol_html::html_content::ContentType::Html);
-                }
-                "after" => {
-                    el.after(&wrapped, lol_html::html_content::ContentType::Html);
-                }
-                // "append" and any unknown mode default to append.
-                _ => {
-                    el.append(&wrapped, lol_html::html_content::ContentType::Html);
-                }
-            }
-            Ok(())
-        });
-
-        rewrite_str(
-            html,
-            RewriteStrSettings {
-                element_content_handlers: vec![element_handler],
-                ..RewriteStrSettings::default()
-            },
-        )
-        .map_err(|_| ApplyError::Html)
+        let marker = component_marker(component);
+        inject_html(html, target_selector, placement_mode, &sanitized, &marker)
     }
+}
+
+/// Reusable injection core: validate the (untrusted) selector, sanitize-once
+/// caller-supplied `sanitized_inner` (already cleaned), wrap it in a marker `<div>`
+/// for idempotency, and inject relative to `target_selector` per `placement_mode`.
+/// If the marker is already present anywhere in `html`, a second pass is a no-op
+/// (idempotency). Shared by the `html_injection` component renderer and the
+/// `apply_component` expression action (design §4.3).
+pub fn inject_html(
+    html: &str,
+    target_selector: &str,
+    placement_mode: &str,
+    sanitized_inner: &str,
+    marker: &str,
+) -> Result<String, ApplyError> {
+    validate_selector(target_selector)?;
+
+    // Idempotency: if our marker is already present anywhere, skip.
+    if html.contains(marker) {
+        return Ok(html.to_string());
+    }
+
+    let wrapped = format!(r#"<div {MARKER_ATTR}="{marker}">{sanitized_inner}</div>"#);
+
+    // lol_html 2 requires element handlers to be `'static`, so the closure must
+    // OWN everything it touches. Move the owned `wrapped` String + placement in.
+    let placement_mode = placement_mode.to_string();
+    let element_handler = element!(target_selector, move |el| {
+        match placement_mode.as_str() {
+            "replace" => {
+                el.set_inner_content(&wrapped, lol_html::html_content::ContentType::Html);
+            }
+            "prepend" => {
+                el.prepend(&wrapped, lol_html::html_content::ContentType::Html);
+            }
+            "before" => {
+                el.before(&wrapped, lol_html::html_content::ContentType::Html);
+            }
+            "after" => {
+                el.after(&wrapped, lol_html::html_content::ContentType::Html);
+            }
+            // "append" and any unknown mode default to append.
+            _ => {
+                el.append(&wrapped, lol_html::html_content::ContentType::Html);
+            }
+        }
+        Ok(())
+    });
+
+    rewrite_str(
+        html,
+        RewriteStrSettings {
+            element_content_handlers: vec![element_handler],
+            ..RewriteStrSettings::default()
+        },
+    )
+    .map_err(|_| ApplyError::Html)
 }
 
 /// Stable per-component marker value (idempotency key).

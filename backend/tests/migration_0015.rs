@@ -1,11 +1,11 @@
-//! Coverage for the 0013 single-canvas collapse migration (BACKEND CONTRACT §6).
+//! Coverage for the 0015 single-canvas collapse migration (BACKEND CONTRACT §6).
 //!
 //! `sqlx::migrate!` (via `common::setup`) already applies every migration,
-//! including 0013, up to head before any test runs — so there are no
-//! pre-0013-shaped rows left to observe by the time a test starts. This test
+//! including 0015, up to head before any test runs — so there are no
+//! pre-0015-shaped rows left to observe by the time a test starts. This test
 //! instead seeds a row shaped like the OLD three-key default directly (as
-//! 0013's own `UPDATE` would have found it, had it existed at migration time),
-//! then replays that exact `UPDATE` statement from `0013_single_canvas.up.sql`
+//! 0015's own `UPDATE` would have found it, had it existed at migration time),
+//! then replays that exact `UPDATE` statement from `0015_single_canvas.up.sql`
 //! and confirms it leaves `rule_graph->'canvas'` present and equal to the old
 //! `anonymous` canvas, with the old keys gone.
 
@@ -16,7 +16,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn migration_0013_collapses_to_single_canvas() {
+async fn migration_0015_collapses_to_single_canvas() {
     let db = common::setup().await;
     let pool = &db.state.pool;
 
@@ -36,7 +36,7 @@ async fn migration_0013_collapses_to_single_canvas() {
     });
 
     sqlx::query(
-        "INSERT INTO rre.features (id, name, type, execution_order) VALUES ('mig-0013', 'm', 'html', 1)",
+        "INSERT INTO rre.features (id, name, type, execution_order) VALUES ('mig-0015', 'm', 'html', 1)",
     )
     .execute(pool)
     .await
@@ -44,7 +44,7 @@ async fn migration_0013_collapses_to_single_canvas() {
     let vid = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO rre.versions (id, feature_id, version_number, status, rule_graph, created_by, last_updated_by) \
-         VALUES ($1, 'mig-0013', 1, 'draft', $2, 't', 't')",
+         VALUES ($1, 'mig-0015', 1, 'draft', $2, 't', 't')",
     )
     .bind(vid)
     .bind(&old_graph)
@@ -52,14 +52,14 @@ async fn migration_0013_collapses_to_single_canvas() {
     .await
     .expect("seed version with old three-canvas shape");
 
-    // Replay 0013's own UPDATE, scoped to this row.
+    // Replay 0015's own UPDATE, scoped to this row.
     sqlx::query(
         "UPDATE rre.versions SET rule_graph = jsonb_build_object('canvas', rule_graph->'anonymous') WHERE id = $1",
     )
     .bind(vid)
     .execute(pool)
     .await
-    .expect("run 0013 UPDATE");
+    .expect("run 0015 UPDATE");
 
     let migrated: Value = sqlx::query("SELECT rule_graph FROM rre.versions WHERE id = $1")
         .bind(vid)

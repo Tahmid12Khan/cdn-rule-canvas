@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,11 @@ import { GenericNodeForm } from "@/components/canvas/config/GenericNodeForm";
 import { NODE_TYPES_FIXTURE } from "@/test/fixtures/nodeTypes";
 import { renderWithQuery } from "@/test/renderWithQuery";
 import { defaultProcessor } from "@/lib/canvas/manifest";
+
+// GenericNodeForm now always mounts TanStack Query hooks (for the dynamic
+// Component controls), so EVERY render goes through renderWithQuery — mirroring
+// how the site_select tests already do.
+const render = renderWithQuery;
 
 const META = NODE_TYPES_FIXTURE.node_types.find((s) => s.kind === "meta_tags")!;
 const DEVICE = NODE_TYPES_FIXTURE.node_types.find(

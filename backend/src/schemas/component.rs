@@ -76,6 +76,35 @@ pub enum ComponentConfig {
         /// The JSON value to write (any JSON, including `null`).
         value: serde_json::Value,
     },
+    /// `type = "component_ref"` — reference the versioned component-template
+    /// library and inject the rendered (mustache + sanitized) HTML at a CSS
+    /// selector. HTML features only. The row-level `Component.placement`
+    /// (`inline`/`sticky_footer`/`popup`) applies exactly like `html_injection`.
+    ComponentRef {
+        /// Library component id (`rre.component_templates.id`).
+        component_id: Uuid,
+        /// Version selector: the string `"default"` or a positive integer.
+        version: serde_json::Value,
+        /// Mustache variable values keyed by variable name.
+        variables: serde_json::Map<String, serde_json::Value>,
+        /// CSS selector the rendered component targets.
+        target_selector: String,
+        /// How the rendered HTML is placed relative to the target.
+        placement_mode: HtmlPlacementMode,
+    },
+    /// `type = "component_ref_json"` — reference the versioned component-template
+    /// library, render to an HTML string, and SET that string at a JSON path.
+    /// JSON features only.
+    ComponentRefJson {
+        /// Library component id (`rre.component_templates.id`).
+        component_id: Uuid,
+        /// Version selector: the string `"default"` or a positive integer.
+        version: serde_json::Value,
+        /// Mustache variable values keyed by variable name.
+        variables: serde_json::Map<String, serde_json::Value>,
+        /// Simple JSON path (dot + `[index]`, e.g. `$.content.html`) to set.
+        target_path: String,
+    },
 }
 
 impl ComponentConfig {
@@ -88,6 +117,8 @@ impl ComponentConfig {
             ComponentConfig::JsonRemove { .. } => "json_remove",
             ComponentConfig::JsonSet { .. } => "json_set",
             ComponentConfig::JsonReplace { .. } => "json_replace",
+            ComponentConfig::ComponentRef { .. } => "component_ref",
+            ComponentConfig::ComponentRefJson { .. } => "component_ref_json",
         }
     }
 
@@ -121,6 +152,29 @@ impl ComponentConfig {
             ComponentConfig::JsonRemove { target_path }
             | ComponentConfig::JsonSet { target_path, .. }
             | ComponentConfig::JsonReplace { target_path, .. } => validate_target_path(target_path),
+            // Library-component reference (HTML): `target_selector` is a CSS
+            // selector (trimmed-non-empty, length-capped) and `version` must be
+            // `"default"` or a positive integer. `variables` is the object the
+            // serde shape already guarantees.
+            ComponentConfig::ComponentRef {
+                version,
+                target_selector,
+                ..
+            } => {
+                validate_selector(target_selector)?;
+                validate_version(version)
+            }
+            // Library-component reference (JSON): same version rule; the result
+            // is set at `target_path` (same simple-path validation as the JSON
+            // mutators).
+            ComponentConfig::ComponentRefJson {
+                version,
+                target_path,
+                ..
+            } => {
+                validate_target_path(target_path)?;
+                validate_version(version)
+            }
         }
     }
 }
@@ -140,6 +194,34 @@ fn validate_target_path(target_path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Validate a `target_selector` (component-ref HTML): trimmed-non-empty and at
+/// most [`MAX_TARGET_PATH_LEN`] chars (same cap as the JSON path).
+fn validate_selector(target_selector: &str) -> Result<(), String> {
+    if target_selector.trim().is_empty() {
+        return Err("target_selector must not be empty".to_string());
+    }
+    if target_selector.chars().count() > MAX_TARGET_PATH_LEN {
+        return Err(format!(
+            "target_selector must be at most {MAX_TARGET_PATH_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
+/// Validate a component-ref `version` selector: either the string `"default"`
+/// or a positive integer (`>= 1`). Well-formedness only — a pinned version that
+/// no longer exists is resolved fail-open at the proxy (falls back to default).
+fn validate_version(version: &serde_json::Value) -> Result<(), String> {
+    match version {
+        serde_json::Value::String(s) if s == "default" => Ok(()),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(v) if v >= 1 => Ok(()),
+            _ => Err("version must be \"default\" or a positive integer".to_string()),
+        },
+        _ => Err("version must be \"default\" or a positive integer".to_string()),
+    }
 }
 
 /// Create-component request body.
@@ -286,5 +368,87 @@ mod tests {
             target_path: "$.items[0].price".to_string(),
         };
         assert!(remove.validate_domain().is_ok());
+    }
+
+    /// `component_ref` round-trips and reports its discriminator.
+    #[test]
+    fn component_ref_round_trip_and_type_str() {
+        let cfg: ComponentConfig = serde_json::from_value(json!({
+            "type": "component_ref",
+            "component_id": "11111111-1111-1111-1111-111111111111",
+            "version": "default",
+            "variables": { "headline": "Hi" },
+            "target_selector": "main .article-body",
+            "placement_mode": "append"
+        }))
+        .unwrap();
+        assert_eq!(cfg.type_str(), "component_ref");
+        assert!(cfg.validate_domain().is_ok());
+
+        let v = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(v["type"], "component_ref");
+        assert_eq!(v["placement_mode"], "append");
+        assert_eq!(v["variables"]["headline"], "Hi");
+    }
+
+    /// `component_ref_json` round-trips and reports its discriminator.
+    #[test]
+    fn component_ref_json_round_trip_and_type_str() {
+        let cfg: ComponentConfig = serde_json::from_value(json!({
+            "type": "component_ref_json",
+            "component_id": "22222222-2222-2222-2222-222222222222",
+            "version": 3,
+            "variables": {},
+            "target_path": "$.content.html"
+        }))
+        .unwrap();
+        assert_eq!(cfg.type_str(), "component_ref_json");
+        assert!(cfg.validate_domain().is_ok());
+
+        let v = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(v["type"], "component_ref_json");
+        assert_eq!(v["target_path"], "$.content.html");
+    }
+
+    /// `version` accepts `"default"` and positive integers; rejects 0/neg and
+    /// non-`"default"` strings.
+    #[test]
+    fn version_selector_rules() {
+        assert!(validate_version(&json!("default")).is_ok());
+        assert!(validate_version(&json!(1)).is_ok());
+        assert!(validate_version(&json!(42)).is_ok());
+
+        assert!(validate_version(&json!(0)).is_err());
+        assert!(validate_version(&json!(-1)).is_err());
+        assert!(validate_version(&json!("latest")).is_err());
+        assert!(validate_version(&json!(null)).is_err());
+        assert!(validate_version(&json!(1.5)).is_err());
+    }
+
+    /// `component_ref` with a bad version fails domain validation.
+    #[test]
+    fn component_ref_bad_version_rejected() {
+        let cfg = ComponentConfig::ComponentRef {
+            component_id: Uuid::new_v4(),
+            version: json!(0),
+            variables: serde_json::Map::new(),
+            target_selector: "main".to_string(),
+            placement_mode: HtmlPlacementMode::Append,
+        };
+        assert!(cfg.validate_domain().is_err());
+    }
+
+    /// `component_ref` with an empty selector fails domain validation.
+    #[test]
+    fn component_ref_empty_selector_rejected() {
+        let cfg = ComponentConfig::ComponentRef {
+            component_id: Uuid::new_v4(),
+            version: json!("default"),
+            variables: serde_json::Map::new(),
+            target_selector: "   ".to_string(),
+            placement_mode: HtmlPlacementMode::Replace,
+        };
+        let err = cfg.validate_domain().unwrap_err();
+        assert!(err.contains("target_selector"));
     }
 }

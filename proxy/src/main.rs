@@ -10,6 +10,7 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
+use rre_proxy::infra::component_cache::ComponentCache;
 use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 use rre_proxy::{build_app, observability, telemetry};
@@ -46,6 +47,12 @@ async fn main() -> anyhow::Result<()> {
         settings.active_version_ttl_secs,
     );
 
+    let component_cache = ComponentCache::new(
+        http.clone(),
+        settings.backend_base_url.clone(),
+        settings.active_version_ttl_secs,
+    );
+
     let compiled = CompiledCache::new(settings.compiled_cache_capacity);
 
     let registry = default_registry();
@@ -64,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
         site_map: Arc::new(site_map),
         backend: Arc::new(backend),
         compiled: Arc::new(compiled),
+        component_cache: Arc::new(component_cache),
         registry: Arc::new(registry),
         sanitizer: Arc::new(sanitizer),
     };

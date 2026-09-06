@@ -20,4 +20,10 @@ export const handlers = [
   http.get(`${API_BASE}/api/v1/test-presets`, () =>
     HttpResponse.json({ items: [], page: 1, page_size: 100, total: 0 }),
   ),
+  // Component-template library default: empty. The rule-node Component controls
+  // (GenericNodeForm / NodeConfigDrawer) + RuleBuilderClient list components on
+  // mount; tests that exercise the Component node override this per-test.
+  http.get(`${API_BASE}/api/v1/component-templates`, () =>
+    HttpResponse.json({ items: [], page: 1, page_size: 100, total: 0 }),
+  ),
 ];

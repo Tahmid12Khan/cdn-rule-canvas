@@ -8,6 +8,7 @@ Cargo.lock
 .cursor
 
 personal.md
+.claude/scheduled_tasks.lock
 
 # native dev loop logs (scripts/dev.sh)
 .devlogs

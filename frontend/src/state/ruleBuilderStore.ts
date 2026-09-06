@@ -165,6 +165,7 @@ export interface RuleBuilderState {
     rg: RuleGraph,
     status: string,
     outcomeTitleById: (id: string) => string,
+    componentNameById?: (id: string) => string | undefined,
   ) => void;
 
   // --- selection / mode ---
@@ -214,13 +215,16 @@ export interface RuleBuilderState {
     processor: ProcessorConfig,
   ) => void;
   // Update an expression node's action config (+ optional resolved outcome
-  // title for apply_outcome display, + optional custom_label — spec §v2.3).
+  // title for apply_outcome display, + optional resolved component name for
+  // apply_component / apply_component_json display, + optional custom_label —
+  // spec §v2.3).
   updateNodeAction: (
     k: CanvasKey,
     nodeId: string,
     action: ProcessorConfig,
     outcomeTitle?: string,
     customLabel?: string,
+    componentName?: string,
   ) => void;
 
   // --- save support ---
@@ -246,8 +250,12 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
   lastSavedAt: null,
   testHighlight: null,
 
-  seedFromRuleGraph: (rg, status, outcomeTitleById) => {
-    const deserialized = deserializeRuleGraph(rg, outcomeTitleById);
+  seedFromRuleGraph: (rg, status, outcomeTitleById, componentNameById) => {
+    const deserialized = deserializeRuleGraph(
+      rg,
+      outcomeTitleById,
+      componentNameById,
+    );
     // Guard each non-empty canvas to carry a start + end node (legacy graphs).
     const canvases = {
       anonymous: withStartEnd(deserialized.anonymous),
@@ -543,7 +551,14 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
       };
     }),
 
-  updateNodeAction: (k, nodeId, action, outcomeTitle, customLabel) =>
+  updateNodeAction: (
+    k,
+    nodeId,
+    action,
+    outcomeTitle,
+    customLabel,
+    componentName,
+  ) =>
     set((state) => {
       const canvas = state.canvases[k];
       // Persist a trimmed custom_label; "" / blank => undefined (no custom name).
@@ -557,7 +572,16 @@ export const useRuleBuilderStore = create<RuleBuilderState>((set, get) => ({
             ...canvas,
             nodes: canvas.nodes.map((n) =>
               n.id === nodeId && n.type === "expressionNode"
-                ? { ...n, data: { ...n.data, action, outcomeTitle, custom_label } }
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      action,
+                      outcomeTitle,
+                      componentName,
+                      custom_label,
+                    },
+                  }
                 : n,
             ),
           },

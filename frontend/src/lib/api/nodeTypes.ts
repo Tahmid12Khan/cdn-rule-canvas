@@ -14,12 +14,19 @@ import { apiGet } from "@/lib/api/client";
 // `site_select` (sites-host-config-spec §6) is a searchable combobox of the
 // configured Sites; it stores the selected site's SLUG. Options are fetched at
 // render time (searchSites), NOT supplied by the manifest.
+// `component_select` / `component_version_select` (component-editor design §5.4)
+// are dynamic dropdowns for apply_component / apply_component_json: the component
+// list and the chosen component's version numbers are fetched client-side, NOT
+// supplied by the manifest (like outcome_select, they skip option-membership
+// validation).
 export const NodeFieldControl = z.enum([
   "select",
   "text",
   "number",
   "outcome_select",
   "site_select",
+  "component_select",
+  "component_version_select",
 ]);
 export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 

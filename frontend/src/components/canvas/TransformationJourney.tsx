@@ -149,11 +149,15 @@ export function TransformationJourney({
   // outcome_id); the title is re-resolved on deserialize and cached on the node.
   const outcomeTitle =
     node?.type === "expressionNode" ? node.data.outcomeTitle : undefined;
+  // apply_component[_json] shows the resolved component name (cached on the node
+  // on deserialize), used by describeStep + the inputs list.
+  const componentName =
+    node?.type === "expressionNode" ? node.data.componentName : undefined;
   const description = describeStep(
     step.kind,
     config,
     step.branch,
-    outcomeTitle ?? step.label,
+    outcomeTitle ?? componentName ?? step.label,
   );
 
   // Git-style diff of the body vs the previous step (skipped on the first step,
@@ -271,7 +275,9 @@ export function TransformationJourney({
                     <dd className="truncate font-mono text-nav">
                       {field.control === "outcome_select"
                         ? outcomeTitle || "—"
-                        : fieldDisplayValue(field, config)}
+                        : field.control === "component_select"
+                          ? componentName || "—"
+                          : fieldDisplayValue(field, config)}
                     </dd>
                   </div>
                 ))}

@@ -5,6 +5,7 @@ use rre_proxy::config::Settings;
 use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
+use rre_proxy::infra::component_cache::ComponentCache;
 use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::state::AppState;
 
@@ -30,6 +31,7 @@ async fn metrics_endpoint_responds() {
     let http = reqwest::Client::new();
     let site_map = SiteMap::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
     let backend = BackendClient::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
+    let component_cache = ComponentCache::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
             .unwrap();
@@ -40,6 +42,7 @@ async fn metrics_endpoint_responds() {
         site_map: Arc::new(site_map),
         backend: Arc::new(backend),
         compiled: Arc::new(CompiledCache::new(256)),
+        component_cache: Arc::new(component_cache),
         registry: Arc::new(default_registry()),
         sanitizer: Arc::new(sanitizer),
     };

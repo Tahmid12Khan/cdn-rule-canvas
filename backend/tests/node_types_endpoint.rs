@@ -38,8 +38,8 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
     assert!(body["categories"].is_array());
     assert!(body["node_types"].is_array());
 
-    // The ported kinds plus json_expression and the three expression kinds, in
-    // palette order.
+    // The ported kinds plus json_expression, the expression kinds, and the two
+    // Component-apply expression kinds, in palette order.
     let kinds: Vec<&str> = body["node_types"]
         .as_array()
         .unwrap()
@@ -56,6 +56,8 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
             "trim_json",
             "add_attribute",
             "apply_outcome",
+            "apply_component",
+            "apply_component_json",
             "site_match",
             "logged_in",
             "has_product"

@@ -28,6 +28,10 @@ import {
   type CanvasOutcome,
 } from "@/lib/api/canvasOutcomes";
 import { getVersion, type VersionRead } from "@/lib/api/canvasVersions";
+import {
+  componentKeys,
+  listComponentTemplates,
+} from "@/lib/api/componentTemplates";
 import type { OutcomeOption } from "@/lib/canvas/nodeTemplates";
 import { useOnboardingStore } from "@/state/onboardingStore";
 import { useRuleBuilderStore } from "@/state/ruleBuilderStore";
@@ -73,6 +77,14 @@ export function RuleBuilderClient({
     queryFn: () => listCanvasOutcomes(versionId),
   });
 
+  // Component library — used to denormalize the apply_component[_json] node's
+  // component name on deserialize (mirrors the outcomes query for outcomeTitle).
+  // Gate seeding on it being settled so component nodes resolve a name, not "".
+  const { data: componentsPage, isFetched: componentsFetched } = useQuery({
+    queryKey: componentKeys.list({ page: 1, page_size: 100 }),
+    queryFn: () => listComponentTemplates({ page: 1, page_size: 100 }),
+  });
+
   const seedFromRuleGraph = useRuleBuilderStore((s) => s.seedFromRuleGraph);
   const selected = useRuleBuilderStore((s) => s.selected);
   const setSelected = useRuleBuilderStore((s) => s.setSelected);
@@ -104,20 +116,34 @@ export function RuleBuilderClient({
     // Recompute when outcomes change so deserialize gets fresh titles.
   }, [outcomes]);
 
+  // Name resolver for component nodes (denormalized display cache). Returns
+  // undefined for an unknown id so the node falls back to its placeholder.
+  const componentNameById = useMemo(() => {
+    const map = new Map(
+      (componentsPage?.items ?? []).map((c) => [c.id, c.name]),
+    );
+    return (id: string) => map.get(id);
+  }, [componentsPage]);
+
   // Seed the store once per (fid, vnum), but only after the outcomes query has
   // settled so outcome-node titles resolve from the cache (not "Outcome").
   // The ref guards against re-seeding on re-render (which would clobber edits).
   const seededKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!outcomesFetched) return;
+    if (!outcomesFetched || !componentsFetched) return;
     const key = `${fid}:${vnum}`;
     if (seededKey.current === key) return;
     seededKey.current = key;
-    seedFromRuleGraph(version.rule_graph, version.status, outcomeTitleById);
-    // Intentionally gate on identity key + outcomes-settled; seed inputs are
-    // stable for a given (fid, vnum).
+    seedFromRuleGraph(
+      version.rule_graph,
+      version.status,
+      outcomeTitleById,
+      componentNameById,
+    );
+    // Intentionally gate on identity key + outcomes/components-settled; seed
+    // inputs are stable for a given (fid, vnum).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fid, vnum, outcomesFetched]);
+  }, [fid, vnum, outcomesFetched, componentsFetched]);
 
   const paletteOutcomes: OutcomeOption[] = outcomes.map((o) => ({
     id: o.id,

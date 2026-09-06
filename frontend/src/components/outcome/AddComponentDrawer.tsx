@@ -31,6 +31,12 @@ const HTML_OPTIONS: ComponentTypeOption[] = [
     description:
       "Trim content to a word budget, optionally with a fade-out gradient.",
   },
+  {
+    type: "component_ref",
+    title: "Component",
+    description:
+      "Render a reusable library Component (versioned, with variables) into the page.",
+  },
 ];
 
 const JSON_OPTIONS: ComponentTypeOption[] = [
@@ -48,6 +54,12 @@ const JSON_OPTIONS: ComponentTypeOption[] = [
     type: "json_replace",
     title: "JSON Replace",
     description: "Overwrite a value only if the path already exists.",
+  },
+  {
+    type: "component_ref_json",
+    title: "Component",
+    description:
+      "Render a library Component to an HTML string and set it at a JSON path.",
   },
 ];
 

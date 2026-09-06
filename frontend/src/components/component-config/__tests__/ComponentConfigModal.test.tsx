@@ -61,6 +61,34 @@ describe("ComponentConfigModal", () => {
     });
   });
 
+  it("offers a Component tab for HTML features", () => {
+    render(
+      <ComponentConfigModal
+        open
+        featureType="html"
+        onOpenChange={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("tab", { name: "HTML Injection" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Component" })).toBeInTheDocument();
+  });
+
+  it("offers a Component tab for JSON features", () => {
+    render(
+      <ComponentConfigModal
+        open
+        featureType="json"
+        onOpenChange={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "JSON Remove" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Component" })).toBeInTheDocument();
+  });
+
   it("locks the type tabs in edit mode", () => {
     render(
       <ComponentConfigModal

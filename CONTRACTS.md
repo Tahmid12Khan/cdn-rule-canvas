@@ -57,11 +57,13 @@ source of truth and the PROXY section mirrors it.
 | `VERSION_NOT_FOUND` | 404 | version (by number or id) missing |
 | `OUTCOME_NOT_FOUND` | 404 | outcome id missing |
 | `COMPONENT_NOT_FOUND` | 404 | component id missing |
+| `COMPONENT_VERSION_NOT_FOUND` | 404 | component-template version (by number) missing |
 | `NO_LIVE_VERSION` | 404 | active-version requested, none LIVE/STAGING |
 | `SITE_NOT_FOUND` | 404 | site slug missing |
 | `SLUG_CONFLICT` | 409 | duplicate feature slug or site slug |
 | `EXECUTION_ORDER_CONFLICT` | 409 | duplicate feature `execution_order` within a type |
 | `CONFLICT` | 409 | site name or source (host:port) already exists |
+| `LAST_VERSION_PROTECTED` | 409 | delete the only remaining component-template version |
 | `VERSION_EDIT_LOCKED` | 409 | mutate rule_graph/outcomes/components on non-DRAFT version |
 | `INVALID_STATUS_TRANSITION` | 409 | illegal publish/unpublish/delete transition |
 | `BUILTIN_OUTCOME_PROTECTED` | 409 | delete builtin ShowContent outcome |
@@ -79,9 +81,11 @@ pub enum AppError {
     #[error("{0}")] VersionNotFound(String),
     #[error("{0}")] OutcomeNotFound(String),
     #[error("{0}")] ComponentNotFound(String),
+    #[error("{0}")] ComponentVersionNotFound(String),
     #[error("{0}")] NoLiveVersion(String),
     #[error("{0}")] SlugConflict(String),
     #[error("{0}")] ExecutionOrderConflict(String),
+    #[error("{0}")] LastVersionProtected(String),
     #[error("{0}")] VersionEditLocked(String),
     #[error("{0}")] InvalidStatusTransition(String),
     #[error("{0}")] BuiltinOutcomeProtected(String),
@@ -154,6 +158,20 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   path?, meta_tags?, headers?, response_body?, content_kind?, site? }`; for `url`: `{ url, headers? }`. The
   service validates ONLY that `payload` is a JSON object within a 16 KB serialized cap (the frontend zod
   schema + the proxy's `headers_to_map` are the per-field guards). Down drops the table.
+- `0013_component_templates`: a GLOBAL library of reusable, independently-versioned HTML (mustache)
+  templates (not feature/version-scoped). Two tables. `rre.component_templates (id UUID PK DEFAULT
+  gen_random_uuid(), slug VARCHAR(120) NOT NULL UNIQUE, name VARCHAR(200) NOT NULL, description TEXT?,
+  default_mode VARCHAR(8) NOT NULL DEFAULT 'latest', default_version_id UUID?, created_at TIMESTAMPTZ NOT
+  NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`, CHECK
+  `component_templates_default_mode_chk (default_mode IN ('latest','pinned'))`, INDEX
+  `component_templates_created_at_idx (created_at DESC, slug ASC)`. `rre.component_template_versions (id
+  UUID PK DEFAULT gen_random_uuid(), component_id UUID NOT NULL REFERENCES rre.component_templates(id) ON
+  DELETE CASCADE, version_number INTEGER NOT NULL, description TEXT?, html_body TEXT NOT NULL DEFAULT '',
+  variables JSONB NOT NULL DEFAULT '[]'::jsonb, created_at, updated_at)`, `UNIQUE (component_id,
+  version_number)`. Then ALTER component_templates ADD the deferrable FK
+  `component_templates_default_version_fk (default_version_id) REFERENCES
+  rre.component_template_versions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED`. Down drops both
+  tables (FK first). Additive — no reorder of 0001–0012.
 
 Migration order is load-bearing (0002 features WITHOUT versions FK; 0003 ALTERs in the deferrable FK
 after creating versions). Never reorder.
@@ -351,7 +369,8 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
 // to the rule_graph node taxonomy: "decision" (yes/no routing) or "expression" (one body action, passes
 // through). It drives which React Flow node the frontend creates on drop and which validation path applies.
 
-// Field — one config control. `control` ∈ { "select" (with options[]), "text", "number", "outcome_select" }.
+// Field — one config control. `control` ∈ { "select" (with options[]), "text", "number", "outcome_select",
+//   "component_select", "component_version_select" }.
 {
   "name": "operator",                        // wire key inside the processor object (snake_case)
   "label": "Operator",                       // form label / tooltip key
@@ -396,17 +415,33 @@ manifest (supplied by the client/validator) and the `apply_outcome_ref_exists` r
 No backend Rust beyond `AppliesTo`/`NodeKind`/`Control::OutcomeSelect` is needed — manifest-driven
 validation handles the fields; the proxy adds one `CanvasProcessor`/applier op per expression kind.
 
+The manifest also ships two `node_kind: "expression"` Component-Editor action node types (each
+`output.branches` is a single `{ "id": "out", "label": "Next" }`): **`apply_component`** (`category:
+"content"`, `applies_to: "html"`; fields `component_id` with the `component_select` control + `version` with
+the `component_version_select` control + `target_selector` text + `placement_mode` select
+`replace|append|prepend|before|after`) renders a Component template and injects it into the page; and
+**`apply_component_json`** (`category: "json"`, `applies_to: "json"`; fields `component_id` + `version` (same
+two controls) + `target_path` text) renders a Component template to an HTML string and sets it at a JSON
+path. Two new `Control` variants back the selectors: `component_select` (dropdown of components) and
+`component_version_select` ("Default (follows component)" + each `version_number`); BOTH are dynamic — their
+options are NOT in the manifest (supplied by the client/validator), so they SKIP option-membership validation
+(like `outcome_select`) but still honor `processor_field_required`. Variable VALUES are NOT manifest fields —
+they are stored on the action as `action.variables: { name: value }` (a flat map) and rendered by a
+special-cased Variables sub-form on the frontend; missing values render empty at the proxy.
+
 Canvas rendering contract: a decision node shows the manifest `label` as its title and a one-line
 condition summary built by joining each field's display token in field order — select-with-`symbol` →
 `symbol`, select → option `label`, text/number → value truncated to `display.value_max_chars` + `…`. This
 is generic (no per-node-type code); the operator symbols and truncation length are server-owned (manifest).
 
-#### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest)`)
+#### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest, &valid_component_ids)`)
 
 Run per-canvas (anonymous/registered/customer). Each failure emits `ValidationDetail { loc, msg,
 rule_id }`; `loc` format `rule_graph.<canvas>.<field>[idx]`. Invalid → 422 `VALIDATION_ERROR`.
 `validate` takes `&NodeManifest` (threaded from `AppState`) so processor checks are manifest-driven —
-the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
+the typed `ProcessorConfig` enum is removed. It ALSO takes a `valid_component_ids` set (the set of
+`rre.component_templates.id`s, pre-fetched or via a repo handle) to check `apply_component_ref_exists`,
+mirroring how `apply_outcome_ref_exists` checks outcome membership. Stable `rule_id` values:
 
 | `rule_id` | Rule |
 |---|---|
@@ -423,6 +458,8 @@ the typed `ProcessorConfig` enum is removed. Stable `rule_id` values:
 | `edge_source_kind` | edges originate only from `start`/`decision`/`expression`, never `end` (replaces `outcome_branch_forbidden`) |
 | `all_paths_reach_end` | every node reachable from the Start node can reach an `end` (dead-ends invalid). Anchored at the unique `start` node; SKIPPED when the canvas is empty or has no single start (replaces `outcome_reachable`) |
 | `apply_outcome_ref_exists` | an `expression` node whose `action.type == "apply_outcome"` has an `action.outcome_id` present in the version's `rre.outcomes` (replaces `outcome_ref_exists`) |
+| `apply_component_ref_exists` | an `expression` node whose `action.type == "apply_component"`/`"apply_component_json"` has an `action.component_id` present in `rre.component_templates` (checked against the `valid_component_ids` set) |
+| `apply_component_version_valid` | such a node's `action.version` is the string `"default"` OR a positive integer (well-formedness only — a pinned number that no longer exists is NOT a save-time error; version drift is handled fail-open at the proxy by falling back to the current default) |
 | `processor_kind_known` | a Decision node's `processor.type` / an Expression node's `action.type` is a manifest `kind` |
 | `processor_field_required` | each `required` field (and each `required_unless` field whose condition is unsatisfied) is present and non-empty |
 | `processor_field_option` | a `select` field's value is one of its `options[].value` |
@@ -433,8 +470,9 @@ Empty canvas (zero nodes) is valid (no start/end required). Processor checks run
 { field, value }`: the field is required unless the named sibling field's current value equals `value`
 (when the sibling equals `value`, the field is optional and absence/empty is allowed). "Non-empty"
 means: present in the map AND not JSON `null` AND, for strings, not empty after trim. `select` option
-membership is checked only when the field has a non-empty value; `outcome_select` controls SKIP the
-option check (dynamic options — `apply_outcome_ref_exists` covers them) but still honor
+membership is checked only when the field has a non-empty value; `outcome_select`/`component_select`/
+`component_version_select` controls SKIP the option check (dynamic options — `apply_outcome_ref_exists` /
+`apply_component_ref_exists` / `apply_component_version_valid` cover them) but still honor
 `processor_field_required`. Unknown extra fields on the processor/action object are ignored
 (forward-compatible), not an error.
 
@@ -471,6 +509,35 @@ DELETE /api/v1/test-presets/{slug}            -> test_presets::delete     -> tes
 # DTOs: TestPresetCreate { slug (3..=64 kebab), name, kind (rule|url), payload (JSON object) };
 #       TestPresetUpdate { name?, payload? } (slug + kind IMMUTABLE); TestPresetRead { slug, name, kind,
 #       payload, created_at, updated_at }. 404 TEST_PRESET_NOT_FOUND; 409 SLUG_CONFLICT (dup slug/name).
+
+# Component templates (global library of reusable, independently-versioned HTML mustache templates;
+#  {cid} = component UUID, {vnum} = version_number i32. List supports ?q name filter + pagination.)
+GET    /api/v1/component-templates                            -> component_templates::list           -> component_template_service::list
+POST   /api/v1/component-templates                            -> component_templates::create         -> component_template_service::create (201)
+GET    /api/v1/component-templates/{cid}                      -> component_templates::get            -> component_template_service::get_with_versions
+PATCH  /api/v1/component-templates/{cid}                      -> component_templates::update         -> component_template_service::update
+DELETE /api/v1/component-templates/{cid}                      -> component_templates::delete         -> component_template_service::delete (204)
+GET    /api/v1/component-templates/{cid}/versions             -> component_templates::list_versions   -> component_template_service::get_with_versions
+POST   /api/v1/component-templates/{cid}/versions             -> component_templates::create_version  -> component_template_service::create_version (201)
+GET    /api/v1/component-templates/{cid}/versions/{vnum}      -> component_templates::get_version     -> component_template_service::get_version
+PATCH  /api/v1/component-templates/{cid}/versions/{vnum}      -> component_templates::update_version  -> component_template_service::update_version
+DELETE /api/v1/component-templates/{cid}/versions/{vnum}      -> component_templates::delete_version  -> component_template_service::delete_version (204)
+POST   /api/v1/component-templates/{cid}/versions/{vnum}/make-default -> component_templates::make_default -> component_template_service::make_default
+GET    /api/v1/component-templates/{cid}/resolve?version=default|N   -> component_templates::resolve  -> component_template_service::resolve (proxy-facing)
+# DTOs: ComponentVariable { name, title, description? }. ComponentTemplateCreate { slug (SLUG_RE 3..=120),
+#       name (1..=200), description?, html_body?, variables?: Vec<ComponentVariable> } (creates the component
+#       + its v1). ComponentTemplateUpdate { name?, description?, default_mode?, default_version_number? }
+#       (manages the default pointer; default_version_number required when switching to `pinned`).
+#       ComponentTemplateRead { id, slug, name, description?, default_mode, default_version_number?,
+#       latest_version_number, versions: Vec<ComponentTemplateVersionSummary>, created_at, updated_at };
+#       ComponentTemplateSummary (list rows). VersionCreate { description?, html_body?, variables?,
+#       make_default?: bool }; VersionUpdate { description?, html_body?, variables? };
+#       ComponentTemplateVersionRead { id, version_number, description?, html_body, variables, is_default,
+#       created_at, updated_at }. ResolvedComponentRead { version_number, html_body, variables } (proxy-facing).
+#       All DTOs deny_unknown_fields. Dup slug -> 409 SLUG_CONFLICT; component id missing -> 404
+#       COMPONENT_NOT_FOUND; version number missing -> 404 COMPONENT_VERSION_NOT_FOUND; delete the only
+#       remaining version -> 409 LAST_VERSION_PROTECTED. `resolve` falls back to the current default on a
+#       missing PINNED version (?version=N where N is gone) -> 200; an unresolvable default -> 404.
 
 # Versions (nested under feature; {vnum} = version_number i32)
 POST   /api/v1/features/{fid}/versions                -> versions::create    -> version_service::create_version
@@ -515,6 +582,17 @@ and optional `q` (case-insensitive `name ILIKE` filter).
 - unpublish `staging`: target must be STAGING → PREV (or LIVE if also live row);
   `features.staging_version_id = NULL`.
 - Any transition not listed → 409 `INVALID_STATUS_TRANSITION`.
+
+#### Component-template default pointer (the movable reference — spec item 4)
+
+A component template carries a `default_mode` of `latest` | `pinned`. `latest` resolves "default" to the
+highest `version_number` (auto-advances when a new version is created); `pinned` resolves to
+`default_version_id`. A rule node references a component version as the string `"default"` OR a specific
+`version_number` (`N`). Every rule that follows `"default"` resolves to the component's CURRENT default, so
+editing a followed version OR repointing the default in the Component Editor changes live proxy output WITHOUT
+republishing the feature. Versions are editable in place; a component always keeps ≥1 version (the last cannot
+be deleted → 409 `LAST_VERSION_PROTECTED`). Deleting the current default re-points the default to the newest
+remaining version.
 
 ### 10. Transaction Boundaries
 
@@ -788,7 +866,26 @@ pub struct AppState {
 - `domain::context::{EvaluationContext, EvaluationContextParts, DeviceType}`.
 - `domain::applier` — `ComponentRenderer` trait, `ModificationResult`, `ApplyError`,
   `orchestrator::apply_outcome`, `html_injection`, `content_truncation`, `placement_sticky_footer`,
-  `placement_popup`, `html_sanitizer::{load_sanitizer, sanitize}`.
+  `placement_popup`, `html_sanitizer::{load_sanitizer, sanitize}`, `component_render::render(html_body,
+  variables_values) -> String`.
+- `infra::component_cache` (moka SWR, TTL = `active_version_ttl_secs`, key `(component_id: Uuid, selector:
+  VersionSelector)`, value `Arc<ResolvedComponent { version_number, html_body, variables }>`);
+  `BackendClient::resolve_component(id, selector)` → `GET
+  /api/v1/component-templates/{id}/resolve?version=default|N` (404 → `None`, fail-open).
+
+#### Component render path (`apply_component` / `apply_component_json` — Component Editor)
+
+After eval yields `actions`, the forwarder (and the `/__rre/eval`, `eval-url`, `eval-full-journey` paths)
+PRE-RESOLVES every `apply_component`/`apply_component_json` action's `(component_id, version)` via the cached
+async `resolve_component(...)` (TTL-cached SWR — gives the spec-item-4 auto-update within the TTL window),
+then the (sync) applier branches: render the resolved `html_body` with `action.variables` via **mustache**
+(flat interpolation — `{{x}}` HTML-escaped, `{{{x}}}`/`{{&x}}` raw; no sections/partials/lambdas; missing
+variables render empty) → **ammonia sanitize** → inject. HTML (`apply_component`): inject at `target_selector`
+with `placement_mode` (reuse the `html_injection` core + idempotency marker). JSON (`apply_component_json`):
+serialize the rendered HTML to a STRING and set it at `target_path` (reuse the `json_set` core). All
+resolve/render failures are FAIL-OPEN (body served untouched); a rule PINNED to a now-deleted version falls
+back to the component's CURRENT default. `apply_component*` actions appear in `rre.feature_expressions[*]` and
+the test-panel `journey[]` exactly like `apply_outcome`.
 
 ### 8. zen Integration Invariants (verified)
 

@@ -16,25 +16,30 @@ pub fn render(
     component: &ActiveComponent,
     sanitizer: &ammonia::Builder<'static>,
 ) -> Result<String, ApplyError> {
-    let marker = format!("c-{}", component.id);
-    if html.contains(&format!(r#"{WRAPPER_MARKER_ATTR}="{marker}""#)) {
-        return Ok(html.to_string());
-    }
-
     let body = component
         .config
         .get("html_body")
         .and_then(Value::as_str)
         .unwrap_or("");
     let sanitized = sanitize(sanitizer, body);
+    let marker = format!("c-{}", component.id);
+    Ok(wrap_sanitized(html, &sanitized, &marker))
+}
 
+/// Wrap ALREADY-sanitized inner HTML in a popup dialog + append to `<body>`,
+/// injecting the CSS once. Idempotent via `marker`. Shared by `render` and the
+/// `component_ref` HTML renderer (which renders + sanitizes the resolved template
+/// first, then wraps).
+pub fn wrap_sanitized(html: &str, sanitized_inner: &str, marker: &str) -> String {
+    if html.contains(&format!(r#"{WRAPPER_MARKER_ATTR}="{marker}""#)) {
+        return html.to_string();
+    }
     let wrapper = format!(
-        r#"<div class="rre-popup-backdrop" {WRAPPER_MARKER_ATTR}="{marker}"><div class="rre-popup" role="dialog" aria-label="Notice"><button class="rre-popup-close" aria-label="Close">&times;</button>{sanitized}</div></div>"#
+        r#"<div class="rre-popup-backdrop" {WRAPPER_MARKER_ATTR}="{marker}"><div class="rre-popup" role="dialog" aria-label="Notice"><button class="rre-popup-close" aria-label="Close">&times;</button>{sanitized_inner}</div></div>"#
     );
-
     let mut out = inject_style_once(html.to_string());
     out = append_to_body(out, &wrapper);
-    Ok(out)
+    out
 }
 
 fn inject_style_once(html: String) -> String {

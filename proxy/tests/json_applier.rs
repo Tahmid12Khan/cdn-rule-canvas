@@ -3,10 +3,21 @@
 //! covering remove / set (upsert + intermediate creation) / replace (exists-only),
 //! per-component fail-open, and idempotency.
 
-use rre_proxy::domain::applier::json_apply::apply_outcome_json;
+use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
+use rre_proxy::domain::applier::json_apply::{apply_outcome_json, ResolvedComponentMap};
 use rre_proxy::domain::applier::json_path::{self, ParsePathError, Seg};
 use rre_proxy::infra::backend_client::ActiveOutcome;
 use serde_json::{json, Value};
+
+fn sanitizer() -> ammonia::Builder<'static> {
+    load_sanitizer("config/sanitizer.yaml").unwrap()
+}
+
+/// Empty pre-resolved map for tests that exercise the built-in JSON component
+/// types (no `component_ref_json` to resolve).
+fn no_components() -> ResolvedComponentMap {
+    ResolvedComponentMap::new()
+}
 
 // ---------------------------------------------------------------------------
 // json_path parser
@@ -107,7 +118,7 @@ fn json_remove_deletes_existing_key() {
         json!({ "target_path": "$.user.premium" })
     )]));
     let body = json!({ "user": { "premium": true, "name": "a" } });
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "user": { "name": "a" } }));
 }
@@ -121,7 +132,7 @@ fn json_remove_missing_key_is_noop() {
         json!({ "target_path": "$.user.absent" })
     )]));
     let body = json!({ "user": { "name": "a" } });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     assert!(!res.applied);
     assert_eq!(res.json, body);
 }
@@ -135,7 +146,7 @@ fn json_remove_array_index() {
         json!({ "target_path": "$.items[1]" })
     )]));
     let body = json!({ "items": [10, 20, 30] });
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "items": [10, 30] }));
 }
@@ -149,7 +160,7 @@ fn json_set_overwrites_existing() {
         json!({ "target_path": "$.user.premium", "value": false })
     )]));
     let body = json!({ "user": { "premium": true } });
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "user": { "premium": false } }));
 }
@@ -163,7 +174,7 @@ fn json_set_creates_intermediate_objects() {
         json!({ "target_path": "$.a.b.c", "value": 1 })
     )]));
     let body = json!({});
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "a": { "b": { "c": 1 } } }));
 }
@@ -177,7 +188,7 @@ fn json_set_is_idempotent() {
         json!({ "target_path": "$.x", "value": "v" })
     )]));
     let body = json!({ "x": "v" });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     // Same value already present -> not "applied" (no change).
     assert!(!res.applied);
     assert_eq!(res.json, body);
@@ -191,7 +202,13 @@ fn json_replace_only_when_exists() {
         0,
         json!({ "target_path": "$.x", "value": "new" })
     )]));
-    let res = apply_outcome_json(json!({ "x": "old" }), &present).unwrap();
+    let res = apply_outcome_json(
+        json!({ "x": "old" }),
+        &present,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "x": "new" }));
 
@@ -201,7 +218,13 @@ fn json_replace_only_when_exists() {
         0,
         json!({ "target_path": "$.y", "value": "new" })
     )]));
-    let res = apply_outcome_json(json!({ "x": "old" }), &absent).unwrap();
+    let res = apply_outcome_json(
+        json!({ "x": "old" }),
+        &absent,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     // Path missing -> replace is a no-op (does NOT create).
     assert!(!res.applied);
     assert_eq!(res.json, json!({ "x": "old" }));
@@ -216,7 +239,7 @@ fn json_set_array_element_overwrites() {
         json!({ "target_path": "$.items[0]", "value": 99 })
     )]));
     let body = json!({ "items": [10, 20] });
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "items": [99, 20] }));
 }
@@ -230,7 +253,7 @@ fn json_set_array_element_out_of_range_is_noop() {
         json!({ "target_path": "$.items[5]", "value": 99 })
     )]));
     let body = json!({ "items": [10, 20] });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     // Index past the end -> fail-open no-op.
     assert!(!res.applied);
     assert_eq!(res.json, body);
@@ -245,7 +268,7 @@ fn json_replace_array_element_out_of_range_is_noop() {
         json!({ "target_path": "$.items[5]", "value": 99 })
     )]));
     let body = json!({ "items": [10, 20] });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     // Path does not resolve (index past the end) -> replace is a no-op.
     assert!(!res.applied);
     assert_eq!(res.json, body);
@@ -259,10 +282,17 @@ fn json_set_array_element_is_idempotent() {
         0,
         json!({ "target_path": "$.items[0]", "value": 99 })
     )]));
-    let first = apply_outcome_json(json!({ "items": [10, 20] }), &o).unwrap();
+    let first = apply_outcome_json(
+        json!({ "items": [10, 20] }),
+        &o,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     assert!(first.applied);
     // Re-setting the same value at the same index -> no change.
-    let second = apply_outcome_json(first.json.clone(), &o).unwrap();
+    let second =
+        apply_outcome_json(first.json.clone(), &o, &no_components(), &sanitizer()).unwrap();
     assert!(!second.applied);
     assert_eq!(second.json, first.json);
 }
@@ -275,7 +305,13 @@ fn json_replace_array_element_overwrites_when_present() {
         0,
         json!({ "target_path": "$.items[1]", "value": "new" })
     )]));
-    let res = apply_outcome_json(json!({ "items": ["a", "b"] }), &present).unwrap();
+    let res = apply_outcome_json(
+        json!({ "items": ["a", "b"] }),
+        &present,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "items": ["a", "new"] }));
 
@@ -286,7 +322,13 @@ fn json_replace_array_element_overwrites_when_present() {
         0,
         json!({ "target_path": "$.items[0]", "value": "new" })
     )]));
-    let res = apply_outcome_json(json!({ "other": 1 }), &absent).unwrap();
+    let res = apply_outcome_json(
+        json!({ "other": 1 }),
+        &absent,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     assert!(!res.applied);
     assert_eq!(res.json, json!({ "other": 1 }));
 }
@@ -301,7 +343,7 @@ fn json_set_does_not_clobber_existing_scalar_intermediate() {
     )]));
     // `$.a` is a scalar; descending into it would destroy it -> fail-open skip.
     let body = json!({ "a": "scalar" });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     assert!(!res.applied);
     assert_eq!(res.json, body);
 }
@@ -315,12 +357,18 @@ fn json_set_upserts_when_intermediate_missing_or_object() {
         0,
         json!({ "target_path": "$.a.b", "value": 1 })
     )]));
-    let res = apply_outcome_json(json!({}), &o).unwrap();
+    let res = apply_outcome_json(json!({}), &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "a": { "b": 1 } }));
 
     // Present object intermediate `$.a` -> preserved, `b` added alongside.
-    let res = apply_outcome_json(json!({ "a": { "existing": true } }), &o).unwrap();
+    let res = apply_outcome_json(
+        json!({ "a": { "existing": true } }),
+        &o,
+        &no_components(),
+        &sanitizer(),
+    )
+    .unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "a": { "existing": true, "b": 1 } }));
 }
@@ -337,7 +385,7 @@ fn html_and_unknown_component_types_are_noops() {
         component("unk", "mystery_type", 1, json!({})),
     ]));
     let body = json!({ "x": 1 });
-    let res = apply_outcome_json(body.clone(), &o).unwrap();
+    let res = apply_outcome_json(body.clone(), &o, &no_components(), &sanitizer()).unwrap();
     assert!(!res.applied);
     assert_eq!(res.json, body);
 }
@@ -359,7 +407,7 @@ fn bad_target_path_fails_open_per_component() {
         ),
     ]));
     let body = json!({});
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     // The wildcard path is rejected (skipped); the valid one still applies.
     assert!(res.applied);
     assert_eq!(res.json, json!({ "ok": 2 }));
@@ -377,7 +425,7 @@ fn full_outcome_runs_components_in_order() {
         ),
     ]));
     let body = json!({ "secret": "s", "locked": false });
-    let res = apply_outcome_json(body, &o).unwrap();
+    let res = apply_outcome_json(body, &o, &no_components(), &sanitizer()).unwrap();
     assert!(res.applied);
     assert_eq!(res.json, json!({ "locked": true }));
 }

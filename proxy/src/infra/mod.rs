@@ -4,5 +4,6 @@
 
 pub mod backend_client;
 pub mod compiled_cache;
+pub mod component_cache;
 pub mod encoding;
 pub mod site_map;

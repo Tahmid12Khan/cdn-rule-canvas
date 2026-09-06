@@ -2,6 +2,7 @@
 //! errors, and return serde DTOs (never raw `FromRow` rows).
 
 // Domain-owned leaf modules (filled by domain agents):
+pub mod component_template_service;
 pub mod feature_service;
 pub mod outcome_service;
 pub mod product_service;
