@@ -44,7 +44,7 @@ source of truth and the PROXY section mirrors it.
 
 ```json
 { "error": { "code": "VERSION_NOT_FOUND", "message": "Version 4 not found for feature 'demo-article'",
-  "details": [ { "loc": "rule_graph.anonymous.edges[1]", "msg": "edge target 'n9' not found in nodes", "rule_id": "edge_endpoint_exists" } ] } }
+  "details": [ { "loc": "rule_graph.canvas.edges[1]", "msg": "edge target 'n9' not found in nodes", "rule_id": "edge_endpoint_exists" } ] } }
 ```
 
 - `error.code`: SCREAMING_SNAKE_CASE stable string. `error.details` present ONLY for 422; each item
@@ -60,6 +60,8 @@ source of truth and the PROXY section mirrors it.
 | `COMPONENT_VERSION_NOT_FOUND` | 404 | component-template version (by number) missing |
 | `NO_LIVE_VERSION` | 404 | active-version requested, none LIVE/STAGING |
 | `SITE_NOT_FOUND` | 404 | site slug missing |
+| `PRODUCT_NOT_FOUND` | 404 | product label missing |
+| `SAVED_OUTCOME_NOT_FOUND` | 404 | saved-outcome id missing |
 | `SLUG_CONFLICT` | 409 | duplicate feature slug or site slug |
 | `EXECUTION_ORDER_CONFLICT` | 409 | duplicate feature `execution_order` within a type |
 | `CONFLICT` | 409 | site name or source (host:port) already exists |
@@ -67,6 +69,7 @@ source of truth and the PROXY section mirrors it.
 | `VERSION_EDIT_LOCKED` | 409 | mutate rule_graph/outcomes/components on non-DRAFT version |
 | `INVALID_STATUS_TRANSITION` | 409 | illegal publish/unpublish/delete transition |
 | `BUILTIN_OUTCOME_PROTECTED` | 409 | delete builtin ShowContent outcome |
+| `COMPONENT_IN_USE` | 409 | delete a component template still referenced by a saved outcome (FK RESTRICT) — distinct from the 422 `VALIDATION_ERROR`/`component_ref_exists` rule used at create/update time when a referenced `component_id` doesn't exist |
 | `INTERNAL_ERROR` | 500 | unexpected (raw `sqlx::Error`, panic-guard). Never leak DB text. |
 
 `error::AppError` (`thiserror`) implements `axum::response::IntoResponse`. `From<sqlx::Error>` →
@@ -265,9 +268,16 @@ Deserialize + ToSchema` so the proxy can mirror/reuse it.
 ### rule_graph JSON schema (§6 — canonical, STABLE)
 
 ```rust
-pub struct RuleGraph { pub anonymous: CanvasGraph, pub registered: CanvasGraph, pub customer: CanvasGraph }
+pub struct RuleGraph { pub canvas: CanvasGraph }
 pub struct CanvasGraph { pub nodes: Vec<Node>, pub edges: Vec<Edge>, #[serde(default)] pub root_node_id: Option<String> }
 
+// A single Rule Canvas, evaluated for every request (the three-canvas
+// anonymous/registered/customer split is REMOVED — migration 0015_single_canvas).
+// Visitor segmentation that used to be implicit in canvas choice is now explicit
+// in-graph via the `logged_in` decision (branches on `ctx.identity.logged_in`) and
+// the `has_product` decision (branches on whether the visitor's identity carries a
+// chosen product label) — see identity resolution in PROXY §1/§7.
+//
 // A non-empty canvas is an in-graph action pipeline:
 //   START -> (decisions route) -> expression/action nodes (mutate body) -> END.
 // `branch` is only meaningful when the edge SOURCE is a Decision; for Start/Expression sources there
@@ -370,7 +380,7 @@ ALL manifest object keys are snake_case (NEVER camelCase). Manifest shape (top l
 // through). It drives which React Flow node the frontend creates on drop and which validation path applies.
 
 // Field — one config control. `control` ∈ { "select" (with options[]), "text", "number", "outcome_select",
-//   "component_select", "component_version_select" }.
+//   "site_select", "product_select", "component_select", "component_version_select", "saved_outcome_select" }.
 {
   "name": "operator",                        // wire key inside the processor object (snake_case)
   "label": "Operator",                       // form label / tooltip key
@@ -429,19 +439,47 @@ options are NOT in the manifest (supplied by the client/validator), so they SKIP
 they are stored on the action as `action.variables: { name: value }` (a flat map) and rendered by a
 special-cased Variables sub-form on the frontend; missing values render empty at the proxy.
 
+The manifest also ships two `node_kind: "expression"` Outcomes Library action node types (each
+`output.branches` is a single `{ "id": "out", "label": "Next" }`): **`apply_saved_outcome`** (`category:
+"content"`, `applies_to: "html"`; fields `saved_outcome_id` with the `saved_outcome_select` control +
+`target_selector` text + `placement_mode` select `replace|append|prepend|before|after`) injects a saved
+outcome's ALREADY-RENDERED `html_body` into the page; and **`apply_saved_outcome_json`** (`category: "json"`,
+`applies_to: "json"`; fields `saved_outcome_id` (same control) + `target_path` text) sets it as a string at a
+JSON path. The `saved_outcome_select` control (backend `Control::SavedOutcomeSelect`) is a dynamic
+single-select of Outcomes Library entries (`GET /api/v1/saved-outcomes`); its options are NOT in the manifest
+and the `saved_outcome_ref_exists` rule covers membership (skips option-membership validation, like
+`outcome_select`/`component_select`). Unlike `apply_component`/`apply_component_json`, the backend
+pre-renders the mustache template against the saved outcome's own stored `variables` at
+`GET /saved-outcomes/{id}/resolve` — the proxy applies the resolved HTML as-is (no client-side render step).
+
+The manifest also ships two `node_kind: "decision"` Product Catalogue / visitor-identity node types (each
+`output.branches` are `{ "id": "yes", "label": "Yes" }` / `{ "id": "no", "label": "No" }`): **`logged_in`**
+(`category: "user"`, `applies_to: "all"`; no fields) branches `Yes` iff the resolved visitor identity is
+logged in; and **`has_product`** (`category: "user"`, `applies_to: "all"`; field `product` with the
+`product_select` control) branches `Yes` iff the identity's product set contains the chosen label — a
+stale/deleted product label fails open to `No` (mirrors `site_match`'s fail-open on a stale site). The
+`product_select` control (backend `Control::ProductSelect`) is a dynamic searchable single-select of
+Product Catalogue entries (`GET /api/v1/products?q=`); its options are NOT in the manifest and the
+`has_product_ref_exists` rule covers membership (skips option-membership validation, like `site_select`).
+Visitor identity (`logged_in: bool`, `products: HashSet<String>`) is resolved once per request by the proxy
+from a cookie, header-fallback (PROXY §1/§7) — it is NOT a backend/DB concept; `has_product_ref_exists`
+only checks the referenced `product` label exists in `rre.products`, not that any visitor holds it.
+
 Canvas rendering contract: a decision node shows the manifest `label` as its title and a one-line
 condition summary built by joining each field's display token in field order — select-with-`symbol` →
 `symbol`, select → option `label`, text/number → value truncated to `display.value_max_chars` + `…`. This
 is generic (no per-node-type code); the operator symbols and truncation length are server-owned (manifest).
 
-#### rule_graph validation rules (`rule_graph_service::validate(version_id, &RuleGraph, &NodeManifest, &valid_component_ids)`)
+#### rule_graph validation rules (`rule_graph_service::validate(&RuleGraph, &valid_outcome_ids, &valid_product_labels, &valid_component_ids, &valid_saved_outcome_ids, &NodeManifest)`)
 
-Run per-canvas (anonymous/registered/customer). Each failure emits `ValidationDetail { loc, msg,
-rule_id }`; `loc` format `rule_graph.<canvas>.<field>[idx]`. Invalid → 422 `VALIDATION_ERROR`.
+Run on the single Rule Canvas. Each failure emits `ValidationDetail { loc, msg,
+rule_id }`; `loc` format `rule_graph.canvas.<field>[idx]`. Invalid → 422 `VALIDATION_ERROR`.
 `validate` takes `&NodeManifest` (threaded from `AppState`) so processor checks are manifest-driven —
-the typed `ProcessorConfig` enum is removed. It ALSO takes a `valid_component_ids` set (the set of
-`rre.component_templates.id`s, pre-fetched or via a repo handle) to check `apply_component_ref_exists`,
-mirroring how `apply_outcome_ref_exists` checks outcome membership. Stable `rule_id` values:
+the typed `ProcessorConfig` enum is removed. It ALSO takes a `valid_outcome_ids` set (`rre.outcomes.id`s
+for the version), a `valid_product_labels` set (`rre.products.label`s) to check `has_product_ref_exists`,
+a `valid_component_ids` set (`rre.component_templates.id`s) to check `apply_component_ref_exists`, and a
+`valid_saved_outcome_ids` set (`rre.saved_outcomes.id`s) to check `saved_outcome_ref_exists` — the caller
+(the version service) fetches all four sets before invoking validation. Stable `rule_id` values:
 
 | `rule_id` | Rule |
 |---|---|
@@ -460,6 +498,8 @@ mirroring how `apply_outcome_ref_exists` checks outcome membership. Stable `rule
 | `apply_outcome_ref_exists` | an `expression` node whose `action.type == "apply_outcome"` has an `action.outcome_id` present in the version's `rre.outcomes` (replaces `outcome_ref_exists`) |
 | `apply_component_ref_exists` | an `expression` node whose `action.type == "apply_component"`/`"apply_component_json"` has an `action.component_id` present in `rre.component_templates` (checked against the `valid_component_ids` set) |
 | `apply_component_version_valid` | such a node's `action.version` is the string `"default"` OR a positive integer (well-formedness only — a pinned number that no longer exists is NOT a save-time error; version drift is handled fail-open at the proxy by falling back to the current default) |
+| `has_product_ref_exists` | a `decision` node whose `processor.type == "has_product"` has a `processor.product` present in `rre.products` (checked against the `valid_product_labels` set) |
+| `saved_outcome_ref_exists` | an `expression` node whose `action.type == "apply_saved_outcome"`/`"apply_saved_outcome_json"` has an `action.saved_outcome_id` present in `rre.saved_outcomes` (checked against the `valid_saved_outcome_ids` set) |
 | `processor_kind_known` | a Decision node's `processor.type` / an Expression node's `action.type` is a manifest `kind` |
 | `processor_field_required` | each `required` field (and each `required_unless` field whose condition is unsatisfied) is present and non-empty |
 | `processor_field_option` | a `select` field's value is one of its `options[].value` |
@@ -470,11 +510,12 @@ Empty canvas (zero nodes) is valid (no start/end required). Processor checks run
 { field, value }`: the field is required unless the named sibling field's current value equals `value`
 (when the sibling equals `value`, the field is optional and absence/empty is allowed). "Non-empty"
 means: present in the map AND not JSON `null` AND, for strings, not empty after trim. `select` option
-membership is checked only when the field has a non-empty value; `outcome_select`/`component_select`/
-`component_version_select` controls SKIP the option check (dynamic options — `apply_outcome_ref_exists` /
-`apply_component_ref_exists` / `apply_component_version_valid` cover them) but still honor
-`processor_field_required`. Unknown extra fields on the processor/action object are ignored
-(forward-compatible), not an error.
+membership is checked only when the field has a non-empty value; `outcome_select`/`site_select`/
+`product_select`/`component_select`/`component_version_select`/`saved_outcome_select` controls SKIP the
+option check (dynamic options — `apply_outcome_ref_exists` / `has_product_ref_exists` /
+`apply_component_ref_exists` / `apply_component_version_valid` / `saved_outcome_ref_exists` cover the ones
+that have a membership rule) but still honor `processor_field_required`. Unknown extra fields on the
+processor/action object are ignored (forward-compatible), not an error.
 
 ### 7. REST Routes (router tree → handler → service → repo)
 
@@ -499,6 +540,21 @@ GET    /api/v1/sites                          -> sites::list             -> site
 GET    /api/v1/sites/{slug}                   -> sites::get              -> site_service::get
 PATCH  /api/v1/sites/{slug}                   -> sites::update           -> site_service::update
 DELETE /api/v1/sites/{slug}                   -> sites::delete           -> site_service::delete
+
+# Products (Product Catalogue; global, snake_case `label` PK. ?q name filter + pagination)
+POST   /api/v1/products                       -> products::create        -> product_service::create (201)
+GET    /api/v1/products                       -> products::list          -> product_service::list
+GET    /api/v1/products/{label}               -> products::get           -> product_service::get
+PATCH  /api/v1/products/{label}               -> products::update        -> product_service::update
+DELETE /api/v1/products/{label}               -> products::delete        -> product_service::delete (204)
+# DTOs: ProductCreate { label (SLUG_RE snake_case `^[a-z0-9]+(_[a-z0-9]+)*$`, 1..=64, immutable),
+#       name (1..=200), description? (<=500) }; ProductUpdate { name?, description? } (label path-derived,
+#       immutable; empty PATCH is a no-op that returns the current row). ProductRead { label, name,
+#       description?, created_at, updated_at }. All DTOs deny_unknown_fields. Dup label/name -> 409
+#       SLUG_CONFLICT; label missing -> 404 PRODUCT_NOT_FOUND. Referenced by the `has_product` decision
+#       node's `product` field (validated at rule_graph save time by `has_product_ref_exists`) and by the
+#       proxy's visitor-identity `products` set (PROXY §1/§7) — NOT DB-joined at eval time, purely a label
+#       string match.
 
 # Test presets (global library of reusable Test-panel inputs; ?q name filter + ?kind=rule|url + pagination)
 POST   /api/v1/test-presets                   -> test_presets::create    -> test_preset_service::create
@@ -559,13 +615,39 @@ POST   /api/v1/outcomes/{oid}/reorder   -> outcomes::reorder_components-> outcom
 POST   /api/v1/outcomes/{oid}/components-> outcomes::add_component     -> outcome_service::add_component
 PATCH  /api/v1/components/{cid}         -> components::update         -> outcome_service::update_component
 DELETE /api/v1/components/{cid}         -> components::delete         -> outcome_service::delete_component
+
+# Saved outcomes (Outcomes Library; global library of reusable, pre-rendered Component-template
+#  instances — distinct from the per-version `Outcomes` above. {id} = saved-outcome UUID. ?q name filter
+#  + pagination.)
+GET    /api/v1/saved-outcomes                 -> saved_outcomes::list    -> saved_outcome_service::list
+POST   /api/v1/saved-outcomes                 -> saved_outcomes::create  -> saved_outcome_service::create (201)
+GET    /api/v1/saved-outcomes/{id}            -> saved_outcomes::get     -> saved_outcome_service::get
+PATCH  /api/v1/saved-outcomes/{id}            -> saved_outcomes::update  -> saved_outcome_service::update
+DELETE /api/v1/saved-outcomes/{id}            -> saved_outcomes::delete  -> saved_outcome_service::delete (204)
+GET    /api/v1/saved-outcomes/{id}/resolve    -> saved_outcomes::resolve -> saved_outcome_service::resolve (proxy-facing)
+# DTOs: SavedOutcomeCreate { slug (SLUG_RE 3..=120), name (1..=200), component_id: Uuid,
+#       version_number?: i32 (absent/None = "Latest"), variables?: HashMap<String,String> (default {}) }.
+#       SavedOutcomeUpdate { name?, version_number?: Option<i32> (double-Option: OMITTED -> unchanged;
+#       JSON `null` -> clear to "Latest"; a value -> pin that version), variables? } (empty PATCH is a
+#       no-op that returns the current row). SavedOutcomeRead { id, slug, name, component_id,
+#       component_name (denormalized, joined at read time), version_number?, variables, created_at,
+#       updated_at }. ResolvedSavedOutcomeRead { html_body } (proxy-facing; `resolve` renders the
+#       referenced component version's `html_body` against this saved outcome's OWN `variables` via
+#       mustache — same flat-interpolation semantics as the proxy's `component_render` — and returns the
+#       ALREADY-RENDERED HTML; the proxy applier injects it as-is, no client-side render step). All DTOs
+#       deny_unknown_fields. Dup slug/name -> 409 SLUG_CONFLICT; `component_id` not found (create/update)
+#       -> 422 VALIDATION_ERROR/`component_ref_exists`; id missing -> 404 SAVED_OUTCOME_NOT_FOUND;
+#       `resolve` on a saved outcome or component not found -> 404. Referenced by the
+#       `apply_saved_outcome`/`apply_saved_outcome_json` expression actions (validated at rule_graph save
+#       time by `saved_outcome_ref_exists`); deleting a component template still referenced by a saved
+#       outcome (FK RESTRICT) -> 409 COMPONENT_IN_USE (checked on `component_templates` delete, not here).
 ```
 
 Canonical responses: POST/clone/add → 201; DELETE → 204; others → 200. `POST /features` dup slug → 409
 `SLUG_CONFLICT`; dup `execution_order` within a type (create with pinned order, or `PATCH` reorder onto a
 taken slot) → 409 `EXECUTION_ORDER_CONFLICT`. `POST /sites` dup slug/name/source → 409 `CONFLICT`. `GET active-version?env=live|staging`
 (default live) → `ActiveVersionRead` / 404 `NO_LIVE_VERSION`. `POST versions` clones rule_graph from
-current LIVE (else empty 3-canvas) and seeds builtin `ShowContent` outcome. `PATCH version` with rule_graph
+current LIVE (else an empty single canvas) and seeds builtin `ShowContent` outcome. `PATCH version` with rule_graph
 on non-DRAFT → 409 `VERSION_EDIT_LOCKED`; invalid graph → 422. DELETE version on LIVE/STAGING → 409
 `INVALID_STATUS_TRANSITION` (only DRAFT/PREV deletable). Outcome create/delete on non-DRAFT version → 409
 `VERSION_EDIT_LOCKED`; delete builtin → 409 `BUILTIN_OUTCOME_PROTECTED`. Clone → deep copy incl. components,
@@ -611,11 +693,12 @@ SCAFFOLD-owned (shared infra; one agent writes, everyone imports): `Cargo.toml`,
 `src/schemas/health.rs`, `src/schemas/pagination.rs`, `src/api/v1/health.rs`, `migrations/0001_baseline.*`,
 `tests/common/mod.rs`, `tests/{health,cors,db_health,migrations}.rs`.
 
-DOMAIN-owned (leaf files, filled by domain agents): `src/api/v1/{features,versions,outcomes,components}.rs`,
-`src/models/{feature,version,outcome,component}.rs`,
-`src/schemas/{feature,version,outcome,component,rule_graph,active_version}.rs`,
-`src/repositories/{feature,version,outcome,component}_repository.rs`,
-`src/services/{feature,version,outcome,rule_graph}_service.rs`, `src/bin/{seed_demo,export_schema}.rs`,
+DOMAIN-owned (leaf files, filled by domain agents): `src/api/v1/{features,versions,outcomes,components,
+products,saved_outcomes}.rs`, `src/models/{feature,version,outcome,component,product,saved_outcome}.rs`,
+`src/schemas/{feature,version,outcome,component,rule_graph,active_version,product,saved_outcome}.rs`,
+`src/repositories/{feature,version,outcome,component,product,saved_outcome}_repository.rs`,
+`src/services/{feature,version,outcome,rule_graph,product,saved_outcome}_service.rs`,
+`src/bin/{seed_demo,export_schema}.rs`,
 `migrations/000{2,3,4,5}_*.{up,down}.sql`, the remaining `tests/*.rs`. Each `api/v1/*` handler module
 exposes `pub fn router() -> Router<AppState>` merged in `api/v1/mod.rs`.
 
@@ -665,14 +748,17 @@ Client -> [axum fallback] -> forwarder::forward
   1. parse Host header -> source_host:source_port. site_map.resolve(host:port) -> Option<Site>
        found -> upstream = dest_protocol://dest_host:dest_port, ctx.site = Some(slug)
        miss -> upstream = settings.upstream_base_url (fallback), ctx.site = None
-  2. classifier::classify(&headers) -> Canvas                  cookie rre_user_type, default anonymous
+  2. identity::resolve(&headers, &cookies, &identity_settings) -> Identity { logged_in, products }
+       cookie-first (rre_user / rre_products), header-fallback; feeds the `logged_in`/`has_product`
+       decision nodes on the single Rule Canvas (no per-visitor-class canvas selection anymore)
   3. backend.active_version(ALL features, Live, cached) -> Arc<Vec<ActiveVersionRead>>
        evaluate every feature (no host/path gating); none/err -> PASS-THROUGH (fail-open)
   4. send_upstream(reqwest, upstream) -> upstream Response     err/timeout -> typed 502/504, never panic
   5. content-type gate: text/html -> modify; else pass-through
-  6. EvaluationContextParts::from_request(headers, path, cookies, body, site)   body kept as Send String
-  7. for each feature: GraphEvaluator::evaluate(canvas_graph, ctx, feature_id, version_number, canvas)
-       - compiled_cache.get_or_compile((feature_id, version_number, canvas)) -> Arc<DecisionContent> (<=256)
+  6. EvaluationContextParts::from_request(headers, path, cookies, body, is_json, identity).with_site(site)
+       body kept as Send String
+  7. for each feature: GraphEvaluator::evaluate(canvas_graph, ctx, feature_id, version_number)
+       - compiled_cache.get_or_compile((feature_id, version_number)) -> Arc<DecisionContent> (<=256)
        - spawn_blocking + current_thread rt: parse scraper::Html; adapter = CanvasNodeAdapter{registry, ctx};
          engine = DecisionEngine::default().with_adapter(...); decision = engine.create_decision(content);
          resp = decision.evaluate_with_opts(Variable::from(ctx_json), EvaluationOptions{trace:false,max_depth:10}).await;
@@ -796,19 +882,22 @@ wrapped so any error returns the original `html` and sets `X-RRE-Apply-Status: e
 | Cache | Type | Key | Value | Bound |
 |---|---|---|---|---|
 | active-version | `moka::future::Cache` | `(feature_id, Env)` | `Arc<ActiveVersionRead>` | TTL 30s |
-| compiled graph | `moka::sync::Cache` | `(feature_id, version_number, Canvas)` | `Arc<DecisionContent>` | <=256 LRU |
+| compiled graph | `moka::sync::Cache` | `(feature_id, version_number)` | `Arc<DecisionContent>` | <=256 LRU |
+| resolved component | `moka::future::Cache` (SWR) | `(component_id, VersionSelector)` | `Arc<ResolvedComponent>` | TTL = `active_version_ttl_secs` |
+| resolved saved outcome | `moka::future::Cache` (SWR) | `saved_outcome_id` | `Arc<ResolvedSavedOutcome>` | TTL = `active_version_ttl_secs`, <=256 |
 | reqwest pool | `reqwest::Client` | — | — | process |
 | ProcessorRegistry | `Arc<ProcessorRegistry>` | — | immutable | process |
 
-Canvas isolation (HARD): the compiled-cache key includes `Canvas`; the classifier picks exactly one
-canvas; no code path lets one class's request reach another class's graph.
+Single Rule Canvas (the anonymous/registered/customer three-canvas split is REMOVED —
+migration 0015_single_canvas): the compiled-cache key is `(feature_id, version_number)` alone; every
+request evaluates the SAME canvas, with visitor segmentation expressed in-graph via the `logged_in` /
+`has_product` decision nodes against the resolved `Identity` (§1).
 
 ### 5. Risk Callouts
 
 - Blocking the runtime: zen `Variable` + `scraper::Html` are `!Send`; everything runs in
   `spawn_blocking` + `new_current_thread` rt. Never `.await` `decision.evaluate` on the multi-thread rt.
 - Memory: compiled cache <=256 LRU; HTML buffered only for text/html under 1 MB (larger passed through).
-- Canvas isolation (HARD): anonymous request evaluates only `rule_graph.anonymous`.
 - Selector injection: `tag_name` (MetaTags) and `target_selector` (applier) length-capped (<=200) +
   char-whitelisted (`[A-Za-z0-9_\-\[\]="' .#:]`) before interpolation; reject -> typed error / skip.
 - Untrusted upstream HTML: parse defensively; malformed -> serve original. Component `html_body`
@@ -829,6 +918,11 @@ pub struct AppState {
     pub site_map: Arc<SiteMap>,
     pub backend: Arc<BackendClient>,
     pub compiled: Arc<CompiledCache>,
+    /// SWR cache of resolved Component templates, keyed by `(component_id, VersionSelector)`.
+    pub component_cache: Arc<ComponentCache>,
+    /// SWR cache of resolved, ALREADY-RENDERED Saved Outcomes (Outcomes Library), keyed by the
+    /// saved outcome's own id.
+    pub saved_outcome_cache: Arc<SavedOutcomeCache>,
     pub registry: Arc<ProcessorRegistry>,
     pub sanitizer: Arc<ammonia::Builder<'static>>,
 }
@@ -838,7 +932,9 @@ pub struct AppState {
 (default `http://demo-upstream:8081`), `backend_base_url` (default `http://backend:8000`), `app_env`,
 `active_version_ttl_secs` (default 30), `compiled_cache_capacity` (default 256),
 `upstream_connect_timeout_secs` (default 2), `upstream_read_timeout_secs` (default 10),
-`sanitizer_config_path` (default `proxy/config/sanitizer.yaml`).
+`sanitizer_config_path` (default `proxy/config/sanitizer.yaml`), `identity_user_cookie`,
+`identity_products_cookie`, `identity_user_header`, `identity_products_header` (visitor-identity
+resolution — cookie name/header name pairs consumed by `domain::identity::resolve`, §1/§7).
 
 `SiteMap`: an in-memory `HashMap<String, Site>` keyed by normalized `source_host:source_port`
 (lowercase host). Cached with the same TTL mechanism as the active-version cache.
@@ -852,18 +948,25 @@ pub struct AppState {
 - `infra::backend_client::{BackendClient, Env, ActiveVersionRead, ActiveOutcome, ActiveComponent, Placement}`.
 - `infra::compiled_cache::CompiledCache::{new, get_or_compile}`.
 - `infra::encoding::{gunzip, gzip, decode_for_modify, reencode}`.
-- `domain::graph` — verbatim rule_graph mirror + `Canvas`. The Decision node's processor is a generic
-  reference `{ type: String /* canonical snake_case kind */, #[serde(flatten)] config: serde_json::Value }`
-  (replaces the `ProcessorConfig` enum + `kind_key()`/`to_config_value()`); deserializes any node type,
-  including ones added later, with no graph.rs edit.
+- `domain::graph` — verbatim rule_graph mirror: single `RuleGraph { canvas: CanvasGraph }` (the
+  anonymous/registered/customer three-canvas split is REMOVED — migration 0015_single_canvas). The
+  Decision node's processor is a generic reference `{ type: String /* canonical snake_case kind */,
+  #[serde(flatten)] config: serde_json::Value }` (replaces the `ProcessorConfig` enum +
+  `kind_key()`/`to_config_value()`); deserializes any node type, including ones added later, with no
+  graph.rs edit.
 - `domain::translator::to_decision_content(&CanvasGraph) -> DecisionContent`.
 - `domain::processors` — `CanvasProcessor` trait, `ProcessorRegistry`, `ProcessorOutcome`, `Branch`,
   `ProcessorError`, `default_registry()`.
-- `domain::processors::{meta_tags::MetaTagsProcessor, device_type::DeviceTypeProcessor, site_match::SiteMatchProcessor}`.
+- `domain::processors::{meta_tags::MetaTagsProcessor, device_type::DeviceTypeProcessor,
+  site_match::SiteMatchProcessor, logged_in::LoggedInProcessor, has_product::HasProductProcessor}`.
 - `domain::adapter::CanvasNodeAdapter` (impl zen `CustomNodeAdapter`).
 - `domain::evaluator::GraphEvaluator::evaluate(...)`.
-- `domain::classifier::classify(&HeaderMap) -> Canvas`.
-- `domain::context::{EvaluationContext, EvaluationContextParts, DeviceType}`.
+- `domain::identity::{Identity { logged_in, products }, IdentitySettings, resolve(&HeaderMap,
+  &HashMap<String,String>, &IdentitySettings) -> Identity}` — cookie-first, header-fallback visitor
+  identity, resolved once per request (replaces the old `classifier::classify(&HeaderMap) -> Canvas`;
+  there is no more per-visitor-class canvas selection, only in-graph `logged_in`/`has_product` decisions).
+- `domain::context::{EvaluationContext, EvaluationContextParts, DeviceType}` — `EvaluationContext.identity:
+  Identity` threaded through unchanged from `domain::identity::resolve`.
 - `domain::applier` — `ComponentRenderer` trait, `ModificationResult`, `ApplyError`,
   `orchestrator::apply_outcome`, `html_injection`, `content_truncation`, `placement_sticky_footer`,
   `placement_popup`, `html_sanitizer::{load_sanitizer, sanitize}`, `component_render::render(html_body,
@@ -872,6 +975,11 @@ pub struct AppState {
   VersionSelector)`, value `Arc<ResolvedComponent { version_number, html_body, variables }>`);
   `BackendClient::resolve_component(id, selector)` → `GET
   /api/v1/component-templates/{id}/resolve?version=default|N` (404 → `None`, fail-open).
+- `infra::saved_outcome_cache::SavedOutcomeCache::{new, resolve_saved_outcome}` (moka SWR, mirrors
+  `component_cache` exactly, keyed by the saved outcome's own `id: Uuid` — no version selector, the
+  backend `resolve` route already picked the version and rendered the HTML), value
+  `Arc<ResolvedSavedOutcome { html_body }>`; fetches `GET /api/v1/saved-outcomes/{id}/resolve` (404 →
+  `None`, fail-open).
 
 #### Component render path (`apply_component` / `apply_component_json` — Component Editor)
 
@@ -886,6 +994,21 @@ serialize the rendered HTML to a STRING and set it at `target_path` (reuse the `
 resolve/render failures are FAIL-OPEN (body served untouched); a rule PINNED to a now-deleted version falls
 back to the component's CURRENT default. `apply_component*` actions appear in `rre.feature_expressions[*]` and
 the test-panel `journey[]` exactly like `apply_outcome`.
+
+#### Saved Outcome render path (`apply_saved_outcome` / `apply_saved_outcome_json` — Outcomes Library)
+
+After eval yields `actions`, the forwarder (and the `/__rre/eval`, `eval-url`, `eval-full-journey` paths)
+PRE-RESOLVES every `apply_saved_outcome`/`apply_saved_outcome_json` action's `saved_outcome_id` via the
+cached async `resolve_saved_outcome(...)` (TTL-cached SWR, same shape as `resolve_component`). Unlike the
+Component render path, the backend has ALREADY rendered the mustache template against the saved outcome's
+own stored `variables` (`GET /saved-outcomes/{id}/resolve`), so the (sync) applier does NO client-side
+mustache pass — it only **ammonia sanitizes** the pre-rendered `html_body` then injects. HTML
+(`apply_saved_outcome`): inject at `target_selector` with `placement_mode` (reuse the `html_injection`
+core + an idempotency marker keyed by the saved outcome's id alone, `rso-<id>`). JSON
+(`apply_saved_outcome_json`): serialize the sanitized HTML to a STRING and set it at `target_path` (reuse
+the `json_set`/`add_attribute` core). All resolve/inject failures are FAIL-OPEN (body served untouched).
+`apply_saved_outcome*` actions appear in `rre.feature_expressions[*]` and the test-panel `journey[]`
+exactly like `apply_outcome`/`apply_component`.
 
 ### 8. zen Integration Invariants (verified)
 
@@ -920,11 +1043,21 @@ the test-panel `journey[]` exactly like `apply_outcome`.
 Proxy calls:
 - `GET {backend_base_url}/api/v1/features?page_size=100` (cached, TTL same as active-version) to fetch
   all features; deserializes the `Page<FeatureRead>` shape.
-- For each feature, evaluates if it applies to the current request (based on the canvas + decision nodes).
+- For each feature, evaluates the single Rule Canvas's decision nodes to decide whether it applies to the
+  current request.
 - 404 / NO_LIVE_VERSION / any error -> fail open (pass-through).
 - `GET {backend_base_url}/api/v1/sites?page_size=100` (cached, TTL 30s) to fetch all sites; builds
   `SiteMap` keyed by `source_host:source_port`. 404 / error -> empty map (no site match, fallback to
   upstream_base_url).
+- `GET {backend_base_url}/api/v1/component-templates/{id}/resolve?version=default|N` (per-id, SWR
+  cached via `component_cache`) to resolve an `apply_component`/`apply_component_json` action's
+  Component template version. 404 -> `None` (fail-open, action skipped).
+- `GET {backend_base_url}/api/v1/saved-outcomes/{id}/resolve` (per-id, SWR cached via
+  `saved_outcome_cache`) to resolve an `apply_saved_outcome`/`apply_saved_outcome_json` action's
+  ALREADY-RENDERED HTML. 404 -> `None` (fail-open, action skipped). Note: `has_product`/`logged_in`
+  decisions do NOT call the backend — they evaluate purely against the `Identity` resolved from the
+  request (§1/§7); only save-time validation (`has_product_ref_exists`) checks `rre.products` on the
+  backend.
 
 `Placement` mirrored as `#[serde(rename_all="snake_case")] { Inline, StickyFooter, Popup }`.
 
