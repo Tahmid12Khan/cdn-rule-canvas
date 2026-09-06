@@ -121,9 +121,13 @@ fn has_rule(ds: &[rre_backend::error::ValidationDetail], rule_id: &str) -> bool 
 // 1.
 #[test]
 fn empty_graph_passes() {
-    assert!(
-        rule_graph_service::validate(&RuleGraph::default(), &HashSet::new(), &manifest()).is_ok()
-    );
+    assert!(rule_graph_service::validate(
+        &RuleGraph::default(),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 2.
@@ -145,7 +149,13 @@ fn complete_canvas_passes() {
         ],
         root_node_id: Some("s".to_string()),
     };
-    assert!(rule_graph_service::validate(&anon(canvas), &ids(&[oid]), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(canvas),
+        &ids(&[oid]),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 3.
@@ -161,6 +171,7 @@ fn missing_edge_target_fails() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -180,6 +191,7 @@ fn missing_edge_source_fails() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -201,6 +213,7 @@ fn duplicate_branch_fails() {
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "branch_unique"));
@@ -219,6 +232,7 @@ fn self_loop_cycle_fails() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -247,6 +261,7 @@ fn three_node_cycle_fails() {
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "no_cycles"));
@@ -265,6 +280,7 @@ fn end_with_outgoing_edge_fails() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -287,6 +303,7 @@ fn dangling_apply_outcome_ref_fails() {
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "apply_outcome_ref_exists"));
@@ -303,12 +320,11 @@ fn root_not_in_nodes_fails() {
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "root_in_nodes"));
-    assert!(ds
-        .iter()
-        .any(|d| d.loc == "rule_graph.canvas.root_node_id"));
+    assert!(ds.iter().any(|d| d.loc == "rule_graph.canvas.root_node_id"));
 }
 
 // 11.
@@ -325,6 +341,7 @@ fn loc_index_points_at_offending_edge() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -347,6 +364,7 @@ fn errors_target_correct_node_index() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -407,7 +425,7 @@ fn worked_example_round_trips_and_validates() {
         Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
         Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
     ]);
-    assert!(rule_graph_service::validate(&graph, &valid, &manifest()).is_ok());
+    assert!(rule_graph_service::validate(&graph, &valid, &HashSet::new(), &manifest()).is_ok());
 }
 
 // 14. The same worked example, but with the outcome ids NOT registered, fails
@@ -439,6 +457,7 @@ fn worked_example_with_unknown_outcomes_fails() {
     let ds = details(rule_graph_service::validate(
         &graph,
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "apply_outcome_ref_exists"));
@@ -465,7 +484,13 @@ fn meta_tags_exists_operator_valid() {
         ],
         root_node_id: Some("s".to_string()),
     };
-    assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(canvas),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 16. processor_kind_known: an unknown processor type fails.
@@ -482,6 +507,7 @@ fn unknown_processor_kind_fails() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -505,6 +531,7 @@ fn select_value_outside_options_fails() {
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
         &HashSet::new(),
+        &HashSet::new(),
         &manifest(),
     ));
     assert!(has_rule(&ds, "processor_field_option"));
@@ -526,6 +553,7 @@ fn meta_tags_value_required_unless_exists() {
     };
     let ds = details(rule_graph_service::validate(
         &anon(canvas),
+        &HashSet::new(),
         &HashSet::new(),
         &manifest(),
     ));
@@ -553,7 +581,13 @@ fn unknown_extra_processor_fields_ignored() {
         ],
         root_node_id: Some("s".to_string()),
     };
-    assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(canvas),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 20. A JSON action pipeline (trim_json -> add_attribute) validates.
@@ -594,7 +628,13 @@ fn json_action_pipeline_validates() {
         ],
         root_node_id: Some("s".to_string()),
     };
-    assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(canvas),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 21. §6 empty-canvas normalization: an all-empty RuleGraph → start + end +
@@ -633,7 +673,7 @@ fn empty_canvas_normalizes_to_start_end() {
 
     // Normalized graph must pass end-to-end validation.
     assert!(
-        rule_graph_service::validate(&graph, &HashSet::new(), &manifest()).is_ok(),
+        rule_graph_service::validate(&graph, &HashSet::new(), &HashSet::new(), &manifest()).is_ok(),
         "normalized graph must pass validation"
     );
 }
@@ -689,16 +729,34 @@ fn canvas_with_custom_label(custom_label: Option<&str>) -> CanvasGraph {
 #[test]
 fn custom_label_snake_case_valid() {
     let canvas = canvas_with_custom_label(Some("my_custom_name_2"));
-    assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(canvas),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 24. v2.3 expression_custom_label_invalid: empty string and absent both pass.
 #[test]
 fn custom_label_empty_and_absent_valid() {
     let empty = canvas_with_custom_label(Some(""));
-    assert!(rule_graph_service::validate(&anon(empty), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(empty),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
     let absent = canvas_with_custom_label(None);
-    assert!(rule_graph_service::validate(&anon(absent), &HashSet::new(), &manifest()).is_ok());
+    assert!(rule_graph_service::validate(
+        &anon(absent),
+        &HashSet::new(),
+        &HashSet::new(),
+        &manifest()
+    )
+    .is_ok());
 }
 
 // 25. v2.3 expression_custom_label_invalid: uppercase, spaces, and
@@ -709,6 +767,7 @@ fn custom_label_invalid_forms_fail() {
         let canvas = canvas_with_custom_label(Some(bad));
         let ds = details(rule_graph_service::validate(
             &anon(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));

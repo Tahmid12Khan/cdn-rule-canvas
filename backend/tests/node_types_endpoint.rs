@@ -56,18 +56,21 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
             "trim_json",
             "add_attribute",
             "apply_outcome",
-            "site_match"
+            "site_match",
+            "logged_in",
+            "has_product"
         ]
     );
 
-    // coming_soon flag is present on a disabled category.
+    // `user` shipped (logged_in/has_product), so it's no longer coming_soon;
+    // the raw manifest omits the absent key entirely (verbatim, not synthesized).
     let user = body["categories"]
         .as_array()
         .unwrap()
         .iter()
         .find(|c| c["id"] == "user")
         .unwrap();
-    assert_eq!(user["coming_soon"], true);
+    assert!(user.get("coming_soon").is_none());
 
     // The served body equals the AppState's raw manifest JSON (verbatim).
     assert_eq!(&body, &*db.state.node_manifest_json);

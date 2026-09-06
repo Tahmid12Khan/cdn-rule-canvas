@@ -2,7 +2,7 @@
   "categories": [
     { "id": "session", "label": "Session" },
     { "id": "request", "label": "Request" },
-    { "id": "user", "label": "User", "coming_soon": true },
+    { "id": "user", "label": "User" },
     { "id": "content", "label": "Content" },
     { "id": "json", "label": "JSON" },
     { "id": "decision-data", "label": "Decision Data", "coming_soon": true },
@@ -257,6 +257,36 @@
           "default": "",
           "placeholder": "Search sites by name…",
           "required_message": "Pick a site to match"
+        }
+      ],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    },
+    {
+      "kind": "logged_in",
+      "label": "Logged In",
+      "category": "user",
+      "applies_to": "all",
+      "node_kind": "decision",
+      "summary": "Branch on whether the visitor is logged in",
+      "fields": [],
+      "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }
+    },
+    {
+      "kind": "has_product",
+      "label": "Has Product",
+      "category": "user",
+      "applies_to": "all",
+      "node_kind": "decision",
+      "summary": "Branch on whether the visitor holds a chosen product",
+      "fields": [
+        {
+          "name": "product",
+          "label": "Product",
+          "control": "product_select",
+          "required": true,
+          "default": "",
+          "placeholder": "Search products…",
+          "required_message": "Pick a product to match"
         }
       ],
       "output": { "branches": [ { "id": "yes", "label": "Yes" }, { "id": "no", "label": "No" } ] }

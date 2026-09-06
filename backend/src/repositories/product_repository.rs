@@ -1,6 +1,8 @@
 //! Product data-access (RUNTIME SQLx only). Returns [`Product`] models; never
 //! serde DTOs. All table refs are schema-qualified (`rre.products`).
 
+use std::collections::HashSet;
+
 use sqlx::PgPool;
 
 use crate::models::product::Product;
@@ -96,6 +98,14 @@ pub async fn update(
         .bind(clear_description)
         .fetch_optional(pool)
         .await
+}
+
+/// All product labels (membership set for `has_product_ref_exists` validation).
+pub async fn list_all_labels(pool: &PgPool) -> Result<HashSet<String>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT label FROM rre.products")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|(label,)| label).collect())
 }
 
 /// Delete a product by label. Returns the number of rows deleted (0 when absent).

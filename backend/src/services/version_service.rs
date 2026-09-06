@@ -12,7 +12,9 @@ use uuid::Uuid;
 use crate::{
     error::{AppError, AppResult},
     models::{component::Component, enums::VersionStatus, outcome::Outcome, version::Version},
-    repositories::{component_repository, outcome_repository, version_repository as repo},
+    repositories::{
+        component_repository, outcome_repository, product_repository, version_repository as repo,
+    },
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
         applicability::Applicability,
@@ -169,7 +171,8 @@ pub async fn create_version(
             .iter()
             .map(|o| o.id)
             .collect();
-    rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
+    let valid_product_labels = product_repository::list_all_labels(pool).await?;
+    rule_graph_service::validate(&graph, &valid_outcome_ids, &valid_product_labels, manifest)?;
 
     // Applicability: caller-supplied (validated) when present, else carry forward
     // the source version's, else the default `{}`.
@@ -377,7 +380,13 @@ pub async fn update(
             let outcomes = outcome_repository::list_for_version(pool, version.id).await?;
             let valid_outcome_ids: std::collections::HashSet<Uuid> =
                 outcomes.iter().map(|o| o.id).collect();
-            rule_graph_service::validate(&graph, &valid_outcome_ids, manifest)?;
+            let valid_product_labels = product_repository::list_all_labels(pool).await?;
+            rule_graph_service::validate(
+                &graph,
+                &valid_outcome_ids,
+                &valid_product_labels,
+                manifest,
+            )?;
             Some(serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)
         }
         None => None,

@@ -208,6 +208,10 @@ pub enum Control {
     /// the manifest; the client queries `GET /api/v1/sites?q=` and stores the
     /// selected site's slug on the processor config.
     SiteSelect,
+    /// Dynamic searchable single-select of configured products. Options are NOT
+    /// in the manifest; the client queries `GET /api/v1/products?q=` and stores
+    /// the selected product's label.
+    ProductSelect,
 }
 
 /// Conditional-requirement clause: required unless a sibling field equals a value.
@@ -275,7 +279,9 @@ mod tests {
                 "trim_json",
                 "add_attribute",
                 "apply_outcome",
-                "site_match"
+                "site_match",
+                "logged_in",
+                "has_product"
             ]
         );
 
@@ -297,7 +303,20 @@ mod tests {
         assert_eq!(by_kind["site_match"].category, "request");
         assert_eq!(by_kind["site_match"].fields[0].control, Control::SiteSelect);
 
-        // 15 palette categories, with `user` flagged coming_soon and `json` not.
+        // `has_product` is a decision node in the `user` category whose `product`
+        // field uses the dynamic `product_select` control; `logged_in` is a
+        // decision node with no fields.
+        assert_eq!(by_kind["has_product"].node_kind, NodeKind::Decision);
+        assert_eq!(by_kind["has_product"].category, "user");
+        assert_eq!(
+            by_kind["has_product"].fields[0].control,
+            Control::ProductSelect
+        );
+        assert_eq!(by_kind["logged_in"].node_kind, NodeKind::Decision);
+        assert!(by_kind["logged_in"].fields.is_empty());
+
+        // 15 palette categories; `user` is no longer coming_soon (now that
+        // logged_in/has_product ship) and `json` never was.
         assert_eq!(loaded.typed.categories.len(), 15);
         let user = loaded
             .typed
@@ -305,7 +324,7 @@ mod tests {
             .iter()
             .find(|c| c.id == "user")
             .unwrap();
-        assert!(user.coming_soon);
+        assert!(!user.coming_soon);
         let json_cat = loaded
             .typed
             .categories

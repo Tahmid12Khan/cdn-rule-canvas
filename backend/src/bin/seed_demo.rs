@@ -532,7 +532,7 @@ mod tests {
             .expect("load manifest")
             .typed;
 
-        rule_graph_service::validate(&graph, &valid_outcome_ids, &manifest)
+        rule_graph_service::validate(&graph, &valid_outcome_ids, &HashSet::new(), &manifest)
             .expect("seed graph must validate");
 
         assert_eq!(
@@ -554,7 +554,7 @@ mod tests {
             .expect("load manifest")
             .typed;
 
-        rule_graph_service::validate(&graph, &HashSet::new(), &manifest)
+        rule_graph_service::validate(&graph, &HashSet::new(), &HashSet::new(), &manifest)
             .expect("json seed graph must validate");
 
         assert_eq!(

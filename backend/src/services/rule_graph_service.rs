@@ -24,6 +24,7 @@
 //! | `edge_source_kind` | edges originate only from start/decision/expression, never `end` |
 //! | `all_paths_reach_end` | every node reachable from the Start node can reach an `end` |
 //! | `apply_outcome_ref_exists` | an `apply_outcome` action's `outcome_id` exists for the version |
+//! | `has_product_ref_exists` | a `has_product` decision's `product` exists in `rre.products` |
 //! | `processor_kind_known` | a Decision/Expression node's `type` is a manifest `kind` |
 //! | `processor_field_required` | each required field (incl. unsatisfied `required_unless`) is present and non-empty |
 //! | `processor_field_option` | a `select` field's value is one of its `options[].value` |
@@ -84,16 +85,18 @@ fn normalize_canvas(canvas: &mut CanvasGraph) {
 ///
 /// `valid_outcome_ids` is the set of `rre.outcomes.id` values that belong to the
 /// version being edited; it backs the `apply_outcome_ref_exists` rule.
-/// `manifest` backs the processor rules (`processor_kind_known`,
-/// `processor_field_required`, `processor_field_option`). Callers (the version
-/// service) fetch the outcome-id set and supply the manifest from `AppState`
-/// before invoking validation.
+/// `valid_product_labels` is the set of `rre.products.label` values; it backs
+/// the `has_product_ref_exists` rule. `manifest` backs the processor rules
+/// (`processor_kind_known`, `processor_field_required`, `processor_field_option`).
+/// Callers (the version service) fetch the outcome-id and product-label sets
+/// and supply the manifest from `AppState` before invoking validation.
 ///
 /// Returns `Ok(())` when every canvas passes; otherwise an
 /// [`AppError::Validation`] carrying one [`ValidationDetail`] per violation.
 pub fn validate(
     graph: &RuleGraph,
     valid_outcome_ids: &HashSet<Uuid>,
+    valid_product_labels: &HashSet<String>,
     manifest: &NodeManifest,
 ) -> AppResult<()> {
     let mut details: Vec<ValidationDetail> = Vec::new();
@@ -104,6 +107,7 @@ pub fn validate(
             canvas_name,
             canvas,
             valid_outcome_ids,
+            valid_product_labels,
             &spec_by_kind,
             &mut details,
         );
@@ -121,6 +125,7 @@ fn validate_canvas(
     canvas: &'static str,
     graph: &CanvasGraph,
     valid_outcome_ids: &HashSet<Uuid>,
+    valid_product_labels: &HashSet<String>,
     spec_by_kind: &HashMap<&str, &NodeTypeSpec>,
     details: &mut Vec<ValidationDetail>,
 ) {
@@ -188,6 +193,7 @@ fn validate_canvas(
         match node {
             Node::Decision { processor, .. } => {
                 validate_processor(canvas, idx, processor, spec_by_kind, details);
+                validate_has_product_ref(canvas, idx, processor, valid_product_labels, details);
             }
             Node::Expression {
                 id,
@@ -446,6 +452,32 @@ fn validate_apply_outcome_ref(
                 loc,
                 format!("outcome_id '{shown}' not found in outcomes for this version"),
                 "apply_outcome_ref_exists",
+            ));
+        }
+    }
+}
+
+/// `has_product_ref_exists`: a Decision node whose `processor.type ==
+/// "has_product"` must carry a `product` present in `valid_product_labels`.
+/// Other processor kinds are ignored. Mirrors `validate_apply_outcome_ref`.
+fn validate_has_product_ref(
+    canvas: &'static str,
+    idx: usize,
+    processor: &ProcessorConfig,
+    valid_product_labels: &HashSet<String>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if processor.r#type != "has_product" {
+        return;
+    }
+    let product = processor.fields.get("product").and_then(|v| v.as_str());
+    match product {
+        Some(label) if valid_product_labels.contains(label) => {}
+        _ => {
+            details.push(ValidationDetail::new(
+                format!("rule_graph.{canvas}.nodes[{idx}].processor.product"),
+                "referenced product does not exist".to_string(),
+                "has_product_ref_exists",
             ));
         }
     }
@@ -745,7 +777,12 @@ mod tests {
     // 1. Empty graph is valid.
     #[test]
     fn empty_graph_is_valid() {
-        let res = validate(&RuleGraph::default(), &HashSet::new(), &manifest());
+        let res = validate(
+            &RuleGraph::default(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        );
         assert!(res.is_ok());
     }
 
@@ -770,7 +807,12 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let res = validate(&graph_with_canvas(canvas), &ids, &manifest());
+        let res = validate(
+            &graph_with_canvas(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest(),
+        );
         assert!(res.is_ok(), "expected ok, got {res:?}");
     }
 
@@ -787,6 +829,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -806,6 +849,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -827,6 +871,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"branch_unique"));
@@ -844,7 +889,13 @@ mod tests {
             ],
             root_node_id: None,
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 7. no_cycles: a self-loop is a cycle.
@@ -860,6 +911,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -880,6 +932,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -906,7 +959,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 10. end_terminal + edge_source_kind: an end node with an outgoing edge.
@@ -922,6 +981,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -946,6 +1006,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"apply_outcome_ref_exists"));
@@ -961,6 +1022,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -984,6 +1046,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(details
@@ -1001,6 +1064,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1033,7 +1097,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 16. processor_kind_known: an unknown processor `type` fails (no field checks).
@@ -1050,6 +1120,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1074,6 +1145,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1104,7 +1176,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 19. required_unless: meta_tags `value` is required when operator != "exists".
@@ -1124,6 +1202,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1146,6 +1225,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1173,7 +1253,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 22. all_paths_reach_end: a reachable dead-end decision fails (no path to end).
@@ -1186,6 +1272,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1207,7 +1294,13 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 24. start -> expression(apply_outcome) -> end passes (expression action
@@ -1225,7 +1318,13 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        assert!(validate(&graph_with_canvas(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
     }
 
     // 25. start_present: a non-empty canvas without a start node fails.
@@ -1238,6 +1337,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1258,6 +1358,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_present"));
@@ -1273,6 +1374,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1294,6 +1396,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_no_incoming"));
@@ -1309,6 +1412,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1330,7 +1434,12 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let details = details_of(validate(&graph_with_canvas(canvas), &ids, &manifest()));
+        let details = details_of(validate(
+            &graph_with_canvas(canvas),
+            &ids,
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(rule_ids(&details).contains(&"expression_single_out"));
     }
 
@@ -1357,6 +1466,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1387,6 +1497,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"processor_field_required"));
@@ -1414,6 +1525,75 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest()
+        )
+        .is_ok());
+    }
+
+    /// A `has_product` decision node referencing `product`.
+    fn decision_has_product(id: &str, product: &str) -> Node {
+        Node::Decision {
+            id: id.to_string(),
+            processor: processor(json!({"type": "has_product", "product": product})),
+            position: pos(),
+        }
+    }
+
+    // 34. has_product_ref_exists: an unknown product label is rejected.
+    #[test]
+    fn has_product_ref_exists_rejects_unknown_label() {
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                decision_has_product("d1", "ghost"),
+                end("y"),
+                end("n"),
+            ],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "y", Branch::Yes),
+                edge("e2", "d1", "n", Branch::No),
+            ],
+            root_node_id: None,
+        };
+        let details = details_of(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"has_product_ref_exists"));
+    }
+
+    // 35. has_product_ref_exists: a known product label passes.
+    #[test]
+    fn has_product_ref_exists_accepts_known_label() {
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                decision_has_product("d1", "premium"),
+                end("y"),
+                end("n"),
+            ],
+            edges: vec![
+                edge("e0", "s", "d1", Branch::Yes),
+                edge("e1", "d1", "y", Branch::Yes),
+                edge("e2", "d1", "n", Branch::No),
+            ],
+            root_node_id: None,
+        };
+        let mut valid_products = HashSet::new();
+        valid_products.insert("premium".to_string());
+        let res = validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &valid_products,
+            &manifest(),
+        );
+        assert!(res.is_ok(), "expected ok, got {res:?}");
     }
 }
