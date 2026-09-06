@@ -7,6 +7,7 @@ pub mod feature_service;
 pub mod outcome_service;
 pub mod product_service;
 pub mod rule_graph_service;
+pub mod saved_outcome_service;
 pub mod site_service;
 pub mod test_preset_service;
 pub mod version_service;

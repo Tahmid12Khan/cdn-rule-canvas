@@ -88,6 +88,12 @@ pub enum AppError {
     /// Delete builtin ShowContent outcome. → 409
     #[error("{0}")]
     BuiltinOutcomeProtected(String),
+    /// Saved-outcome id missing. → 404
+    #[error("{0}")]
+    SavedOutcomeNotFound(String),
+    /// A component is referenced by a saved outcome (FK RESTRICT). → 409
+    #[error("{0}")]
+    ComponentInUse(String),
     /// Unexpected internal error (never leaks DB text to the client). → 500
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -113,6 +119,8 @@ impl AppError {
             AppError::VersionEditLocked(_) => "VERSION_EDIT_LOCKED",
             AppError::InvalidStatusTransition(_) => "INVALID_STATUS_TRANSITION",
             AppError::BuiltinOutcomeProtected(_) => "BUILTIN_OUTCOME_PROTECTED",
+            AppError::SavedOutcomeNotFound(_) => "SAVED_OUTCOME_NOT_FOUND",
+            AppError::ComponentInUse(_) => "COMPONENT_IN_USE",
             AppError::Internal(_) => "INTERNAL_ERROR",
         }
     }
@@ -129,13 +137,15 @@ impl AppError {
             | AppError::OutcomeNotFound(_)
             | AppError::ComponentNotFound(_)
             | AppError::ComponentVersionNotFound(_)
+            | AppError::SavedOutcomeNotFound(_)
             | AppError::NoLiveVersion(_) => StatusCode::NOT_FOUND,
             AppError::SlugConflict(_)
             | AppError::ExecutionOrderConflict(_)
             | AppError::VersionEditLocked(_)
             | AppError::InvalidStatusTransition(_)
             | AppError::LastVersionProtected(_)
-            | AppError::BuiltinOutcomeProtected(_) => StatusCode::CONFLICT,
+            | AppError::BuiltinOutcomeProtected(_)
+            | AppError::ComponentInUse(_) => StatusCode::CONFLICT,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

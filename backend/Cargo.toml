@@ -48,6 +48,10 @@ dotenvy = "0.15"
 config = { version = "0.15", default-features = false, features = ["json"] }
 regex = "1"
 once_cell = "1"
+serde_with = "3"
+# mustache rendering for saved-outcome resolve (flat interpolation over the
+# saved outcome's own variables), matching the proxy's pinned version.
+mustache = "0.9"
 # Engine path dep (proxy is the primary consumer; included here per scaffold task spec).
 zen-engine = { path = "../core/engine" }
 

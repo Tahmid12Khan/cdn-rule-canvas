@@ -274,13 +274,29 @@ pub async fn update(
     Ok(build_read(component, versions))
 }
 
-/// Delete a component (cascades its versions). Absent → 404.
+/// Delete a component (cascades its versions). Absent → 404. Referenced by a
+/// saved outcome (FK RESTRICT) → 409 `COMPONENT_IN_USE`.
 pub async fn delete(pool: &PgPool, cid: Uuid) -> AppResult<()> {
-    let deleted = comp_repo::delete(pool, cid).await?;
+    let deleted = comp_repo::delete(pool, cid)
+        .await
+        .map_err(map_delete_error)?;
     if deleted == 0 {
         return Err(not_found(cid));
     }
     Ok(())
+}
+
+/// Map a pg foreign-key violation (a saved outcome still references this
+/// component) to a 409; else fall through to Internal.
+fn map_delete_error(err: sqlx::Error) -> AppError {
+    if let sqlx::Error::Database(db_err) = &err {
+        if db_err.code().as_deref() == Some("23503") {
+            return AppError::ComponentInUse(
+                "Component is referenced by a saved outcome and cannot be deleted".to_string(),
+            );
+        }
+    }
+    err.into()
 }
 
 /// Create a new version: lock the component's versions, take `MAX + 1`, clone

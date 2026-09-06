@@ -325,6 +325,74 @@
       "output": { "branches": [ { "id": "out", "label": "Next" } ] }
     },
     {
+      "kind": "apply_saved_outcome",
+      "label": "Apply Saved Outcome",
+      "category": "content",
+      "applies_to": "html",
+      "node_kind": "expression",
+      "summary": "Inject a saved Outcomes Library entry into the page",
+      "fields": [
+        {
+          "name": "saved_outcome_id",
+          "label": "Outcome",
+          "control": "saved_outcome_select",
+          "required": true,
+          "default": "",
+          "required_message": "Pick a saved outcome"
+        },
+        {
+          "name": "target_selector",
+          "label": "Target selector",
+          "control": "text",
+          "required": true,
+          "placeholder": "main .article-body",
+          "required_message": "Enter a CSS selector"
+        },
+        {
+          "name": "placement_mode",
+          "label": "Placement",
+          "control": "select",
+          "required": true,
+          "default": "append",
+          "options": [
+            { "value": "replace", "label": "replace" },
+            { "value": "append", "label": "append" },
+            { "value": "prepend", "label": "prepend" },
+            { "value": "before", "label": "before" },
+            { "value": "after", "label": "after" }
+          ]
+        }
+      ],
+      "output": { "branches": [ { "id": "out", "label": "Next" } ] }
+    },
+    {
+      "kind": "apply_saved_outcome_json",
+      "label": "Apply Saved Outcome (JSON)",
+      "category": "json",
+      "applies_to": "json",
+      "node_kind": "expression",
+      "summary": "Set a saved Outcomes Library entry's rendered HTML at a JSON path",
+      "fields": [
+        {
+          "name": "saved_outcome_id",
+          "label": "Outcome",
+          "control": "saved_outcome_select",
+          "required": true,
+          "default": "",
+          "required_message": "Pick a saved outcome"
+        },
+        {
+          "name": "target_path",
+          "label": "Target path",
+          "control": "text",
+          "required": true,
+          "placeholder": "$.content.html",
+          "required_message": "Enter a JSON path"
+        }
+      ],
+      "output": { "branches": [ { "id": "out", "label": "Next" } ] }
+    },
+    {
       "kind": "site_match",
       "label": "Site Match",
       "category": "request",

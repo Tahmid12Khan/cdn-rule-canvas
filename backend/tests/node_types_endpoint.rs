@@ -58,6 +58,8 @@ async fn node_types_endpoint_serves_manifest_verbatim() {
             "apply_outcome",
             "apply_component",
             "apply_component_json",
+            "apply_saved_outcome",
+            "apply_saved_outcome_json",
             "site_match",
             "logged_in",
             "has_product"

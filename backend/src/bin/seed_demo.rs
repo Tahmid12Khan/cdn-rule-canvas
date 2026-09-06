@@ -668,6 +668,7 @@ mod tests {
             &valid_outcome_ids,
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest,
         )
         .expect("seed graph must validate");
@@ -698,6 +699,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &valid_component_ids,
+            &HashSet::new(),
             &manifest,
         )
         .expect("draft graph must validate");
@@ -726,6 +728,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest,
         )
         .expect_err("unknown component must fail validation");
@@ -750,6 +753,7 @@ mod tests {
 
         rule_graph_service::validate(
             &graph,
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),

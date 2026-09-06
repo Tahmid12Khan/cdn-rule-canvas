@@ -223,6 +223,12 @@ pub enum Control {
     /// option-membership validation; `apply_component_version_valid` covers
     /// well-formedness.
     ComponentVersionSelect,
+    /// Dynamic single-select of Outcomes Library entries. Options are NOT in
+    /// the manifest; the client queries `GET /api/v1/saved-outcomes` and stores
+    /// the selected entry's UUID on the action config (the
+    /// `saved_outcome_ref_exists` rule covers membership). Skips option-
+    /// membership validation, like `OutcomeSelect`.
+    SavedOutcomeSelect,
 }
 
 /// Conditional-requirement clause: required unless a sibling field equals a value.
@@ -292,6 +298,8 @@ mod tests {
                 "apply_outcome",
                 "apply_component",
                 "apply_component_json",
+                "apply_saved_outcome",
+                "apply_saved_outcome_json",
                 "site_match",
                 "logged_in",
                 "has_product"

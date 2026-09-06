@@ -14,7 +14,7 @@ use crate::{
     models::{component::Component, enums::VersionStatus, outcome::Outcome, version::Version},
     repositories::{
         component_repository, component_template_version_repository, outcome_repository,
-        product_repository, version_repository as repo,
+        product_repository, saved_outcome_repository, version_repository as repo,
     },
     schemas::{
         active_version::{ActiveComponent, ActiveOutcome, ActiveVersionRead},
@@ -174,11 +174,16 @@ pub async fn create_version(
             .collect();
     let valid_product_labels = product_repository::list_all_labels(pool).await?;
     let valid_component_ids = existing_component_ids(&mut *tx, &graph).await?;
+    let valid_saved_outcome_ids: HashSet<Uuid> = saved_outcome_repository::list_all_ids(pool)
+        .await?
+        .into_iter()
+        .collect();
     rule_graph_service::validate(
         &graph,
         &valid_outcome_ids,
         &valid_product_labels,
         &valid_component_ids,
+        &valid_saved_outcome_ids,
         manifest,
     )?;
 
@@ -421,11 +426,17 @@ pub async fn update(
                 outcomes.iter().map(|o| o.id).collect();
             let valid_product_labels = product_repository::list_all_labels(pool).await?;
             let valid_component_ids = existing_component_ids(pool, &graph).await?;
+            let valid_saved_outcome_ids: HashSet<Uuid> =
+                saved_outcome_repository::list_all_ids(pool)
+                    .await?
+                    .into_iter()
+                    .collect();
             rule_graph_service::validate(
                 &graph,
                 &valid_outcome_ids,
                 &valid_product_labels,
                 &valid_component_ids,
+                &valid_saved_outcome_ids,
                 manifest,
             )?;
             Some(serde_json::to_value(&graph).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?)

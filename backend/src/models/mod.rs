@@ -9,6 +9,7 @@ pub mod component_template;
 pub mod feature;
 pub mod outcome;
 pub mod product;
+pub mod saved_outcome;
 pub mod site;
 pub mod test_preset;
 pub mod version;

@@ -27,6 +27,7 @@
 //! | `has_product_ref_exists` | a `has_product` decision's `product` exists in `rre.products` |
 //! | `apply_component_ref_exists` | an `apply_component`/`apply_component_json` action's `component_id` is a UUID present in `rre.component_templates` |
 //! | `apply_component_version_valid` | such an action's `version` is the string `"default"` or a positive integer (well-formedness only; drift is fail-open at the proxy) |
+//! | `saved_outcome_ref_exists` | an `apply_saved_outcome`/`apply_saved_outcome_json` action's `saved_outcome_id` is a UUID present in `rre.saved_outcomes` |
 //! | `processor_kind_known` | a Decision/Expression node's `type` is a manifest `kind` |
 //! | `processor_field_required` | each required field (incl. unsatisfied `required_unless`) is present and non-empty |
 //! | `processor_field_option` | a `select` field's value is one of its `options[].value` |
@@ -90,11 +91,13 @@ fn normalize_canvas(canvas: &mut CanvasGraph) {
 /// `valid_product_labels` is the set of `rre.products.label` values; it backs
 /// the `has_product_ref_exists` rule. `valid_component_ids` is the set of
 /// `rre.component_templates.id` values that exist; it backs the
-/// `apply_component_ref_exists` rule. `manifest` backs the processor rules
+/// `apply_component_ref_exists` rule. `valid_saved_outcome_ids` is the set of
+/// `rre.saved_outcomes.id` values that exist; it backs the
+/// `saved_outcome_ref_exists` rule. `manifest` backs the processor rules
 /// (`processor_kind_known`, `processor_field_required`, `processor_field_option`).
-/// Callers (the version service) fetch the outcome-id, product-label, and
-/// component-id sets and supply the manifest from `AppState` before invoking
-/// validation.
+/// Callers (the version service) fetch the outcome-id, product-label,
+/// component-id, and saved-outcome-id sets and supply the manifest from
+/// `AppState` before invoking validation.
 ///
 /// Returns `Ok(())` when every canvas passes; otherwise an
 /// [`AppError::Validation`] carrying one [`ValidationDetail`] per violation.
@@ -103,6 +106,7 @@ pub fn validate(
     valid_outcome_ids: &HashSet<Uuid>,
     valid_product_labels: &HashSet<String>,
     valid_component_ids: &HashSet<Uuid>,
+    valid_saved_outcome_ids: &HashSet<Uuid>,
     manifest: &NodeManifest,
 ) -> AppResult<()> {
     let mut details: Vec<ValidationDetail> = Vec::new();
@@ -115,6 +119,7 @@ pub fn validate(
             valid_outcome_ids,
             valid_product_labels,
             valid_component_ids,
+            valid_saved_outcome_ids,
             &spec_by_kind,
             &mut details,
         );
@@ -134,6 +139,7 @@ fn validate_canvas(
     valid_outcome_ids: &HashSet<Uuid>,
     valid_product_labels: &HashSet<String>,
     valid_component_ids: &HashSet<Uuid>,
+    valid_saved_outcome_ids: &HashSet<Uuid>,
     spec_by_kind: &HashMap<&str, &NodeTypeSpec>,
     details: &mut Vec<ValidationDetail>,
 ) {
@@ -213,6 +219,7 @@ fn validate_canvas(
                 validate_apply_outcome_ref(canvas, idx, action, valid_outcome_ids, details);
                 validate_apply_component_ref(canvas, idx, action, valid_component_ids, details);
                 validate_apply_component_version(canvas, idx, action, details);
+                validate_saved_outcome_ref(canvas, idx, action, valid_saved_outcome_ids, details);
                 validate_custom_label(canvas, id, custom_label.as_deref(), details);
             }
             Node::Start { .. } | Node::End { .. } => {}
@@ -568,6 +575,43 @@ fn is_apply_component(action_type: &str) -> bool {
     action_type == "apply_component" || action_type == "apply_component_json"
 }
 
+/// `saved_outcome_ref_exists`: an expression node whose `action.type` is
+/// `apply_saved_outcome`/`apply_saved_outcome_json` has `action.saved_outcome_id`
+/// present in `valid_saved_outcome_ids`. Mirrors `validate_apply_component_ref`.
+fn validate_saved_outcome_ref(
+    canvas: &'static str,
+    idx: usize,
+    action: &ProcessorConfig,
+    valid_saved_outcome_ids: &HashSet<Uuid>,
+    details: &mut Vec<ValidationDetail>,
+) {
+    if action.r#type != "apply_saved_outcome" && action.r#type != "apply_saved_outcome_json" {
+        return;
+    }
+    let loc = format!("rule_graph.{canvas}.nodes[{idx}]");
+
+    let raw = action.fields.get("saved_outcome_id");
+    let parsed: Option<Uuid> = match raw {
+        Some(Value::String(s)) => Uuid::parse_str(s).ok(),
+        _ => None,
+    };
+    match parsed {
+        Some(id) if valid_saved_outcome_ids.contains(&id) => {}
+        _ => {
+            let shown = match raw {
+                Some(Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => "<missing>".to_string(),
+            };
+            details.push(ValidationDetail::new(
+                loc,
+                format!("saved_outcome_id '{shown}' not found in saved outcomes"),
+                "saved_outcome_ref_exists",
+            ));
+        }
+    }
+}
+
 /// `expression_custom_label_invalid`: an expression node's optional
 /// `custom_label`, when present and non-empty (after trim), must be snake_case
 /// (`^[a-z0-9]+(_[a-z0-9]+)*$`). An empty/absent value is valid (no custom name).
@@ -867,6 +911,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         );
         assert!(res.is_ok());
@@ -898,6 +943,7 @@ mod tests {
             &ids,
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         );
         assert!(res.is_ok(), "expected ok, got {res:?}");
@@ -919,6 +965,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"edge_endpoint_exists"));
@@ -937,6 +984,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -962,6 +1010,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"branch_unique"));
@@ -981,6 +1030,7 @@ mod tests {
         };
         assert!(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1005,6 +1055,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"no_cycles"));
@@ -1024,6 +1075,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1057,6 +1109,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1075,6 +1128,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1103,6 +1157,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"apply_outcome_ref_exists"));
@@ -1118,6 +1173,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1145,6 +1201,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(details
@@ -1162,6 +1219,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1201,6 +1259,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1220,6 +1279,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1246,6 +1306,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1283,6 +1344,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1308,6 +1370,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"processor_field_required"));
@@ -1329,6 +1392,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1363,6 +1427,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1378,6 +1443,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1406,6 +1472,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1431,6 +1498,7 @@ mod tests {
             &ids,
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest()
         )
         .is_ok());
@@ -1446,6 +1514,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1470,6 +1539,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_present"));
@@ -1485,6 +1555,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1510,6 +1581,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"start_no_incoming"));
@@ -1525,6 +1597,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1551,6 +1624,7 @@ mod tests {
         let details = details_of(validate(
             &graph_with_canvas(canvas),
             &ids,
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &manifest(),
@@ -1581,6 +1655,7 @@ mod tests {
         };
         let details = details_of(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1615,6 +1690,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"processor_field_required"));
@@ -1644,6 +1720,7 @@ mod tests {
         };
         assert!(validate(
             &graph_with_canvas(canvas),
+            &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
@@ -1683,6 +1760,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"has_product_ref_exists"));
@@ -1712,6 +1790,79 @@ mod tests {
             &HashSet::new(),
             &valid_products,
             &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        );
+        assert!(res.is_ok(), "expected ok, got {res:?}");
+    }
+
+    /// An `apply_saved_outcome` expression node referencing `saved_outcome_id`.
+    fn expression_apply_saved_outcome(id: &str, saved_outcome_id: Uuid) -> Node {
+        Node::Expression {
+            id: id.to_string(),
+            action: processor(json!({
+                "type": "apply_saved_outcome",
+                "saved_outcome_id": saved_outcome_id.to_string(),
+                "target_selector": "main",
+                "placement_mode": "append"
+            })),
+            custom_label: None,
+            position: pos(),
+        }
+    }
+
+    // 36. saved_outcome_ref_exists: an unknown saved_outcome_id is rejected.
+    #[test]
+    fn saved_outcome_ref_exists_rejects_unknown_id() {
+        let sid = Uuid::new_v4();
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                expression_apply_saved_outcome("a", sid),
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
+            ],
+            root_node_id: None,
+        };
+        // empty valid-id set => the reference is dangling.
+        let details = details_of(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        assert!(rule_ids(&details).contains(&"saved_outcome_ref_exists"));
+    }
+
+    // 37. saved_outcome_ref_exists: a known saved_outcome_id passes.
+    #[test]
+    fn saved_outcome_ref_exists_accepts_known_id() {
+        let sid = Uuid::new_v4();
+        let canvas = CanvasGraph {
+            nodes: vec![
+                start("s"),
+                expression_apply_saved_outcome("a", sid),
+                end("e"),
+            ],
+            edges: vec![
+                edge("e0", "s", "a", Branch::Yes),
+                edge("e1", "a", "e", Branch::Yes),
+            ],
+            root_node_id: Some("s".to_string()),
+        };
+        let mut valid_saved_outcomes = HashSet::new();
+        valid_saved_outcomes.insert(sid);
+        let res = validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &valid_saved_outcomes,
             &manifest(),
         );
         assert!(res.is_ok(), "expected ok, got {res:?}");
