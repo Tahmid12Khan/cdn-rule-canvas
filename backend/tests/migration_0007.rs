@@ -104,11 +104,21 @@ async fn migration_0007_transforms_outcomes_to_pipeline() {
         .expect("read migrated graph")
         .get(0);
 
-    // It parses into the new typed shape and validates against the manifest.
-    let graph: RuleGraph =
-        serde_json::from_value(migrated.clone()).expect("migrated graph parses to new shape");
+    // Migration 0007 predates 0013 (the single-canvas collapse), so at this
+    // point in migration history the row is still the 3-key
+    // {anonymous, registered, customer} shape — index it as raw JSON rather
+    // than parsing the top-level object into the (now single-canvas)
+    // `RuleGraph`. The `anonymous` canvas object itself is still a
+    // `CanvasGraph`, which hasn't changed shape, so parse that piece and wrap
+    // it to keep validating against the current manifest-driven validator.
+    let canvas_graph: rre_backend::schemas::rule_graph::CanvasGraph =
+        serde_json::from_value(migrated["anonymous"].clone())
+            .expect("migrated anonymous canvas parses to new shape");
+    let graph = RuleGraph {
+        canvas: canvas_graph,
+    };
     assert_eq!(
-        graph.anonymous.root_node_id.as_deref(),
+        graph.canvas.root_node_id.as_deref(),
         Some("start"),
         "root anchored at the injected start node"
     );

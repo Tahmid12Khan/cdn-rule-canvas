@@ -173,6 +173,6 @@ async fn active_version_http_endpoint_returns_payload() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["version_number"], vnum);
-    assert!(body["rule_graph"]["anonymous"].is_object());
+    assert!(body["rule_graph"]["canvas"].is_object());
     assert!(body["outcomes"].is_array());
 }

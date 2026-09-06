@@ -507,7 +507,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
     // (one per node), wired start -> a-builtin -> a-paywall -> end.
     let pos = Position { x: 0.0, y: 0.0 };
     let graph = RuleGraph {
-        anonymous: CanvasGraph {
+        canvas: CanvasGraph {
             nodes: vec![
                 Node::Start {
                     id: "start".to_string(),
@@ -542,7 +542,6 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
             ],
             root_node_id: Some("start".to_string()),
         },
-        ..Default::default()
     };
 
     // (a) Create v2 with the source-referencing graph — must NOT be a 422.
@@ -576,7 +575,7 @@ async fn create_version_with_rule_graph_remaps_outcome_refs() {
     let v1_outcome_id_set: HashSet<Uuid> = v1_outcome_ids.iter().copied().collect();
     let referenced: Vec<Uuid> = v2
         .rule_graph
-        .anonymous
+        .canvas
         .nodes
         .iter()
         .filter_map(apply_outcome_id)

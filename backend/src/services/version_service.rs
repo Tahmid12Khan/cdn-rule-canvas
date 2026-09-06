@@ -278,8 +278,8 @@ async fn carry_forward_outcomes(
     Ok(id_map)
 }
 
-/// Rewrite every `apply_outcome` expression action's `outcome_id` across all
-/// three canvases through `map` (source id -> new id). Keys absent from `map`
+/// Rewrite every `apply_outcome` expression action's `outcome_id` in the Rule
+/// Canvas through `map` (source id -> new id). Keys absent from `map`
 /// are left untouched, as are decision nodes, edges, positions, and
 /// `root_node_id`. The `outcome_id` lives in the action's flattened field map as
 /// a UUID string; non-`apply_outcome` actions and unparsable ids are skipped.
@@ -287,28 +287,22 @@ fn remap_outcome_refs(graph: &mut RuleGraph, map: &HashMap<Uuid, Uuid>) {
     if map.is_empty() {
         return;
     }
-    for canvas in [
-        &mut graph.anonymous,
-        &mut graph.registered,
-        &mut graph.customer,
-    ] {
-        for node in &mut canvas.nodes {
-            if let Node::Expression { action, .. } = node {
-                if action.r#type != "apply_outcome" {
-                    continue;
-                }
-                let Some(serde_json::Value::String(s)) = action.fields.get("outcome_id") else {
-                    continue;
-                };
-                let Ok(old_id) = Uuid::parse_str(s) else {
-                    continue;
-                };
-                if let Some(new_id) = map.get(&old_id) {
-                    action.fields.insert(
-                        "outcome_id".to_string(),
-                        serde_json::Value::String(new_id.to_string()),
-                    );
-                }
+    for node in &mut graph.canvas.nodes {
+        if let Node::Expression { action, .. } = node {
+            if action.r#type != "apply_outcome" {
+                continue;
+            }
+            let Some(serde_json::Value::String(s)) = action.fields.get("outcome_id") else {
+                continue;
+            };
+            let Ok(old_id) = Uuid::parse_str(s) else {
+                continue;
+            };
+            if let Some(new_id) = map.get(&old_id) {
+                action.fields.insert(
+                    "outcome_id".to_string(),
+                    serde_json::Value::String(new_id.to_string()),
+                );
             }
         }
     }
@@ -780,7 +774,7 @@ mod tests {
         };
         let read = to_read(v).expect("parse");
         assert_eq!(read.version_number, 1);
-        assert!(read.rule_graph.anonymous.nodes.is_empty());
+        assert!(read.rule_graph.canvas.nodes.is_empty());
         // Applicability round-trips out of the stored JSONB.
         assert_eq!(
             read.applicability.html_selector.as_deref(),

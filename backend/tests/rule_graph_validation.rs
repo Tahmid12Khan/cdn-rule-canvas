@@ -100,10 +100,7 @@ fn edge(id: &str, src: &str, tgt: &str, branch: Branch) -> Edge {
 }
 
 fn anon(canvas: CanvasGraph) -> RuleGraph {
-    RuleGraph {
-        anonymous: canvas,
-        ..Default::default()
-    }
+    RuleGraph { canvas }
 }
 
 fn ids(list: &[Uuid]) -> HashSet<Uuid> {
@@ -311,7 +308,7 @@ fn root_not_in_nodes_fails() {
     assert!(has_rule(&ds, "root_in_nodes"));
     assert!(ds
         .iter()
-        .any(|d| d.loc == "rule_graph.anonymous.root_node_id"));
+        .any(|d| d.loc == "rule_graph.canvas.root_node_id"));
 }
 
 // 11.
@@ -333,30 +330,29 @@ fn loc_index_points_at_offending_edge() {
     ));
     assert!(ds
         .iter()
-        .any(|d| d.loc == "rule_graph.anonymous.edges[2]" && d.rule_id == "edge_endpoint_exists"));
+        .any(|d| d.loc == "rule_graph.canvas.edges[2]" && d.rule_id == "edge_endpoint_exists"));
 }
 
-// 12.
+// 12. Error `loc`s point at the offending node's actual index within the
+//     single canvas (not just the canvas prefix).
 #[test]
-fn errors_target_correct_canvas() {
+fn errors_target_correct_node_index() {
     let canvas = CanvasGraph {
-        nodes: vec![start("s"), decision("d"), end("e")],
+        nodes: vec![start("s1"), start("s2"), end("e")],
         edges: vec![
-            edge("e0", "s", "d", Branch::Yes),
-            edge("e1", "d", "ghost", Branch::Yes),
+            edge("e0", "s1", "e", Branch::Yes),
+            edge("e1", "s2", "e", Branch::Yes),
         ],
         root_node_id: None,
     };
-    let graph = RuleGraph {
-        customer: canvas,
-        ..Default::default()
-    };
     let ds = details(rule_graph_service::validate(
-        &graph,
+        &anon(canvas),
         &HashSet::new(),
         &manifest(),
     ));
-    assert!(ds.iter().all(|d| d.loc.starts_with("rule_graph.customer.")));
+    assert!(ds
+        .iter()
+        .any(|d| d.loc == "rule_graph.canvas.nodes[1]" && d.rule_id == "start_present"));
 }
 
 // 13. The canonical worked example (expression-node flow) must deserialize and
@@ -364,7 +360,7 @@ fn errors_target_correct_canvas() {
 #[test]
 fn worked_example_round_trips_and_validates() {
     let json = serde_json::json!({
-      "anonymous": {
+      "canvas": {
         "root_node_id": "start",
         "nodes": [
           { "kind": "start", "id": "start", "position": { "x": 0, "y": 200 } },
@@ -396,8 +392,6 @@ fn worked_example_round_trips_and_validates() {
           { "id": "e_end_content", "source_node_id": "a_content", "target_node_id": "end", "branch": "yes" }
         ]
       },
-      "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-      "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
 
     let graph: RuleGraph =
@@ -421,7 +415,7 @@ fn worked_example_round_trips_and_validates() {
 #[test]
 fn worked_example_with_unknown_outcomes_fails() {
     let json = serde_json::json!({
-      "anonymous": {
+      "canvas": {
         "root_node_id": "start",
         "nodes": [
           { "kind": "start", "id": "start", "position": { "x": 0, "y": 200 } },
@@ -440,8 +434,6 @@ fn worked_example_with_unknown_outcomes_fails() {
           { "id": "e_end_content", "source_node_id": "a_content", "target_node_id": "end", "branch": "yes" }
         ]
       },
-      "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-      "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
     let graph: RuleGraph = serde_json::from_value(json).unwrap();
     let ds = details(rule_graph_service::validate(
@@ -605,43 +597,39 @@ fn json_action_pipeline_validates() {
     assert!(rule_graph_service::validate(&anon(canvas), &HashSet::new(), &manifest()).is_ok());
 }
 
-// 21. §6 empty-canvas normalization: all-empty RuleGraph → start + end + e_start_end
-//     on every canvas; root_node_id == "start"; normalized graph passes validation.
+// 21. §6 empty-canvas normalization: an all-empty RuleGraph → start + end +
+//     e_start_end on the canvas; root_node_id == "start"; normalized graph
+//     passes validation.
 #[test]
 fn empty_canvas_normalizes_to_start_end() {
     let mut graph = RuleGraph::default();
     rule_graph_service::normalize(&mut graph);
 
-    for (name, canvas) in [
-        ("anonymous", &graph.anonymous),
-        ("registered", &graph.registered),
-        ("customer", &graph.customer),
-    ] {
-        assert_eq!(canvas.nodes.len(), 2, "{name}: expected 2 nodes");
-        assert_eq!(canvas.edges.len(), 1, "{name}: expected 1 edge");
-        assert_eq!(
-            canvas.root_node_id.as_deref(),
-            Some("start"),
-            "{name}: root_node_id must be 'start'"
-        );
+    let canvas = &graph.canvas;
+    assert_eq!(canvas.nodes.len(), 2, "expected 2 nodes");
+    assert_eq!(canvas.edges.len(), 1, "expected 1 edge");
+    assert_eq!(
+        canvas.root_node_id.as_deref(),
+        Some("start"),
+        "root_node_id must be 'start'"
+    );
 
-        let start_node = canvas.nodes.iter().find(|n| n.id() == "start");
-        let end_node = canvas.nodes.iter().find(|n| n.id() == "end");
-        assert!(
-            start_node.map(|n| n.is_start()).unwrap_or(false),
-            "{name}: missing start node"
-        );
-        assert!(
-            end_node.map(|n| n.is_end()).unwrap_or(false),
-            "{name}: missing end node"
-        );
+    let start_node = canvas.nodes.iter().find(|n| n.id() == "start");
+    let end_node = canvas.nodes.iter().find(|n| n.id() == "end");
+    assert!(
+        start_node.map(|n| n.is_start()).unwrap_or(false),
+        "missing start node"
+    );
+    assert!(
+        end_node.map(|n| n.is_end()).unwrap_or(false),
+        "missing end node"
+    );
 
-        let e = &canvas.edges[0];
-        assert_eq!(e.id, "e_start_end", "{name}: edge id");
-        assert_eq!(e.source_node_id, "start", "{name}: edge source");
-        assert_eq!(e.target_node_id, "end", "{name}: edge target");
-        assert_eq!(e.branch, Branch::Yes, "{name}: edge branch");
-    }
+    let e = &canvas.edges[0];
+    assert_eq!(e.id, "e_start_end", "edge id");
+    assert_eq!(e.source_node_id, "start", "edge source");
+    assert_eq!(e.target_node_id, "end", "edge target");
+    assert_eq!(e.branch, Branch::Yes, "edge branch");
 
     // Normalized graph must pass end-to-end validation.
     assert!(
@@ -650,12 +638,11 @@ fn empty_canvas_normalizes_to_start_end() {
     );
 }
 
-// 22. §6 empty-canvas normalization: a non-empty canvas is left untouched;
-//     empty siblings still receive the default graph.
+// 22. §6 empty-canvas normalization: a non-empty canvas is left untouched.
 #[test]
 fn non_empty_canvas_not_touched_by_normalize() {
     let mut graph = RuleGraph {
-        anonymous: CanvasGraph {
+        canvas: CanvasGraph {
             nodes: vec![
                 Node::Start {
                     id: "s".to_string(),
@@ -674,15 +661,11 @@ fn non_empty_canvas_not_touched_by_normalize() {
             }],
             root_node_id: Some("s".to_string()),
         },
-        ..Default::default()
     };
     rule_graph_service::normalize(&mut graph);
 
-    // anonymous was non-empty: its edge must remain unchanged.
-    assert_eq!(graph.anonymous.edges[0].id, "custom_edge");
-    // registered and customer were empty and get the default graph.
-    assert_eq!(graph.registered.edges[0].id, "e_start_end");
-    assert_eq!(graph.customer.edges[0].id, "e_start_end");
+    // The canvas was non-empty: its edge must remain unchanged.
+    assert_eq!(graph.canvas.edges[0].id, "custom_edge");
 }
 
 /// A `start → expression(trim_json, custom_label) → end` canvas; the expression's
@@ -734,9 +717,8 @@ fn custom_label_invalid_forms_fail() {
             "custom_label {bad:?} should fail expression_custom_label_invalid"
         );
         assert!(
-            ds.iter()
-                .any(|d| d.loc == "anonymous.nodes[t].custom_label"),
-            "custom_label {bad:?} should report loc anonymous.nodes[t].custom_label"
+            ds.iter().any(|d| d.loc == "canvas.nodes[t].custom_label"),
+            "custom_label {bad:?} should report loc canvas.nodes[t].custom_label"
         );
     }
 }

@@ -107,7 +107,7 @@ async fn patch_valid_rule_graph_succeeds() {
     let (vnum, _vid, outcome_id) = seed_feature_version(&db.state, "patch-valid").await;
 
     let rule_graph = json!({
-        "anonymous": {
+        "canvas": {
             "root_node_id": "start",
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
@@ -126,8 +126,6 @@ async fn patch_valid_rule_graph_succeeds() {
                 { "id": "e3", "source_node_id": "a1", "target_node_id": "end", "branch": "yes" }
             ]
         },
-        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
 
     let (status, body) = send(
@@ -146,7 +144,7 @@ async fn patch_valid_rule_graph_succeeds() {
     );
     // The persisted graph should echo the start node back.
     assert_eq!(
-        body["rule_graph"]["anonymous"]["root_node_id"], "start",
+        body["rule_graph"]["canvas"]["root_node_id"], "start",
         "rule_graph should round-trip"
     );
 }
@@ -157,7 +155,7 @@ async fn patch_dangling_edge_rejected() {
     let (vnum, _vid, outcome_id) = seed_feature_version(&db.state, "patch-dangling").await;
 
     let rule_graph = json!({
-        "anonymous": {
+        "canvas": {
             "root_node_id": null,
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
@@ -174,8 +172,6 @@ async fn patch_dangling_edge_rejected() {
                 { "id": "e1", "source_node_id": "d1", "target_node_id": "ghost", "branch": "yes" }
             ]
         },
-        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
 
     let (status, body) = send(
@@ -212,7 +208,7 @@ async fn patch_unknown_outcome_rejected() {
     // An apply_outcome expression referencing a UUID that is not an outcome of
     // this version.
     let rule_graph = json!({
-        "anonymous": {
+        "canvas": {
             "root_node_id": "start",
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": -120.0, "y": 0.0 } },
@@ -226,8 +222,6 @@ async fn patch_unknown_outcome_rejected() {
                 { "id": "e1", "source_node_id": "a1", "target_node_id": "end", "branch": "yes" }
             ]
         },
-        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
     });
 
     let (status, body) = send(

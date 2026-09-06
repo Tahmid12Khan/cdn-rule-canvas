@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 /// One validation problem (the `error.details[*]` element).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ValidationDetail {
-    /// Location of the offending value, e.g. `rule_graph.anonymous.edges[1]`.
+    /// Location of the offending value, e.g. `rule_graph.canvas.edges[1]`.
     pub loc: String,
     /// Human-readable message.
     pub msg: String,

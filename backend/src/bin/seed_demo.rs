@@ -1,9 +1,9 @@
 //! Demo seeder (Task 20). Idempotent: creates the `demo-article` demo feature
-//! with a LIVE version 1 whose anonymous canvas mirrors the worked example in the
+//! with a LIVE version 1 whose Rule Canvas mirrors the worked example in the
 //! expression-node flow (start → paywall meta-tag → device-type →
 //! apply_outcome(regwall/paywall/show-content) → end), plus an editable DRAFT
 //! version 2 cloned from it for the rule-builder UI. Also seeds the
-//! `demo-json-article` (type `json`) demo feature whose anonymous canvas trims
+//! `demo-json-article` (type `json`) demo feature whose Rule Canvas trims
 //! the body and injects a paywall marker when `$.api == "demo-article"`, and a
 //! demo Site (`localhost:9000 → demo-upstream:8081`) the proxy routes through.
 //!
@@ -226,9 +226,7 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
             (id, feature_id, version_number, description, status, rule_graph,
              created_by, last_updated_by)
         VALUES ($1, $2, 2, $3, 'draft',
-                '{"anonymous":{"nodes":[],"edges":[],"root_node_id":null},
-                  "registered":{"nodes":[],"edges":[],"root_node_id":null},
-                  "customer":{"nodes":[],"edges":[],"root_node_id":null}}'::jsonb,
+                '{"canvas":{"nodes":[],"edges":[],"root_node_id":null}}'::jsonb,
                 'seed', 'seed')
         ON CONFLICT (id) DO NOTHING
         "#,
@@ -293,7 +291,7 @@ async fn seed_site(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Re
 }
 
 /// Idempotently seed the `demo-json-article` JSON feature with one LIVE version
-/// whose anonymous canvas trims `$.body` and injects `$.paywall_show` when
+/// whose Rule Canvas trims `$.body` and injects `$.paywall_show` when
 /// `$.api == "demo-article"`. The version row is UPSERTED on its rule_graph so a
 /// pre-existing row converges to this canvas rather than duplicating.
 async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> anyhow::Result<()> {
@@ -381,12 +379,12 @@ async fn seed_json_feature(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> an
     Ok(())
 }
 
-/// The anonymous canvas worked example in the new expression-node taxonomy:
+/// The Rule Canvas worked example in the new expression-node taxonomy:
 /// `start → paywall meta-tag → device-type → apply_outcome(regwall/paywall/
-/// show-content) → end`. `registered`/`customer` are empty canvases.
+/// show-content) → end`.
 fn anonymous_rule_graph() -> serde_json::Value {
     json!({
-        "anonymous": {
+        "canvas": {
             "root_node_id": "start",
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": 40, "y": 200 } },
@@ -417,19 +415,17 @@ fn anonymous_rule_graph() -> serde_json::Value {
                 { "id": "e_end_paywall", "source_node_id": "a_paywall", "target_node_id": "end", "branch": "yes" },
                 { "id": "e_end_content", "source_node_id": "a_content", "target_node_id": "end", "branch": "yes" }
             ]
-        },
-        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+        }
     })
 }
 
-/// The anonymous canvas for the `demo-json-article` JSON feature:
+/// The Rule Canvas for the `demo-json-article` JSON feature:
 /// `start → json_expression($.api == "demo-article") → [yes] trim_json($.body, 0)
 /// → add_attribute($.paywall_show, "<html>paywall_showed</html>") → end ;
 /// [no] → end`.
 fn json_anonymous_rule_graph() -> serde_json::Value {
     json!({
-        "anonymous": {
+        "canvas": {
             "root_node_id": "start",
             "nodes": [
                 { "kind": "start", "id": "start", "position": { "x": 40, "y": 160 } },
@@ -451,9 +447,7 @@ fn json_anonymous_rule_graph() -> serde_json::Value {
                 { "id": "e_trim",  "source_node_id": "t_body", "target_node_id": "a_pw",   "branch": "yes" },
                 { "id": "e_attr",  "source_node_id": "a_pw",   "target_node_id": "end",    "branch": "yes" }
             ]
-        },
-        "registered": { "root_node_id": null, "nodes": [], "edges": [] },
-        "customer":   { "root_node_id": null, "nodes": [], "edges": [] }
+        }
     })
 }
 
@@ -542,7 +536,7 @@ mod tests {
             .expect("seed graph must validate");
 
         assert_eq!(
-            graph.anonymous.root_node_id.as_deref(),
+            graph.canvas.root_node_id.as_deref(),
             Some("start"),
             "seed must anchor the canvas root at the start node"
         );
@@ -564,7 +558,7 @@ mod tests {
             .expect("json seed graph must validate");
 
         assert_eq!(
-            graph.anonymous.root_node_id.as_deref(),
+            graph.canvas.root_node_id.as_deref(),
             Some("start"),
             "json seed must anchor the canvas root at the start node"
         );

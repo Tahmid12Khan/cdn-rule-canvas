@@ -1,8 +1,8 @@
 //! Rule-graph DTOs (BACKEND CONTRACT §6).
 //!
-//! `RuleGraph` is the top-level shape of `versions.rule_graph` JSONB: one
-//! [`CanvasGraph`] per user class (anonymous / registered / customer). Each
-//! canvas is a directed graph of [`Node`]s connected by [`Edge`]s. A non-empty
+//! `RuleGraph` is the top-level shape of `versions.rule_graph` JSONB: a single
+//! Rule Canvas. Each canvas is a directed graph of [`Node`]s connected by
+//! [`Edge`]s. A non-empty
 //! canvas is an in-graph action pipeline: `Start → (decisions route) →
 //! expression/action nodes (mutate the body, pass through) → End`. Decision
 //! nodes carry a generic [`ProcessorConfig`] (a snake_case `type` discriminator
@@ -16,27 +16,19 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// The `version.rule_graph` JSONB top-level object — one [`CanvasGraph`] per
-/// user class.
+/// The `version.rule_graph` JSONB top-level object — a single Rule Canvas.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, ToSchema)]
 pub struct RuleGraph {
-    /// Canvas evaluated for anonymous (un-identified) users.
-    pub anonymous: CanvasGraph,
-    /// Canvas evaluated for registered (logged-in, non-paying) users.
-    pub registered: CanvasGraph,
-    /// Canvas evaluated for paying customers.
-    pub customer: CanvasGraph,
+    /// The Rule Canvas evaluated for every request.
+    pub canvas: CanvasGraph,
 }
 
 impl RuleGraph {
-    /// Borrow the three canvases alongside their stable names, for per-canvas
-    /// iteration (used by validation `loc` paths).
-    pub fn canvases(&self) -> [(&'static str, &CanvasGraph); 3] {
-        [
-            ("anonymous", &self.anonymous),
-            ("registered", &self.registered),
-            ("customer", &self.customer),
-        ]
+    /// Kept as a single-element array so callers written for the old
+    /// three-canvas shape (`rule_graph_service::validate`, error `loc` builders)
+    /// need no shape-specific change beyond iterating one entry.
+    pub fn canvases(&self) -> [(&'static str, &CanvasGraph); 1] {
+        [("canvas", &self.canvas)]
     }
 }
 

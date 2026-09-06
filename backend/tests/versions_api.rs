@@ -130,7 +130,7 @@ async fn get_version_returns_full_read() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["version_number"], 1);
-    assert!(body["rule_graph"]["anonymous"].is_object());
+    assert!(body["rule_graph"]["canvas"].is_object());
 }
 
 #[tokio::test]

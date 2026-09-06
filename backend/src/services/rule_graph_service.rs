@@ -1,7 +1,7 @@
 //! Rule-graph validation (BACKEND CONTRACT §6).
 //!
-//! [`validate`] checks a [`RuleGraph`] against the stable rules below, per canvas
-//! (anonymous / registered / customer). Every failure produces a
+//! [`validate`] checks a [`RuleGraph`] against the stable rules below, on its
+//! single Rule Canvas. Every failure produces a
 //! [`ValidationDetail`] whose `loc` is `rule_graph.<canvas>.<field>[idx]` and
 //! whose `rule_id` is one of the STABLE identifiers in the table. Any failure
 //! yields an [`AppError::Validation`] (HTTP 422).
@@ -52,9 +52,7 @@ use crate::{
 /// the default `start → end` graph (one start node, one end node, one edge).
 /// Non-empty canvases are untouched.
 pub fn normalize(graph: &mut RuleGraph) {
-    normalize_canvas(&mut graph.anonymous);
-    normalize_canvas(&mut graph.registered);
-    normalize_canvas(&mut graph.customer);
+    normalize_canvas(&mut graph.canvas);
 }
 
 /// Replace an empty [`CanvasGraph`] (zero nodes) with the default start → end
@@ -82,7 +80,7 @@ fn normalize_canvas(canvas: &mut CanvasGraph) {
     canvas.root_node_id = Some("start".to_string());
 }
 
-/// Validate a full [`RuleGraph`] across all three canvases.
+/// Validate a full [`RuleGraph`]'s single Rule Canvas.
 ///
 /// `valid_outcome_ids` is the set of `rre.outcomes.id` values that belong to the
 /// version being edited; it backs the `apply_outcome_ref_exists` rule.
@@ -727,12 +725,9 @@ mod tests {
         }
     }
 
-    /// Wrap a single canvas as the `anonymous` canvas of an otherwise-empty graph.
-    fn graph_with_anonymous(canvas: CanvasGraph) -> RuleGraph {
-        RuleGraph {
-            anonymous: canvas,
-            ..Default::default()
-        }
+    /// Wrap a single canvas as the graph's `canvas`.
+    fn graph_with_canvas(canvas: CanvasGraph) -> RuleGraph {
+        RuleGraph { canvas }
     }
 
     /// Extract the validation details, asserting an error was produced.
@@ -775,7 +770,7 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let res = validate(&graph_with_anonymous(canvas), &ids, &manifest());
+        let res = validate(&graph_with_canvas(canvas), &ids, &manifest());
         assert!(res.is_ok(), "expected ok, got {res:?}");
     }
 
@@ -791,7 +786,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -810,7 +805,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -830,7 +825,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -849,7 +844,7 @@ mod tests {
             ],
             root_node_id: None,
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 7. no_cycles: a self-loop is a cycle.
@@ -864,7 +859,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -884,7 +879,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -911,7 +906,7 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 10. end_terminal + edge_source_kind: an end node with an outgoing edge.
@@ -926,7 +921,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -949,7 +944,7 @@ mod tests {
         };
         // empty valid-id set => the reference is dangling.
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -965,19 +960,19 @@ mod tests {
             root_node_id: Some("ghost".to_string()),
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
         assert!(rule_ids(&details).contains(&"root_in_nodes"));
         assert!(details
             .iter()
-            .any(|d| d.loc == "rule_graph.anonymous.root_node_id"));
+            .any(|d| d.loc == "rule_graph.canvas.root_node_id"));
     }
 
-    // 13. Failures are reported on the correct canvas (registered, not anonymous).
+    // 13. Failures are reported under the `rule_graph.canvas.` loc prefix.
     #[test]
-    fn loc_reflects_canvas() {
+    fn loc_uses_canvas_prefix() {
         let canvas = CanvasGraph {
             nodes: vec![start("s"), decision("d1"), end("e")],
             edges: vec![
@@ -986,37 +981,35 @@ mod tests {
             ],
             root_node_id: None,
         };
-        let graph = RuleGraph {
-            registered: canvas,
-            ..Default::default()
-        };
-        let details = details_of(validate(&graph, &HashSet::new(), &manifest()));
+        let details = details_of(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
         assert!(details
             .iter()
-            .any(|d| d.loc.starts_with("rule_graph.registered.")));
+            .any(|d| d.loc.starts_with("rule_graph.canvas.")));
     }
 
-    // 14. Multiple violations across canvases accumulate.
+    // 14. Multiple violation types accumulate within the single canvas.
     #[test]
-    fn violations_accumulate_across_canvases() {
-        let bad = || CanvasGraph {
-            nodes: vec![start("s"), decision("d1"), end("e")],
-            edges: vec![
-                edge("e0", "s", "d1", Branch::Yes),
-                edge("e1", "d1", "ghost", Branch::Yes),
-            ],
+    fn violations_accumulate_within_one_canvas() {
+        let canvas = CanvasGraph {
+            nodes: vec![decision("d1"), end("e")],
+            edges: vec![edge("e0", "d1", "ghost", Branch::Yes)],
             root_node_id: Some("missing".to_string()),
         };
-        let graph = RuleGraph {
-            anonymous: bad(),
-            registered: bad(),
-            customer: CanvasGraph::default(),
-        };
-        let details = details_of(validate(&graph, &HashSet::new(), &manifest()));
-        // Two canvases each contribute an endpoint error + a root error => >= 4.
-        assert!(details.len() >= 4, "got {} details", details.len());
+        let details = details_of(validate(
+            &graph_with_canvas(canvas),
+            &HashSet::new(),
+            &manifest(),
+        ));
+        // A dangling edge endpoint, a missing root, and a missing start node all
+        // fire in the same canvas => at least 3 distinct violations.
+        assert!(details.len() >= 3, "got {} details", details.len());
         assert!(rule_ids(&details).contains(&"edge_endpoint_exists"));
         assert!(rule_ids(&details).contains(&"root_in_nodes"));
+        assert!(rule_ids(&details).contains(&"start_present"));
     }
 
     // 15. A meta_tags decision node round-trips through manifest-driven validation.
@@ -1040,7 +1033,7 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 16. processor_kind_known: an unknown processor `type` fails (no field checks).
@@ -1056,7 +1049,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1080,7 +1073,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1111,7 +1104,7 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 19. required_unless: meta_tags `value` is required when operator != "exists".
@@ -1130,7 +1123,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1152,7 +1145,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1180,7 +1173,7 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 22. all_paths_reach_end: a reachable dead-end decision fails (no path to end).
@@ -1192,7 +1185,7 @@ mod tests {
             root_node_id: Some("s".to_string()),
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1214,7 +1207,7 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 
     // 24. start -> expression(apply_outcome) -> end passes (expression action
@@ -1232,7 +1225,7 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        assert!(validate(&graph_with_anonymous(canvas), &ids, &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &ids, &manifest()).is_ok());
     }
 
     // 25. start_present: a non-empty canvas without a start node fails.
@@ -1244,7 +1237,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1263,7 +1256,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1279,7 +1272,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1299,7 +1292,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1315,7 +1308,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1337,7 +1330,7 @@ mod tests {
         };
         let mut ids = HashSet::new();
         ids.insert(oid);
-        let details = details_of(validate(&graph_with_anonymous(canvas), &ids, &manifest()));
+        let details = details_of(validate(&graph_with_canvas(canvas), &ids, &manifest()));
         assert!(rule_ids(&details).contains(&"expression_single_out"));
     }
 
@@ -1363,7 +1356,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1392,7 +1385,7 @@ mod tests {
             root_node_id: None,
         };
         let details = details_of(validate(
-            &graph_with_anonymous(canvas),
+            &graph_with_canvas(canvas),
             &HashSet::new(),
             &manifest(),
         ));
@@ -1421,6 +1414,6 @@ mod tests {
             ],
             root_node_id: Some("s".to_string()),
         };
-        assert!(validate(&graph_with_anonymous(canvas), &HashSet::new(), &manifest()).is_ok());
+        assert!(validate(&graph_with_canvas(canvas), &HashSet::new(), &manifest()).is_ok());
     }
 }
