@@ -39,6 +39,8 @@ use crate::{
 
 /// Postgres unique-violation SQLSTATE.
 const PG_UNIQUE_VIOLATION: &str = "23505";
+/// Postgres foreign-key-violation SQLSTATE.
+const PG_FOREIGN_KEY_VIOLATION: &str = "23503";
 
 /// Which version a resolve request targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,7 +292,7 @@ pub async fn delete(pool: &PgPool, cid: Uuid) -> AppResult<()> {
 /// component) to a 409; else fall through to Internal.
 fn map_delete_error(err: sqlx::Error) -> AppError {
     if let sqlx::Error::Database(db_err) = &err {
-        if db_err.code().as_deref() == Some("23503") {
+        if db_err.code().as_deref() == Some(PG_FOREIGN_KEY_VIOLATION) {
             return AppError::ComponentInUse(
                 "Component is referenced by a saved outcome and cannot be deleted".to_string(),
             );
