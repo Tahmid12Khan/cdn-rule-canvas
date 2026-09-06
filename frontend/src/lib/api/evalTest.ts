@@ -41,6 +41,11 @@ export const EvalContext = z.object({
   // a device fallback. Invalid names/values are dropped defensively by the proxy.
   site: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  // Simulated visitor identity for `logged_in`/`has_product` decision nodes
+  // (proxy EvalContext additive fields — bypasses the real cookie/header
+  // identity resolution so the test panel supplies the state directly).
+  logged_in: z.boolean().optional(),
+  products: z.array(z.string()).optional(),
 });
 export type EvalContext = z.infer<typeof EvalContext>;
 

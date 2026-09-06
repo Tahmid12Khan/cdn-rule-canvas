@@ -207,6 +207,43 @@ describe("TestPanel", () => {
     });
   });
 
+  it("feeds Advanced identity inputs (logged in, products) into the eval context", async () => {
+    const user = userEvent.setup();
+    let captured: { context?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`${PROXY_BASE}/__rre/eval`, async ({ request }) => {
+        captured = (await request.json()) as typeof captured;
+        return HttpResponse.json({
+          matched_node_id: null,
+          traversed_node_ids: [],
+          traversed_edge_ids: [],
+          steps: [],
+        });
+      }),
+    );
+
+    render(<TestPanel outcomeTitleById={() => "Paywall"} featureType="html" />, {
+      wrapper,
+    });
+
+    // Advanced is collapsed by default; expand it.
+    await user.click(screen.getByRole("button", { name: /^advanced$/i }));
+
+    await user.click(screen.getByRole("checkbox", { name: /logged in/i }));
+    await user.type(
+      screen.getByLabelText(/products \(comma-separated\)/i),
+      "premium, sports",
+    );
+
+    await user.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(captured.context).toBeDefined());
+    expect(captured.context).toMatchObject({
+      logged_in: true,
+      products: ["premium", "sports"],
+    });
+  });
+
   it("blocks Run when an Advanced header name is invalid", async () => {
     const user = userEvent.setup();
     let posted = false;

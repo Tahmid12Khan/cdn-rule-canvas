@@ -59,6 +59,12 @@ export function TopNav() {
         >
           {UI.catalogue}
         </Link>
+        <Link
+          href="/products/outcomes"
+          className="text-sm font-medium text-nav-muted hover:text-fg"
+        >
+          {UI.outcomes}
+        </Link>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />

@@ -23,6 +23,10 @@ import { apiGet } from "@/lib/api/client";
 // the `has_product` decision node); it stores the selected product's LABEL.
 // Options are fetched at render time (searchProducts), NOT supplied by the
 // manifest.
+// `saved_outcome_select` is a searchable combobox of the Outcomes Library
+// (used by apply_saved_outcome / apply_saved_outcome_json); it stores the
+// selected saved outcome's ID. Options are fetched at render time
+// (searchSavedOutcomes), NOT supplied by the manifest.
 export const NodeFieldControl = z.enum([
   "select",
   "text",
@@ -32,6 +36,7 @@ export const NodeFieldControl = z.enum([
   "component_select",
   "component_version_select",
   "product_select",
+  "saved_outcome_select",
 ]);
 export type NodeFieldControl = z.infer<typeof NodeFieldControl>;
 

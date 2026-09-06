@@ -61,6 +61,16 @@ function metaRowsFromMap(meta: Record<string, string>): MetaRow[] {
   return rows.length > 0 ? rows : [{ key: "", value: "" }];
 }
 
+// Comma-separated products text -> a trimmed, non-empty label array (mirrors
+// meta_tags' simple key/value rows, but products are a flat list so a
+// comma-separated field is the simplest matching input for this panel).
+function parseProducts(text: string): string[] {
+  return text
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   const isJson = featureType === "json";
   const highlight = useRuleBuilderStore((s) => s.testHighlight);
@@ -90,6 +100,9 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   // Raw response body (content_kind aware). For json this is the JSON body;
   // for html it's a raw HTML string passed straight to the evaluator.
   const [rawBody, setRawBody] = useState("");
+  // Simulated visitor identity for `logged_in`/`has_product` decision nodes.
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [productsText, setProductsText] = useState("");
 
   // Introspect the canvas's decision processors so we can hint which inputs
   // actually matter (meta_tags vs device_type).
@@ -102,6 +115,16 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
   const usesMetaTags = useRuleBuilderStore((s) =>
     s.canvas.nodes.some(
       (n) => n.type === "decisionNode" && n.data.processor.type === "meta_tags",
+    ),
+  );
+  const usesLoggedIn = useRuleBuilderStore((s) =>
+    s.canvas.nodes.some(
+      (n) => n.type === "decisionNode" && n.data.processor.type === "logged_in",
+    ),
+  );
+  const usesHasProduct = useRuleBuilderStore((s) =>
+    s.canvas.nodes.some(
+      (n) => n.type === "decisionNode" && n.data.processor.type === "has_product",
     ),
   );
 
@@ -155,6 +178,9 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       if (userAgent.trim()) context.user_agent = userAgent.trim();
       if (site) context.site = site;
       if (Object.keys(headerMap).length > 0) context.headers = headerMap;
+      if (loggedIn) context.logged_in = true;
+      const products = parseProducts(productsText);
+      if (products.length > 0) context.products = products;
       if (rawBody.trim()) {
         context.response_body = rawBody;
         context.content_kind = isJson ? "json" : "html";
@@ -239,6 +265,9 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
     presetPayload.content_kind = isJson ? "json" : "html";
   }
   if (site) presetPayload.site = site;
+  if (loggedIn) presetPayload.logged_in = true;
+  const presetProducts = parseProducts(productsText);
+  if (presetProducts.length > 0) presetPayload.products = presetProducts;
 
   function handleLoadPreset(payload: unknown) {
     const p = (payload ?? {}) as Record<string, unknown>;
@@ -250,6 +279,10 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
     setUserAgent(typeof p.user_agent === "string" ? p.user_agent : "");
     setPath(typeof p.path === "string" ? p.path : "");
     setSite(typeof p.site === "string" ? p.site : "");
+    setLoggedIn(p.logged_in === true);
+    setProductsText(
+      Array.isArray(p.products) ? p.products.join(", ") : "",
+    );
     setMetaRows(
       p.meta_tags && typeof p.meta_tags === "object"
         ? metaRowsFromMap(p.meta_tags as Record<string, string>)
@@ -269,7 +302,14 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
       setJsonBody("");
     }
     // Open Advanced if the preset uses any advanced field so the user sees it.
-    if (p.user_agent || p.site || p.headers || (p.response_body && !isJson)) {
+    if (
+      p.user_agent ||
+      p.site ||
+      p.headers ||
+      p.logged_in ||
+      p.products ||
+      (p.response_body && !isJson)
+    ) {
       setAdvancedOpen(true);
     }
   }
@@ -470,6 +510,37 @@ export function TestPanel({ outcomeTitleById, featureType }: TestPanelProps) {
                 onChange={setSite}
               />
             </div>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-nav">
+              <input
+                type="checkbox"
+                checked={loggedIn}
+                onChange={(e) => setLoggedIn(e.target.checked)}
+              />
+              Logged in
+              {usesLoggedIn && (
+                <span className="font-normal text-status-prev">
+                  (used here)
+                </span>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium text-nav">
+              Products (comma-separated)
+              {usesHasProduct && (
+                <span className="font-normal text-status-prev">
+                  (used here)
+                </span>
+              )}
+              <input
+                type="text"
+                value={productsText}
+                onChange={(e) => setProductsText(e.target.value)}
+                placeholder="premium, sports"
+                aria-label="Products (comma-separated)"
+                className={inputClass}
+              />
+            </label>
 
             <div>
               <div className="text-xs font-medium text-nav">
