@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::json_apply::{
-    apply_action_html, apply_action_json, ResolvedComponentMap,
+    apply_action_html, apply_action_json, ResolvedComponentMap, ResolvedSavedOutcomeMap,
 };
 use rre_proxy::infra::backend_client::{ResolvedComponent, VersionSelector};
 use serde_json::{json, Value};
@@ -19,6 +19,12 @@ use uuid::Uuid;
 
 fn sanitizer() -> ammonia::Builder<'static> {
     load_sanitizer("config/sanitizer.yaml").unwrap()
+}
+
+/// Empty pre-resolved saved-outcome map: these tests exercise Component actions,
+/// so no saved outcome is ever resolved.
+fn no_saved_outcomes() -> ResolvedSavedOutcomeMap {
+    ResolvedSavedOutcomeMap::new()
 }
 
 const CID: &str = "44444444-4444-4444-4444-444444444444";
@@ -66,7 +72,8 @@ fn apply_component_renders_and_injects() {
     let html =
         r#"<html><body><div id="article-body"><p>article</p></div></body></html>"#.to_string();
 
-    let (out, changed) = apply_action_html(html, &action, &[], &map, &sanitizer());
+    let (out, changed) =
+        apply_action_html(html, &action, &[], &map, &no_saved_outcomes(), &sanitizer());
     assert!(changed);
     assert!(out.contains("Subscribe now"), "out: {out}");
     assert!(out.contains("class=\"promo\""), "out: {out}");
@@ -92,7 +99,7 @@ fn apply_component_escapes_double_brace_and_sanitizes() {
     });
     let html = r#"<div id="t"></div>"#.to_string();
 
-    let (out, _) = apply_action_html(html, &action, &[], &map, &sanitizer());
+    let (out, _) = apply_action_html(html, &action, &[], &map, &no_saved_outcomes(), &sanitizer());
     // `{{safe}}` escaped: no live <b> from the variable.
     assert!(out.contains("&lt;b&gt;x&lt;/b&gt;"), "escaped: {out}");
     // `{{{raw}}}` is raw but ammonia removed <script>.
@@ -113,9 +120,17 @@ fn apply_component_is_idempotent() {
     });
     let html = r#"<div id="t"></div>"#.to_string();
 
-    let (once, changed1) = apply_action_html(html, &action, &[], &map, &sanitizer());
+    let (once, changed1) =
+        apply_action_html(html, &action, &[], &map, &no_saved_outcomes(), &sanitizer());
     assert!(changed1);
-    let (twice, changed2) = apply_action_html(once.clone(), &action, &[], &map, &sanitizer());
+    let (twice, changed2) = apply_action_html(
+        once.clone(),
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed2, "second pass is a no-op (idempotency marker)");
     assert_eq!(once, twice);
 }
@@ -134,7 +149,14 @@ fn apply_component_missing_resolution_fails_open() {
     });
     let html = r#"<div id="t">original</div>"#.to_string();
 
-    let (out, changed) = apply_action_html(html.clone(), &action, &[], &map, &sanitizer());
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(out, html, "fail-open: served original");
 }
@@ -153,7 +175,14 @@ fn apply_component_render_error_fails_open() {
     });
     let html = r#"<div id="t">original</div>"#.to_string();
 
-    let (out, changed) = apply_action_html(html.clone(), &action, &[], &map, &sanitizer());
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(out, html, "fail-open on render error");
 }
@@ -172,7 +201,14 @@ fn apply_component_bad_selector_fails_open() {
     });
     let html = r#"<div id="t">original</div>"#.to_string();
 
-    let (out, changed) = apply_action_html(html.clone(), &action, &[], &map, &sanitizer());
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(out, html);
 }
@@ -192,7 +228,8 @@ fn apply_component_pinned_version_resolves_by_selector() {
     });
     let html = r#"<div id="t"></div>"#.to_string();
 
-    let (out, changed) = apply_action_html(html, &action, &[], &map, &sanitizer());
+    let (out, changed) =
+        apply_action_html(html, &action, &[], &map, &no_saved_outcomes(), &sanitizer());
     assert!(changed);
     assert!(out.contains("pinned"), "out: {out}");
 }
@@ -213,7 +250,14 @@ fn apply_component_json_sets_rendered_html_at_path() {
     });
     let mut body = json!({ "content": { "title": "t" } });
 
-    let changed = apply_action_json(&mut body, &action, &[], &map, &sanitizer());
+    let changed = apply_action_json(
+        &mut body,
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(changed);
     assert_eq!(body["content"]["html"], json!("<p>Hi</p>"));
     // Sibling untouched.
@@ -232,10 +276,24 @@ fn apply_component_json_is_idempotent() {
     });
     let mut body = json!({});
 
-    let first = apply_action_json(&mut body, &action, &[], &map, &sanitizer());
+    let first = apply_action_json(
+        &mut body,
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(first);
     let once = body.clone();
-    let second = apply_action_json(&mut body, &action, &[], &map, &sanitizer());
+    let second = apply_action_json(
+        &mut body,
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!second, "re-setting the same rendered string is a no-op");
     assert_eq!(body, once);
 }
@@ -253,7 +311,14 @@ fn apply_component_json_missing_resolution_fails_open() {
     let mut body: Value = json!({ "keep": 1 });
     let before = body.clone();
 
-    let changed = apply_action_json(&mut body, &action, &[], &map, &sanitizer());
+    let changed = apply_action_json(
+        &mut body,
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(body, before, "fail-open: body untouched");
 }
@@ -272,7 +337,14 @@ fn apply_component_on_json_body_is_noop() {
     });
     let mut body = json!({ "k": 1 });
     let before = body.clone();
-    let changed = apply_action_json(&mut body, &action, &[], &map, &sanitizer());
+    let changed = apply_action_json(
+        &mut body,
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(body, before);
 }
@@ -288,7 +360,14 @@ fn apply_component_json_on_html_body_is_noop() {
         "target_path": "$.html"
     });
     let html = "<html><body>x</body></html>".to_string();
-    let (out, changed) = apply_action_html(html.clone(), &action, &[], &map, &sanitizer());
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &action,
+        &[],
+        &map,
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!changed);
     assert_eq!(out, html);
 }

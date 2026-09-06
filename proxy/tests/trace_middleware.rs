@@ -9,6 +9,7 @@ use rre_proxy::domain::processors::default_registry;
 use rre_proxy::infra::backend_client::BackendClient;
 use rre_proxy::infra::compiled_cache::CompiledCache;
 use rre_proxy::infra::component_cache::ComponentCache;
+use rre_proxy::infra::saved_outcome_cache::SavedOutcomeCache;
 use rre_proxy::infra::site_map::SiteMap;
 use rre_proxy::middleware::trace::TRACE_HEADER;
 use rre_proxy::state::AppState;
@@ -35,6 +36,8 @@ async fn spawn() -> String {
     let site_map = SiteMap::new(http.clone(), settings.backend_base_url.clone(), 30);
     let backend = BackendClient::new(http.clone(), settings.backend_base_url.clone(), 30);
     let component_cache = ComponentCache::new(http.clone(), settings.backend_base_url.clone(), 30);
+    let saved_outcome_cache =
+        SavedOutcomeCache::new(http.clone(), settings.backend_base_url.clone(), 30);
     let sanitizer =
         rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
             .unwrap();
@@ -46,6 +49,7 @@ async fn spawn() -> String {
         backend: Arc::new(backend),
         compiled: Arc::new(CompiledCache::new(256)),
         component_cache: Arc::new(component_cache),
+        saved_outcome_cache: Arc::new(saved_outcome_cache),
         registry: Arc::new(default_registry()),
         sanitizer: Arc::new(sanitizer),
     };

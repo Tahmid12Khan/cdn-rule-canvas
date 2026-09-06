@@ -301,6 +301,7 @@ async fn apply_features_html(
         // component_ref* components inside applied outcomes) on the ASYNC side
         // (cached await) before the sync apply — no I/O in the apply path (§4.3).
         let components = resolve_action_components(state, &actions, &av.outcomes).await;
+        let saved_outcomes = resolve_action_saved_outcomes(state, &actions).await;
         let mut applied = false;
         // Per-node timing (spec §4): time each expression node's apply.
         let mut timings: Vec<NodeTiming> = Vec::with_capacity(actions.len());
@@ -311,6 +312,7 @@ async fn apply_features_html(
                 &ma.action,
                 &av.outcomes,
                 &components,
+                &saved_outcomes,
                 &state.sanitizer,
             );
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
@@ -471,6 +473,7 @@ async fn apply_features_json(
         // Pre-resolve component references on the async side (design §4.3):
         // apply_component* actions AND component_ref* components inside outcomes.
         let components = resolve_action_components(state, &actions, &av.outcomes).await;
+        let saved_outcomes = resolve_action_saved_outcomes(state, &actions).await;
         let mut applied = false;
         // Per-node timing (spec §4): time each expression node's apply.
         let mut timings: Vec<NodeTiming> = Vec::with_capacity(actions.len());
@@ -481,6 +484,7 @@ async fn apply_features_json(
                 &ma.action,
                 &av.outcomes,
                 &components,
+                &saved_outcomes,
                 &state.sanitizer,
             );
             let time_ms = t_node.elapsed().as_secs_f64() * 1000.0;
@@ -654,6 +658,31 @@ pub(crate) async fn resolve_action_components(
     for key in keys {
         if let Some(resolved) = state.component_cache.resolve_component(key.0, key.1).await {
             map.insert(key, resolved);
+        }
+    }
+    map
+}
+
+/// Pre-resolve every saved-outcome reference touched by `actions`, ON THE
+/// ASYNC SIDE, mirroring `resolve_action_components`. Only direct action refs
+/// (`apply_saved_outcome`/`apply_saved_outcome_json`) exist for saved
+/// outcomes — no outcome-embedded variant.
+pub(crate) async fn resolve_action_saved_outcomes(
+    state: &AppState,
+    actions: &[MatchedAction],
+) -> json_apply::ResolvedSavedOutcomeMap {
+    let mut map = json_apply::ResolvedSavedOutcomeMap::new();
+    let mut ids: Vec<uuid::Uuid> = Vec::new();
+    for ma in actions {
+        if let Some(id) = json_apply::saved_outcome_ref(&ma.action) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    for id in ids {
+        if let Some(resolved) = state.saved_outcome_cache.resolve_saved_outcome(id).await {
+            map.insert(id, resolved);
         }
     }
     map

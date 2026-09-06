@@ -4,6 +4,7 @@
 
 use rre_proxy::domain::applier::json_apply::{
     add_attribute, apply_action_html, apply_action_json, trim_json, ResolvedComponentMap,
+    ResolvedSavedOutcomeMap,
 };
 use rre_proxy::infra::backend_client::ActiveOutcome;
 use serde_json::{json, Value};
@@ -12,6 +13,12 @@ use serde_json::{json, Value};
 /// actions, so no component is ever resolved.
 fn no_components() -> ResolvedComponentMap {
     ResolvedComponentMap::new()
+}
+
+/// Empty pre-resolved saved-outcome map: these primitive tests exercise
+/// non-saved-outcome actions, so no saved outcome is ever resolved.
+fn no_saved_outcomes() -> ResolvedSavedOutcomeMap {
+    ResolvedSavedOutcomeMap::new()
 }
 
 /// Sanitizer for the dispatcher tests (apply_action_* now take one).
@@ -136,6 +143,7 @@ fn apply_action_json_dispatches_trim_and_add() {
         &trim,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body["body"], json!([]));
@@ -147,6 +155,7 @@ fn apply_action_json_dispatches_trim_and_add() {
         &add,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body["paywall_show"], json!("<html>p</html>"));
@@ -162,6 +171,7 @@ fn apply_action_json_length_as_string() {
         &trim,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body["body"], json!([1]));
@@ -176,6 +186,7 @@ fn apply_action_json_unknown_type_is_noop() {
         &action,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body, json!({ "x": 1 }));
@@ -190,6 +201,7 @@ fn apply_action_json_missing_type_is_noop() {
         &action,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body, json!({ "x": 1 }));
@@ -219,6 +231,7 @@ fn apply_action_json_apply_outcome_runs_components() {
         &action,
         &outcomes,
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body["locked"], json!(true));
@@ -234,6 +247,7 @@ fn apply_action_json_apply_outcome_missing_outcome_is_noop() {
         &action,
         &[],
         &no_components(),
+        &no_saved_outcomes(),
         &sanitizer()
     ));
     assert_eq!(body, json!({ "locked": false }));
@@ -251,12 +265,26 @@ fn apply_action_html_trim_and_add_are_noops() {
     let html = "<html><body>x</body></html>".to_string();
 
     let trim = json!({ "type": "trim_json", "json_path": "$.body", "length": 0 });
-    let (out, changed) = apply_action_html(html.clone(), &trim, &[], &no_components(), &sanitizer);
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &trim,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer,
+    );
     assert!(!changed);
     assert_eq!(out, html);
 
     let add = json!({ "type": "add_attribute", "json_path": "$.x", "value": "v" });
-    let (out, changed) = apply_action_html(html.clone(), &add, &[], &no_components(), &sanitizer);
+    let (out, changed) = apply_action_html(
+        html.clone(),
+        &add,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer,
+    );
     assert!(!changed);
     assert_eq!(out, html);
 }
@@ -284,7 +312,14 @@ fn apply_action_html_apply_outcome_injects() {
     let html = r#"<html><body><div id="body"><p>article</p></div></body></html>"#.to_string();
     let action =
         json!({ "type": "apply_outcome", "outcome_id": "22222222-2222-2222-2222-222222222222" });
-    let (out, changed) = apply_action_html(html, &action, &outcomes, &no_components(), &sanitizer);
+    let (out, changed) = apply_action_html(
+        html,
+        &action,
+        &outcomes,
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer,
+    );
     assert!(changed);
     assert!(out.contains("Subscribe"), "out: {out}");
 }
@@ -299,15 +334,43 @@ fn folding_chain_is_idempotent() {
 
     let mut body: Value = json!({ "api": "demo-article", "body": [1, 2, 3] });
     let mut applied = false;
-    applied |= apply_action_json(&mut body, &trim, &[], &no_components(), &sanitizer());
-    applied |= apply_action_json(&mut body, &add, &[], &no_components(), &sanitizer());
+    applied |= apply_action_json(
+        &mut body,
+        &trim,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
+    applied |= apply_action_json(
+        &mut body,
+        &add,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(applied);
     let once = body.clone();
 
     // Second pass over the same body: no further change.
     let mut twice = false;
-    twice |= apply_action_json(&mut body, &trim, &[], &no_components(), &sanitizer());
-    twice |= apply_action_json(&mut body, &add, &[], &no_components(), &sanitizer());
+    twice |= apply_action_json(
+        &mut body,
+        &trim,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
+    twice |= apply_action_json(
+        &mut body,
+        &add,
+        &[],
+        &no_components(),
+        &no_saved_outcomes(),
+        &sanitizer(),
+    );
     assert!(!twice);
     assert_eq!(body, once);
 }

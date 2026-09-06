@@ -37,6 +37,12 @@ use crate::infra::backend_client::{
 /// is skipped (fail-open). Design §4.3.
 pub type ResolvedComponentMap = HashMap<(Uuid, VersionSelector), Arc<ResolvedComponent>>;
 
+/// Pre-resolved saved-outcome map for one feature's apply pass, keyed by
+/// `saved_outcome_id`. Parallel to `ResolvedComponentMap` but with no version
+/// selector (the backend `resolve` route already picked the version).
+pub type ResolvedSavedOutcomeMap =
+    HashMap<Uuid, Arc<crate::infra::saved_outcome_cache::ResolvedSavedOutcome>>;
+
 /// Apply an outcome's components to `body`. Always returns `Ok` (per-component
 /// failures fail open). `applied` = any component mutated the body.
 ///
@@ -321,6 +327,7 @@ pub fn apply_action_json(
     action: &Value,
     outcomes: &[ActiveOutcome],
     components: &ResolvedComponentMap,
+    saved_outcomes: &ResolvedSavedOutcomeMap,
     sanitizer: &ammonia::Builder<'static>,
 ) -> bool {
     let Some(kind) = action.get("type").and_then(Value::as_str) else {
@@ -380,6 +387,13 @@ pub fn apply_action_json(
             tracing::warn!("apply_component (html) action on JSON body, skipped");
             false
         }
+        "apply_saved_outcome_json" => {
+            apply_saved_outcome_json(body, action, saved_outcomes, sanitizer)
+        }
+        "apply_saved_outcome" => {
+            tracing::warn!("apply_saved_outcome (html) action on JSON body, skipped");
+            false
+        }
         other => {
             tracing::warn!(action_type = %other, "unknown expression action type, skipped");
             false
@@ -434,6 +448,7 @@ pub fn apply_action_html(
     action: &Value,
     outcomes: &[ActiveOutcome],
     components: &ResolvedComponentMap,
+    saved_outcomes: &ResolvedSavedOutcomeMap,
     sanitizer: &ammonia::Builder<'static>,
 ) -> (String, bool) {
     let Some(kind) = action.get("type").and_then(Value::as_str) else {
@@ -463,6 +478,11 @@ pub fn apply_action_html(
         "apply_component" => apply_component_html(body, action, components, sanitizer),
         "apply_component_json" => {
             tracing::warn!("apply_component_json action on HTML body, skipped");
+            (body, false)
+        }
+        "apply_saved_outcome" => apply_saved_outcome_html(body, action, saved_outcomes, sanitizer),
+        "apply_saved_outcome_json" => {
+            tracing::warn!("apply_saved_outcome_json action on HTML body, skipped");
             (body, false)
         }
         "trim_json" | "add_attribute" => {
@@ -544,6 +564,96 @@ pub fn component_ref(action: &Value) -> Option<(Uuid, VersionSelector)> {
     let id = Uuid::parse_str(id_str).ok()?;
     let selector = VersionSelector::from_action_value(action.get("version"));
     Some((id, selector))
+}
+
+/// If `action` is an `apply_saved_outcome` / `apply_saved_outcome_json` action,
+/// return its `saved_outcome_id` for PRE-RESOLUTION on the async side. `None`
+/// for any other action type or a malformed/absent id.
+pub fn saved_outcome_ref(action: &Value) -> Option<Uuid> {
+    let kind = action.get("type").and_then(Value::as_str)?;
+    if kind != "apply_saved_outcome" && kind != "apply_saved_outcome_json" {
+        return None;
+    }
+    let id_str = action.get("saved_outcome_id").and_then(Value::as_str)?;
+    Uuid::parse_str(id_str).ok()
+}
+
+/// Stable idempotency marker for an injected saved outcome, keyed by its id
+/// alone (the backend resolve already picked/rendered the version).
+fn saved_outcome_marker(id: Uuid) -> String {
+    format!("rso-{id}")
+}
+
+/// `apply_saved_outcome` (HTML): look up the PRE-RESOLVED, ALREADY-RENDERED
+/// saved outcome, sanitize its `html_body`, then inject at `target_selector`
+/// per `placement_mode` (reuses the `html_injection` core exactly like
+/// `apply_component`). No mustache render here — the backend already rendered
+/// it against the saved outcome's own `variables`.
+fn apply_saved_outcome_html(
+    body: String,
+    action: &Value,
+    saved_outcomes: &ResolvedSavedOutcomeMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> (String, bool) {
+    let Some(id) = saved_outcome_ref(action) else {
+        tracing::warn!("apply_saved_outcome action: bad/absent saved_outcome_id, skipped");
+        return (body, false);
+    };
+    let Some(resolved) = saved_outcomes.get(&id) else {
+        tracing::warn!("apply_saved_outcome action: saved outcome not resolved, skipped");
+        return (body, false);
+    };
+    let sanitized = html_sanitizer::sanitize(sanitizer, &resolved.html_body);
+    let target_selector = action
+        .get("target_selector")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let placement_mode = action
+        .get("placement_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("append");
+    let marker = saved_outcome_marker(id);
+    match html_injection::inject_html(&body, target_selector, placement_mode, &sanitized, &marker) {
+        Ok(next) => {
+            let changed = next != body;
+            (next, changed)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "apply_saved_outcome inject failed, serving original");
+            (body, false)
+        }
+    }
+}
+
+/// `apply_saved_outcome_json`: sanitize the PRE-RESOLVED, ALREADY-RENDERED
+/// saved outcome's `html_body` and set it as a STRING at `target_path` via the
+/// `json_set` core (`add_attribute`). No mustache render here.
+fn apply_saved_outcome_json(
+    body: &mut Value,
+    action: &Value,
+    saved_outcomes: &ResolvedSavedOutcomeMap,
+    sanitizer: &ammonia::Builder<'static>,
+) -> bool {
+    let Some(id) = saved_outcome_ref(action) else {
+        tracing::warn!("apply_saved_outcome_json action: bad/absent saved_outcome_id, skipped");
+        return false;
+    };
+    let Some(resolved) = saved_outcomes.get(&id) else {
+        tracing::warn!("apply_saved_outcome_json action: saved outcome not resolved, skipped");
+        return false;
+    };
+    let Some(target) = action.get("target_path").and_then(Value::as_str) else {
+        tracing::warn!("apply_saved_outcome_json action missing `target_path`, skipped");
+        return false;
+    };
+    let sanitized = html_sanitizer::sanitize(sanitizer, &resolved.html_body);
+    match add_attribute(body, target, Value::String(sanitized)) {
+        Ok(changed) => changed,
+        Err(e) => {
+            tracing::warn!(error = %e, "apply_saved_outcome_json set-at-path failed, skipped");
+            false
+        }
+    }
 }
 
 /// Render a resolved Component's `html_body` against the action's `variables` and

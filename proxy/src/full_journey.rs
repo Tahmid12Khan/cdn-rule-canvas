@@ -402,12 +402,21 @@ async fn eval_feature(
     // `body_after` reflects the rendered component (design §4.3): apply_component*
     // action refs AND component_ref* components inside the feature's outcomes.
     let components = forwarder::resolve_action_components(state, &trace.actions, outcomes).await;
+    let saved_outcomes = forwarder::resolve_action_saved_outcomes(state, &trace.actions).await;
 
     let JourneyResult {
         journey,
         timings,
         final_body,
-    } = build_journey(state, canvas, inputs, &trace, outcomes, &components);
+    } = build_journey(
+        state,
+        canvas,
+        inputs,
+        &trace,
+        outcomes,
+        &components,
+        &saved_outcomes,
+    );
 
     // The full-journey path resolves a real saved version, so the summary carries it.
     let summary = features_matched::build_entry(&timings, eval_ms, Some(version_number));

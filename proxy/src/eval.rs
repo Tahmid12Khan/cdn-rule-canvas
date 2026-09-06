@@ -389,6 +389,7 @@ async fn run_canvas_eval(
     // test panels apply no outcomes (`apply_outcome` is a no-op), so pass `&[]` —
     // only direct apply_component* action refs are resolved here.
     let components = forwarder::resolve_action_components(state, &trace.actions, &[]).await;
+    let saved_outcomes = forwarder::resolve_action_saved_outcomes(state, &trace.actions).await;
 
     Ok(build_response(
         state,
@@ -397,6 +398,7 @@ async fn run_canvas_eval(
         trace,
         eval_ms,
         &components,
+        &saved_outcomes,
     ))
 }
 
@@ -484,6 +486,7 @@ fn build_response(
     trace: EvalTrace,
     eval_ms: f64,
     components: &json_apply::ResolvedComponentMap,
+    saved_outcomes: &json_apply::ResolvedSavedOutcomeMap,
 ) -> EvalResponse {
     // trace.steps is ordered by zen's `order` field: each entry has the canvas
     // node id and the branch output.
@@ -505,7 +508,15 @@ fn build_response(
     // single-canvas path passes an empty outcomes slice and ignores `final_body`.
     let JourneyResult {
         journey, timings, ..
-    } = build_journey(state, canvas, inputs, &trace, &[], components);
+    } = build_journey(
+        state,
+        canvas,
+        inputs,
+        &trace,
+        &[],
+        components,
+        saved_outcomes,
+    );
 
     // Summary (spec §5/§8): built exactly like one feature's entry, for the
     // single canvas under test. `None` when no expression node matched. The test
@@ -568,6 +579,7 @@ pub(crate) fn build_journey(
     trace: &EvalTrace,
     outcomes: &[ActiveOutcome],
     components: &json_apply::ResolvedComponentMap,
+    saved_outcomes: &json_apply::ResolvedSavedOutcomeMap,
 ) -> JourneyResult {
     let is_json = inputs.is_json;
     // Running JSON body (only meaningful for JSON features).
@@ -616,6 +628,7 @@ pub(crate) fn build_journey(
                         action,
                         outcomes,
                         components,
+                        saved_outcomes,
                         &state.sanitizer,
                     );
                 } else {
@@ -624,6 +637,7 @@ pub(crate) fn build_journey(
                         action,
                         outcomes,
                         components,
+                        saved_outcomes,
                         &state.sanitizer,
                     );
                     html_body = next;
