@@ -26,7 +26,7 @@
 ## Task 1: Backend — collapse `rule_graph` to a single Rule Canvas
 
 **Files:**
-- Create: `backend/migrations/0015_single_canvas.up.sql`, `backend/migrations/0015_single_canvas.down.sql`
+- Create: `backend/migrations/0013_single_canvas.up.sql`, `backend/migrations/0013_single_canvas.down.sql`
 - Modify: `backend/src/schemas/rule_graph.rs`, `backend/src/services/rule_graph_service.rs`, `backend/src/bin/seed_demo.rs`
 - Test: `backend/src/services/rule_graph_service.rs` (inline `#[cfg(test)]`), `backend/tests/migrations.rs` (create if absent)
 
@@ -36,7 +36,7 @@
 
 - [ ] **Step 1: Write the migration**
 
-`backend/migrations/0015_single_canvas.up.sql`:
+`backend/migrations/0013_single_canvas.up.sql`:
 ```sql
 ALTER TABLE rre.versions
   ALTER COLUMN rule_graph SET DEFAULT '{"canvas":{"nodes":[],"edges":[],"root_node_id":null}}'::jsonb;
@@ -45,7 +45,7 @@ UPDATE rre.versions
   SET rule_graph = jsonb_build_object('canvas', rule_graph->'anonymous');
 ```
 
-`backend/migrations/0015_single_canvas.down.sql`:
+`backend/migrations/0013_single_canvas.down.sql`:
 ```sql
 ALTER TABLE rre.versions
   ALTER COLUMN rule_graph SET DEFAULT
@@ -137,7 +137,7 @@ Create `backend/tests/migrations.rs` (or add to an existing migration test file 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/migrations/0015_single_canvas.up.sql backend/migrations/0015_single_canvas.down.sql \
+git add backend/migrations/0013_single_canvas.up.sql backend/migrations/0013_single_canvas.down.sql \
   backend/src/schemas/rule_graph.rs backend/src/services/rule_graph_service.rs backend/src/bin/seed_demo.rs \
   backend/tests/migrations.rs
 git commit -m "feat(backend): collapse rule_graph to a single Rule Canvas"
@@ -148,7 +148,7 @@ git commit -m "feat(backend): collapse rule_graph to a single Rule Canvas"
 ## Task 2: Backend — Product Catalogue (`rre.products` CRUD)
 
 **Files:**
-- Create: `backend/migrations/0016_products.up.sql`, `backend/migrations/0016_products.down.sql`, `backend/src/models/product.rs`, `backend/src/schemas/product.rs`, `backend/src/repositories/product_repository.rs`, `backend/src/services/product_service.rs`, `backend/src/api/v1/products.rs`
+- Create: `backend/migrations/0014_products.up.sql`, `backend/migrations/0014_products.down.sql`, `backend/src/models/product.rs`, `backend/src/schemas/product.rs`, `backend/src/repositories/product_repository.rs`, `backend/src/services/product_service.rs`, `backend/src/api/v1/products.rs`
 - Modify: `backend/src/models/mod.rs`, `backend/src/schemas/mod.rs`, `backend/src/repositories/mod.rs`, `backend/src/services/mod.rs`, `backend/src/api/v1/mod.rs`, `backend/src/error.rs`
 - Test: inline `#[cfg(test)]` in `schemas/product.rs` + `services/product_service.rs`; `backend/tests/products.rs`
 
@@ -158,7 +158,7 @@ git commit -m "feat(backend): collapse rule_graph to a single Rule Canvas"
 
 - [ ] **Step 1: Migration**
 
-`backend/migrations/0016_products.up.sql`:
+`backend/migrations/0014_products.up.sql`:
 ```sql
 CREATE TABLE rre.products (
   label VARCHAR(64) PRIMARY KEY,
@@ -171,7 +171,7 @@ CREATE INDEX products_created_at_idx ON rre.products (created_at DESC, label ASC
 ALTER TABLE rre.products ADD CONSTRAINT products_label_snake_case
   CHECK (label ~ '^[a-z0-9]+(_[a-z0-9]+)*$');
 ```
-`backend/migrations/0016_products.down.sql`:
+`backend/migrations/0014_products.down.sql`:
 ```sql
 DROP TABLE rre.products;
 ```
@@ -683,7 +683,7 @@ Expected: clean.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add backend/migrations/0016_products.up.sql backend/migrations/0016_products.down.sql \
+git add backend/migrations/0014_products.up.sql backend/migrations/0014_products.down.sql \
   backend/src/models/product.rs backend/src/models/mod.rs \
   backend/src/schemas/product.rs backend/src/schemas/mod.rs \
   backend/src/repositories/product_repository.rs backend/src/repositories/mod.rs \
@@ -865,7 +865,7 @@ git commit -m "feat(backend): add logged_in/has_product decision nodes + validat
 ## Task 4: Backend — Outcomes Library (`rre.saved_outcomes`) + `apply_saved_outcome(_json)` nodes
 
 **Files:**
-- Create: `backend/migrations/0017_saved_outcomes.up.sql`, `.down.sql`, `backend/src/models/saved_outcome.rs`, `backend/src/schemas/saved_outcome.rs`, `backend/src/repositories/saved_outcome_repository.rs`, `backend/src/services/saved_outcome_service.rs`, `backend/src/api/v1/saved_outcomes.rs`
+- Create: `backend/migrations/0015_saved_outcomes.up.sql`, `.down.sql`, `backend/src/models/saved_outcome.rs`, `backend/src/schemas/saved_outcome.rs`, `backend/src/repositories/saved_outcome_repository.rs`, `backend/src/services/saved_outcome_service.rs`, `backend/src/api/v1/saved_outcomes.rs`
 - Modify: `backend/config/node_types.json`, `backend/src/schemas/mod.rs`, `backend/src/models/mod.rs`, `backend/src/repositories/mod.rs`, `backend/src/services/mod.rs`, `backend/src/api/v1/mod.rs`, `backend/src/error.rs`, `backend/src/services/rule_graph_service.rs`, `backend/Cargo.toml`
 - Test: `backend/tests/saved_outcomes.rs`, inline in `rule_graph_service.rs`
 
@@ -875,7 +875,7 @@ git commit -m "feat(backend): add logged_in/has_product decision nodes + validat
 
 - [ ] **Step 1: Migration**
 
-`backend/migrations/0017_saved_outcomes.up.sql`:
+`backend/migrations/0015_saved_outcomes.up.sql`:
 ```sql
 CREATE TABLE rre.saved_outcomes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1552,7 +1552,7 @@ Expected: clean.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/migrations/0017_saved_outcomes.up.sql backend/migrations/0017_saved_outcomes.down.sql \
+git add backend/migrations/0015_saved_outcomes.up.sql backend/migrations/0015_saved_outcomes.down.sql \
   backend/src/models/saved_outcome.rs backend/src/models/mod.rs \
   backend/src/schemas/saved_outcome.rs backend/src/schemas/mod.rs \
   backend/src/repositories/saved_outcome_repository.rs backend/src/repositories/mod.rs \
