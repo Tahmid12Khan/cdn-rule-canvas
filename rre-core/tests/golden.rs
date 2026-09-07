@@ -160,7 +160,29 @@ fn golden_fixtures_pin_apply() {
             &rre_core::default_sanitizer(),
         );
 
-        assert_eq!(outcome.body, fixture.expected.body, "{ctx}: body");
+        // The `rre` telemetry block carries measured times, so it can never be
+        // pinned byte-for-byte. Strip it, compare the RULE output (what a
+        // fixture is for), then assert the block separately below.
+        let (body, telemetry_seen) = strip_telemetry(&outcome.body, fixture.body_kind.into());
+        assert_eq!(body, fixture.expected.body, "{ctx}: body");
+        // A feature that changed the body MUST carry an entry, and one that
+        // changed nothing must not inject at all.
+        assert_eq!(
+            telemetry_seen,
+            !outcome.feature_expressions.is_empty(),
+            "{ctx}: telemetry present iff a feature changed the body"
+        );
+        for (feature_id, entry) in &outcome.feature_expressions {
+            assert!(
+                !entry.expressions.is_empty(),
+                "{ctx}: `{feature_id}` entry with no expressions"
+            );
+            assert!(
+                entry.time_took_ms.contains('.'),
+                "{ctx}: `{feature_id}` time_took_ms is not `d.dd`: {}",
+                entry.time_took_ms
+            );
+        }
         assert_eq!(outcome.changed, fixture.expected.changed, "{ctx}: changed");
         assert_eq!(
             outcome.features.len(),
@@ -180,5 +202,38 @@ fn golden_fixtures_pin_apply() {
                 "{ctx}: skipped_reason"
             );
         }
+    }
+}
+
+/// Remove the injected `rre` telemetry from a body so the rule output can be
+/// compared exactly. Returns the stripped body and whether anything was found.
+fn strip_telemetry(body: &str, kind: BodyKind) -> (String, bool) {
+    match kind {
+        BodyKind::Json => {
+            let Ok(mut v) = serde_json::from_str::<serde_json::Value>(body) else {
+                return (body.to_string(), false);
+            };
+            let removed = v.as_object_mut().and_then(|o| o.remove("rre")).is_some();
+            if !removed {
+                // Return the body VERBATIM when there was nothing to strip: a
+                // re-serialize would reorder keys and fail the exact compare
+                // for a body `apply` never touched.
+                return (body.to_string(), false);
+            }
+            (
+                serde_json::to_string(&v).unwrap_or_else(|_| body.to_string()),
+                true,
+            )
+        }
+        BodyKind::Html => match body.find("<script>window.rre=") {
+            Some(start) => {
+                let end = body[start..]
+                    .find("</script>")
+                    .map(|i| start + i + "</script>".len())
+                    .unwrap_or(body.len());
+                (format!("{}{}", &body[..start], &body[end..]), true)
+            }
+            None => (body.to_string(), false),
+        },
     }
 }

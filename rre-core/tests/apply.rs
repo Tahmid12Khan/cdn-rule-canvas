@@ -311,3 +311,98 @@ fn an_empty_bundle_is_a_no_op() {
     assert_eq!(out.body, r#"{"id":"a1"}"#);
     assert!(out.features.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Saved outcomes are TRUSTED-AUTHOR content: their HTML reaches the reader
+// byte-for-byte. The publication's paywall template IS <script>/<link>/<meta>,
+// so sanitizing it would ship the mount point with nothing to fill it.
+// ---------------------------------------------------------------------------
+
+/// The exact shape that regressed in production: a saved outcome written to a
+/// JSON path must arrive whole, scripts included.
+#[test]
+fn saved_outcome_json_is_not_sanitized() {
+    let id = uuid::Uuid::parse_str("6223f688-671c-4002-9259-77895386f65c").unwrap();
+    let html = r#"<meta charset="UTF-8"><link rel="stylesheet" href="https://x/style.css">
+<script type="module" src="https://x/vendor.js"></script>
+<div id="sub-paywall-container"></div>
+<script>subPerformPaywallTasks("paywall-with-2-offers")</script>"#;
+
+    let mut f = feature(
+        "paywall",
+        "json",
+        linear_canvas(serde_json::json!({
+            "type": "apply_saved_outcome_json",
+            "saved_outcome_id": id,
+            "target_path": "$.paywall",
+        })),
+    );
+    f.saved_outcomes.insert(
+        id,
+        rre_core::bundle::ResolvedSavedOutcome {
+            html_body: html.to_string(),
+        },
+    );
+
+    let out = run(&bundle(vec![f]), &facts(), BodyKind::Json, r#"{"id":"a"}"#);
+    let v: serde_json::Value = serde_json::from_str(&out.body).expect("json");
+    let got = v["paywall"].as_str().expect("paywall is a string");
+
+    assert_eq!(got, html, "the saved outcome must arrive byte-for-byte");
+    assert!(got.contains("<script"), "scripts must survive");
+    assert!(
+        got.contains("subPerformPaywallTasks"),
+        "inline JS must survive"
+    );
+    assert!(out.changed);
+}
+
+/// The `rre` block ships with the body, out of the box, with the per-node
+/// timings the app shows.
+#[test]
+fn apply_injects_the_rre_telemetry_block() {
+    let f = feature(
+        "dn-json-article",
+        "json",
+        linear_canvas(serde_json::json!({
+            "type": "add_attribute",
+            "json_path": "$.flag",
+            "value": "x",
+        })),
+    );
+
+    let out = run(&bundle(vec![f]), &facts(), BodyKind::Json, r#"{"id":"a"}"#);
+    let v: serde_json::Value = serde_json::from_str(&out.body).expect("json");
+
+    let entry = &v["rre"]["feature_expressions"]["dn-json-article"];
+    assert_eq!(entry["version"], 1);
+    assert_eq!(entry["expressions"][0]["expression_label"], "add_attribute");
+    assert!(entry["expressions"][0]["expression_time_ms"].is_string());
+    assert!(entry["time_took_ms"].is_string());
+    assert!(entry["expensive_nodes"].is_array());
+    assert!(v["rre"]["total_time_ms"].is_string());
+    assert!(v["rre"]["compute_time_ms"].is_string());
+    // Also returned, so a host can header/log it without re-parsing the body.
+    assert_eq!(out.feature_expressions.len(), 1);
+}
+
+/// A feature that matches nothing must not add the block — an untouched body
+/// stays untouched.
+#[test]
+fn no_match_injects_no_telemetry() {
+    let f = feature(
+        "dn-json-article",
+        "json",
+        decision_canvas(
+            ProcessorRef {
+                kind: "device_type".into(),
+                config: serde_json::json!({"operator": "equals", "value": "mobile"}),
+            },
+            serde_json::json!({"type": "add_attribute", "json_path": "$.flag", "value": "x"}),
+        ),
+    );
+
+    let out = run(&bundle(vec![f]), &facts(), BodyKind::Json, r#"{"id":"a"}"#);
+    assert_eq!(out.body, r#"{"id":"a"}"#);
+    assert!(out.feature_expressions.is_empty());
+}

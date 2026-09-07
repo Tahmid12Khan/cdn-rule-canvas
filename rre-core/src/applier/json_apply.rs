@@ -386,9 +386,7 @@ pub fn apply_action_json(
             tracing::warn!("apply_component (html) action on JSON body, skipped");
             false
         }
-        "apply_saved_outcome_json" => {
-            apply_saved_outcome_json(body, action, saved_outcomes, sanitizer)
-        }
+        "apply_saved_outcome_json" => apply_saved_outcome_json(body, action, saved_outcomes),
         "apply_saved_outcome" => {
             tracing::warn!("apply_saved_outcome (html) action on JSON body, skipped");
             false
@@ -479,7 +477,7 @@ pub fn apply_action_html(
             tracing::warn!("apply_component_json action on HTML body, skipped");
             (body, false)
         }
-        "apply_saved_outcome" => apply_saved_outcome_html(body, action, saved_outcomes, sanitizer),
+        "apply_saved_outcome" => apply_saved_outcome_html(body, action, saved_outcomes),
         "apply_saved_outcome_json" => {
             tracing::warn!("apply_saved_outcome_json action on HTML body, skipped");
             (body, false)
@@ -592,7 +590,6 @@ fn apply_saved_outcome_html(
     body: String,
     action: &Value,
     saved_outcomes: &ResolvedSavedOutcomeMap,
-    sanitizer: &ammonia::Builder<'static>,
 ) -> (String, bool) {
     let Some(id) = saved_outcome_ref(action) else {
         tracing::warn!("apply_saved_outcome action: bad/absent saved_outcome_id, skipped");
@@ -602,7 +599,8 @@ fn apply_saved_outcome_html(
         tracing::warn!("apply_saved_outcome action: saved outcome not resolved, skipped");
         return (body, false);
     };
-    let sanitized = html_sanitizer::sanitize(sanitizer, &resolved.html_body);
+    // Trusted-author content, NOT sanitized — see `apply_saved_outcome_json`.
+    let sanitized = resolved.html_body.clone();
     let target_selector = action
         .get("target_selector")
         .and_then(Value::as_str)
@@ -631,7 +629,6 @@ fn apply_saved_outcome_json(
     body: &mut Value,
     action: &Value,
     saved_outcomes: &ResolvedSavedOutcomeMap,
-    sanitizer: &ammonia::Builder<'static>,
 ) -> bool {
     let Some(id) = saved_outcome_ref(action) else {
         tracing::warn!("apply_saved_outcome_json action: bad/absent saved_outcome_id, skipped");
@@ -645,8 +642,12 @@ fn apply_saved_outcome_json(
         tracing::warn!("apply_saved_outcome_json action missing `target_path`, skipped");
         return false;
     };
-    let sanitized = html_sanitizer::sanitize(sanitizer, &resolved.html_body);
-    match add_attribute(body, target, Value::String(sanitized)) {
+    // NOT sanitized, deliberately. A saved outcome is trusted-author content
+    // (the Outcomes Library), and its whole purpose here is to carry the
+    // publication's paywall template: <script>/<link>/<meta> ARE the payload.
+    // Running ammonia over it leaves the mount point and deletes everything
+    // that fills it, which ships an empty paywall to the reader.
+    match add_attribute(body, target, Value::String(resolved.html_body.clone())) {
         Ok(changed) => changed,
         Err(e) => {
             tracing::warn!(error = %e, "apply_saved_outcome_json set-at-path failed, skipped");

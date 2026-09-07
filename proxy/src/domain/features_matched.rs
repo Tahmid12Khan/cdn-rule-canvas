@@ -6,107 +6,11 @@
 //! All times are STRINGS formatted `d.dd` (spec §3) so the trailing-zero format
 //! survives JSON (`0.10`, not `0.1`).
 
-use serde::Serialize;
+//! The IMPLEMENTATION now lives in `rre_core::telemetry`, so the proxy and the
+//! Fastly guest emit one shape from one place. This module stays as the proxy's
+//! name for it; the tests below are the proxy-side contract.
 
-/// One expression node's measured apply time (spec §4): canvas node id, display
-/// label, optional custom label (spec v2.3), and its individual apply duration.
-#[derive(Clone, Debug)]
-pub struct NodeTiming {
-    pub node_id: String,
-    pub label: String,
-    pub custom_label: Option<String>,
-    pub time_ms: f64,
-}
-
-/// One expression node on the matched path (spec v2.2). Used for both the
-/// `expressions` list (last-10, in order) and `expensive_nodes` (top-3 by time).
-#[derive(Serialize, Clone, Debug)]
-pub struct Expression {
-    pub expression_id: String,
-    pub expression_label: String,
-    /// The node's `custom_label` (spec v2.3), `""` when unset.
-    pub custom_expression_label: String,
-    /// Per-node apply time, `d.dd`.
-    pub expression_time_ms: String,
-}
-
-/// A single feature's `feature_expressions` entry (spec v2.2). Also the
-/// `/__rre/eval` `summary` for the single canvas under test (spec §5).
-#[derive(Serialize, Clone, Debug)]
-pub struct FeatureEntry {
-    /// The `version_number` of the active version used to evaluate this feature.
-    /// `Some` for the production injection (the served version); `None` for the
-    /// `/__rre/eval(-url)` test panel (a posted canvas has no saved version) →
-    /// omitted from the JSON.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<i32>,
-    /// Last-10 expression nodes the matched path traversed, in order.
-    pub expressions: Vec<Expression>,
-    /// Whole-feature time (`eval_ms + sum(per-node apply times)`), `d.dd`.
-    pub time_took_ms: String,
-    /// Expression nodes sorted by per-node apply time DESC, top 3.
-    pub expensive_nodes: Vec<Expression>,
-}
-
-/// Format a millisecond value as the LOCKED `d.dd` string (spec §3).
-pub fn fmt_ms(ms: f64) -> String {
-    format!("{ms:.2}")
-}
-
-/// Map a `NodeTiming` to the wire `Expression` shape (spec v2.2). The custom
-/// label is trimmed; `""` when `None` or empty.
-fn to_expression(t: &NodeTiming) -> Expression {
-    Expression {
-        expression_id: t.node_id.clone(),
-        expression_label: t.label.clone(),
-        custom_expression_label: t
-            .custom_label
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_string(),
-        expression_time_ms: fmt_ms(t.time_ms),
-    }
-}
-
-/// Build a feature's entry from the per-node expression timings (in traversal
-/// order), the feature's eval duration, and the served active `version` (`None`
-/// for the test panel — a posted canvas has no saved version). Returns `None`
-/// when no expression node was applied (the feature did NOT match — no entry).
-pub fn build_entry(
-    timings: &[NodeTiming],
-    eval_ms: f64,
-    version: Option<i32>,
-) -> Option<FeatureEntry> {
-    if timings.is_empty() {
-        return None;
-    }
-
-    // expressions: traversal order, LAST 10.
-    let start = timings.len().saturating_sub(10);
-    let expressions: Vec<Expression> = timings[start..].iter().map(to_expression).collect();
-
-    // time_took_ms = eval_ms + sum of every per-node apply time (not just last 10).
-    let sum_ms: f64 = timings.iter().map(|t| t.time_ms).sum();
-    let time_took_ms = fmt_ms(eval_ms + sum_ms);
-
-    // expensive_nodes: sort by per-node time DESC, top 3.
-    let mut by_time: Vec<&NodeTiming> = timings.iter().collect();
-    by_time.sort_by(|a, b| {
-        b.time_ms
-            .partial_cmp(&a.time_ms)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let expensive_nodes: Vec<Expression> =
-        by_time.iter().take(3).map(|t| to_expression(t)).collect();
-
-    Some(FeatureEntry {
-        version,
-        expressions,
-        time_took_ms,
-        expensive_nodes,
-    })
-}
+pub use rre_core::telemetry::{build_entry, fmt_ms, Expression, FeatureEntry, NodeTiming};
 
 #[cfg(test)]
 mod tests {

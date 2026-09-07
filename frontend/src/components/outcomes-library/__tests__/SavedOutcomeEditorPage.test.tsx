@@ -122,8 +122,11 @@ describe("SavedOutcomeEditorPage", () => {
     await user.clear(headline);
     await user.type(headline, "Big Sale");
 
+    // The preview renders into a srcdoc iframe (jsdom doesn't parse srcdoc).
     await waitFor(() =>
-      expect(screen.getByText("Big Sale")).toBeInTheDocument(),
+      expect(
+        screen.getByTitle("Component preview").getAttribute("srcdoc"),
+      ).toContain("<h1>Big Sale</h1>"),
     );
   });
 

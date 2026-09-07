@@ -368,49 +368,15 @@ async fn apply_features_html(
 }
 
 /// Append the trusted `window.rre.{feature_expressions,total_time_ms,compute_time_ms}`
-/// script immediately before `</body>` (or at the end of the document if there is
-/// none). The serialized map has every `<` escaped to `<` so an embedded
-/// `</script>` cannot break out — XSS-safe; this is first-party trusted data
-/// (spec §2). `total_time_ms` and `compute_time_ms` are top-level SIBLINGS of
-/// `feature_expressions` (spec item 7; `compute_time_ms` = total minus rule-fetch I/O).
+/// script immediately before `</body>`. Delegates to `rre_core::telemetry` so the
+/// proxy and the Fastly guest emit the SAME block from the same code.
 fn inject_html_feature_expressions(
     body: String,
     matched: &[(String, FeatureEntry)],
     total_time_ms: &str,
     compute_time_ms: &str,
 ) -> String {
-    let map: serde_json::Map<String, serde_json::Value> = matched
-        .iter()
-        .map(|(id, entry)| (id.clone(), serde_json::to_value(entry).unwrap_or_default()))
-        .collect();
-    let json = serde_json::to_string(&serde_json::Value::Object(map))
-        .unwrap_or_else(|_| "{}".to_string())
-        .replace('<', "\\u003c");
-    // The time fields are `d.dd` strings; serialize so each is a quoted JSON string
-    // (escaping any `<` for the same break-out safety).
-    let total_json = serde_json::to_string(total_time_ms)
-        .unwrap_or_else(|_| "\"0.00\"".to_string())
-        .replace('<', "\\u003c");
-    let compute_json = serde_json::to_string(compute_time_ms)
-        .unwrap_or_else(|_| "\"0.00\"".to_string())
-        .replace('<', "\\u003c");
-    let script = format!(
-        "<script>window.rre=window.rre||{{}};window.rre.feature_expressions={json};window.rre.total_time_ms={total_json};window.rre.compute_time_ms={compute_json};</script>"
-    );
-    match body.rfind("</body>") {
-        Some(idx) => {
-            let mut out = String::with_capacity(body.len() + script.len());
-            out.push_str(&body[..idx]);
-            out.push_str(&script);
-            out.push_str(&body[idx..]);
-            out
-        }
-        None => {
-            let mut out = body;
-            out.push_str(&script);
-            out
-        }
-    }
+    rre_core::telemetry::inject_html(body, matched, total_time_ms, compute_time_ms)
 }
 
 /// Apply every matching feature's actions to a JSON body, in order, chaining the
@@ -553,42 +519,16 @@ async fn apply_features_json(
 }
 
 /// Merge the matched features' entries into `body["rre"]["feature_expressions"]`
-/// (spec v2.2) and set `body["rre"]["total_time_ms"]` + `["compute_time_ms"]` (spec
-/// item 7) as top-level SIBLINGS. Creates the `rre` object if absent; sets the keys
-/// without clobbering other `rre.*` keys. A non-object `body` is left untouched.
+/// and set `total_time_ms` / `compute_time_ms` as top-level SIBLINGS (spec
+/// v2.2 / item 7). Delegates to `rre_core::telemetry` so the proxy and the
+/// Fastly guest emit the SAME block from the same code.
 fn inject_json_feature_expressions(
     body: &mut serde_json::Value,
     matched: &[(String, FeatureEntry)],
     total_time_ms: &str,
     compute_time_ms: &str,
 ) {
-    let Some(root) = body.as_object_mut() else {
-        return; // top-level non-object body: nothing to namespace under.
-    };
-    let rre = root
-        .entry("rre")
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    // If `rre` exists but is not an object, replace it (reserved namespace).
-    if !rre.is_object() {
-        *rre = serde_json::Value::Object(serde_json::Map::new());
-    }
-    let rre_obj = rre.as_object_mut().expect("just ensured object");
-    let fe: serde_json::Map<String, serde_json::Value> = matched
-        .iter()
-        .map(|(id, entry)| (id.clone(), serde_json::to_value(entry).unwrap_or_default()))
-        .collect();
-    rre_obj.insert(
-        "feature_expressions".to_string(),
-        serde_json::Value::Object(fe),
-    );
-    rre_obj.insert(
-        "total_time_ms".to_string(),
-        serde_json::Value::String(total_time_ms.to_string()),
-    );
-    rre_obj.insert(
-        "compute_time_ms".to_string(),
-        serde_json::Value::String(compute_time_ms.to_string()),
-    );
+    rre_core::telemetry::inject_json(body, matched, total_time_ms, compute_time_ms);
 }
 
 /// Run the canvas through the evaluator, returning the ordered matched
@@ -1125,20 +1065,10 @@ fn canvas_has_meta_tags(canvas: &CanvasGraph) -> bool {
     })
 }
 
-/// Display label + custom label for an expression node (spec §4/v2.3): the
-/// manifest label for the action kind (the proxy has no manifest at runtime, so
-/// the action kind IS the label — fieldless fallback) plus the node's
-/// `custom_label`. Mirrors the `eval.rs` `label()` helper — a node-id->label
-/// lookup over the canvas.
+/// The expression node's `(label, custom_label)`, read off the canvas. Shared
+/// with the Fastly guest via `rre_core::telemetry`.
 fn expression_label(canvas: &CanvasGraph, node_id: &str) -> (String, Option<String>) {
-    match canvas.nodes.iter().find(|n| n.id() == node_id) {
-        Some(Node::Expression {
-            action,
-            custom_label,
-            ..
-        }) => (action.kind.clone(), custom_label.clone()),
-        _ => (node_id.to_string(), None),
-    }
+    rre_core::telemetry::expression_label(canvas, node_id)
 }
 
 // ---------------------------------------------------------------------------

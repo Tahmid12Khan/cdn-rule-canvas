@@ -17,6 +17,7 @@ pub mod evaluator;
 pub mod graph;
 pub mod identity;
 pub mod processors;
+pub mod telemetry;
 pub mod translator;
 
 pub use applier::html_sanitizer::{default_sanitizer, load_sanitizer, SanitizerError};

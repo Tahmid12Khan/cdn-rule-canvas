@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,6 +25,7 @@ use crate::context::EvaluationContextParts;
 use crate::graph::{CanvasGraph, Node, RuleGraph};
 use crate::identity::Identity;
 use crate::processors::default_registry;
+use crate::telemetry::{self, FeatureEntry, NodeTiming};
 
 /// Bumped on any incompatible change to the bundle format. A host REJECTS a
 /// bundle whose version it does not know rather than guessing at the shape.
@@ -144,6 +146,14 @@ pub struct ApplyOutcome {
     pub body: String,
     pub changed: bool,
     pub features: Vec<FeatureReport>,
+    /// The `rre` block, ALREADY injected into `body` (spec §2/v2.2). Returned
+    /// as well so a host can put the same numbers in a header or a log line
+    /// without re-parsing the body.
+    pub total_time_ms: String,
+    pub compute_time_ms: String,
+    /// `(feature_id, entry)` for every feature that changed the body, in the
+    /// order they ran.
+    pub feature_expressions: Vec<(String, FeatureEntry)>,
 }
 
 /// Evaluate every feature in `bundle` matching `kind`, in bundle order, folding
@@ -168,6 +178,10 @@ pub fn apply(
     let mut current = body;
     let mut changed = false;
     let mut features = Vec::new();
+    // Same wall-clock boundary the proxy uses: start immediately before the
+    // per-feature loop, stop immediately after the injection is computed.
+    let engine_start = Instant::now();
+    let mut matched_entries: Vec<(String, FeatureEntry)> = Vec::new();
 
     for feature in bundle.features.iter().filter(|f| f.r#type == kind.as_str()) {
         let canvas = feature.canvas();
@@ -220,7 +234,9 @@ pub fn apply(
         ctx.needs_meta_tags = needs_meta_tags;
 
         let content = Arc::new(crate::compile(canvas));
+        let eval_start = Instant::now();
         let actions = crate::evaluate_sync(content, canvas, ctx, registry.clone());
+        let eval_ms = ms_since(eval_start);
         if actions.is_empty() {
             features.push(report(feature, false, false, Some(SkipReason::NoMatch)));
             continue;
@@ -229,10 +245,14 @@ pub fn apply(
         let components = component_map(feature);
         let saved = saved_outcome_map(feature);
         let mut feature_changed = false;
+        // Per-node timing (spec §4): time each expression node's apply, so the
+        // injected block names the expensive node exactly as the app does.
+        let mut timings: Vec<NodeTiming> = Vec::with_capacity(actions.len());
 
         match kind {
             BodyKind::Html => {
                 for ma in &actions {
+                    let node_start = Instant::now();
                     let (next, did) = json_apply::apply_action_html(
                         current,
                         &ma.action,
@@ -241,6 +261,7 @@ pub fn apply(
                         &saved,
                         sanitizer,
                     );
+                    timings.push(node_timing(canvas, &ma.node_id, node_start));
                     current = next;
                     feature_changed |= did;
                 }
@@ -248,6 +269,7 @@ pub fn apply(
             BodyKind::Json => {
                 let mut value = json_body.expect("json_body is Some for BodyKind::Json");
                 for ma in &actions {
+                    let node_start = Instant::now();
                     feature_changed |= json_apply::apply_action_json(
                         &mut value,
                         &ma.action,
@@ -256,6 +278,7 @@ pub fn apply(
                         &saved,
                         sanitizer,
                     );
+                    timings.push(node_timing(canvas, &ma.node_id, node_start));
                 }
                 if feature_changed {
                     match serde_json::to_string(&value) {
@@ -267,13 +290,81 @@ pub fn apply(
         }
 
         changed |= feature_changed;
+        if feature_changed {
+            if let Some(entry) =
+                telemetry::build_entry(&timings, eval_ms, Some(feature.version_number))
+            {
+                matched_entries.push((feature.id.clone(), entry));
+            }
+        }
         features.push(report(feature, true, feature_changed, None));
+    }
+
+    // No rule-fetch I/O at the edge — the bundle is already in the binary — so
+    // `compute_time_ms` and `total_time_ms` are the same number here. Both keys
+    // are emitted anyway: the block must have ONE shape across hosts.
+    let elapsed_ms = ms_since(engine_start);
+    let total_time_ms = telemetry::fmt_ms(elapsed_ms);
+    let compute_time_ms = total_time_ms.clone();
+
+    // Inject the block into the body the reader gets, exactly as the proxy does:
+    // `rre.{feature_expressions,total_time_ms,compute_time_ms}` for JSON, a
+    // `window.rre` script for HTML. Only when >=1 feature changed the body.
+    if !matched_entries.is_empty() {
+        current = inject_telemetry(
+            current,
+            kind,
+            &matched_entries,
+            &total_time_ms,
+            &compute_time_ms,
+        );
     }
 
     ApplyOutcome {
         body: current,
         changed,
         features,
+        total_time_ms,
+        compute_time_ms,
+        feature_expressions: matched_entries,
+    }
+}
+
+/// Milliseconds elapsed since `start`, as the `f64` the timings carry.
+fn ms_since(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+/// One expression node's timing, labelled off the canvas.
+fn node_timing(canvas: &CanvasGraph, node_id: &str, start: Instant) -> NodeTiming {
+    let (label, custom_label) = telemetry::expression_label(canvas, node_id);
+    NodeTiming {
+        node_id: node_id.to_string(),
+        label,
+        custom_label,
+        time_ms: ms_since(start),
+    }
+}
+
+/// Add the `rre` block to the body. Fail-open in every direction: a body that
+/// cannot be parsed (JSON) is returned untouched rather than replaced, because
+/// losing the reader's article to a debug field is never the right trade.
+fn inject_telemetry(
+    body: String,
+    kind: BodyKind,
+    matched: &[(String, FeatureEntry)],
+    total_time_ms: &str,
+    compute_time_ms: &str,
+) -> String {
+    match kind {
+        BodyKind::Json => {
+            let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&body) else {
+                return body;
+            };
+            telemetry::inject_json(&mut value, matched, total_time_ms, compute_time_ms);
+            serde_json::to_string(&value).unwrap_or(body)
+        }
+        BodyKind::Html => telemetry::inject_html(body, matched, total_time_ms, compute_time_ms),
     }
 }
 
