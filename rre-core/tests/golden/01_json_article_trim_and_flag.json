@@ -1,0 +1,127 @@
+{
+  "description": "A JSON feature whose article_url decision matches and whose two expression nodes rewrite the body in trace order (trim first, then flag).",
+  "body_kind": "json",
+  "facts": {
+    "path": "/proxy/global/v2/content/2-1-1742531",
+    "site": "intrafish-com"
+  },
+  "bundle": {
+    "schema_version": 1,
+    "site": {
+      "slug": "intrafish-com",
+      "source_host": "test.intrafish.com"
+    },
+    "environment": "live",
+    "generated_at": "2026-09-07T00:00:00Z",
+    "features": [
+      {
+        "id": "article-metering",
+        "type": "json",
+        "execution_order": 1,
+        "version_number": 4,
+        "rule_graph": {
+          "canvas": {
+            "root_node_id": "s",
+            "nodes": [
+              {
+                "kind": "start",
+                "id": "s",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "decision",
+                "id": "d_url",
+                "processor": {
+                  "type": "article_url",
+                  "operator": "contains",
+                  "value": "/content/"
+                },
+                "position": {
+                  "x": 160,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_trim",
+                "custom_label": "Keep one paragraph",
+                "action": {
+                  "type": "trim_json",
+                  "json_path": "$.body",
+                  "length": 1
+                },
+                "position": {
+                  "x": 320,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_flag",
+                "action": {
+                  "type": "add_attribute",
+                  "json_path": "$.access",
+                  "value": "metered"
+                },
+                "position": {
+                  "x": 480,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "end",
+                "id": "n",
+                "position": {
+                  "x": 640,
+                  "y": 0
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "x1",
+                "source_node_id": "s",
+                "target_node_id": "d_url",
+                "branch": "yes"
+              },
+              {
+                "id": "x2",
+                "source_node_id": "d_url",
+                "target_node_id": "e_trim",
+                "branch": "yes"
+              },
+              {
+                "id": "x3",
+                "source_node_id": "e_trim",
+                "target_node_id": "e_flag",
+                "branch": "yes"
+              },
+              {
+                "id": "x4",
+                "source_node_id": "e_flag",
+                "target_node_id": "n",
+                "branch": "yes"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "body": "{\"id\":\"2-1-1742531\",\"access\":\"open\",\"body\":[{\"t\":\"Paragraph one.\"},{\"t\":\"Paragraph two.\"},{\"t\":\"Paragraph three.\"}]}",
+  "expected": {
+    "body": "{\"access\":\"metered\",\"body\":[{\"t\":\"Paragraph one.\"}],\"id\":\"2-1-1742531\"}",
+    "changed": true,
+    "features": [
+      {
+        "feature_id": "article-metering",
+        "version_number": 4,
+        "matched": true,
+        "changed": true
+      }
+    ]
+  }
+}

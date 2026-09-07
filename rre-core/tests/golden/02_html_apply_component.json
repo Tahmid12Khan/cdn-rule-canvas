@@ -1,0 +1,121 @@
+{
+  "description": "An HTML feature that renders a pre-resolved Component template and REPLACES the article body with it; pins the mustache render, the ammonia allow-list and the lol_html marker wrapper.",
+  "body_kind": "html",
+  "facts": {
+    "path": "/news/2-1-1742531",
+    "site": "intrafish-com"
+  },
+  "bundle": {
+    "schema_version": 1,
+    "site": {
+      "slug": "intrafish-com",
+      "source_host": "test.intrafish.com"
+    },
+    "environment": "live",
+    "generated_at": "2026-09-07T00:00:00Z",
+    "features": [
+      {
+        "id": "hard-paywall",
+        "type": "html",
+        "execution_order": 1,
+        "version_number": 2,
+        "applicability": {
+          "html_selector": "#dn-content-ssr"
+        },
+        "rule_graph": {
+          "canvas": {
+            "root_node_id": "s",
+            "nodes": [
+              {
+                "kind": "start",
+                "id": "s",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "decision",
+                "id": "d_site",
+                "processor": {
+                  "type": "site_match",
+                  "site": "intrafish-com"
+                },
+                "position": {
+                  "x": 160,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_wall",
+                "action": {
+                  "type": "apply_component",
+                  "component_id": "5a1f0d3c-2b44-4e6a-9c88-11f2a3b4c5d6",
+                  "version": "default",
+                  "target_selector": "#dn-content-ssr",
+                  "placement_mode": "replace",
+                  "variables": {
+                    "cta": "Subscribe now"
+                  }
+                },
+                "position": {
+                  "x": 320,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "end",
+                "id": "n",
+                "position": {
+                  "x": 480,
+                  "y": 0
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "x1",
+                "source_node_id": "s",
+                "target_node_id": "d_site",
+                "branch": "yes"
+              },
+              {
+                "id": "x2",
+                "source_node_id": "d_site",
+                "target_node_id": "e_wall",
+                "branch": "yes"
+              },
+              {
+                "id": "x3",
+                "source_node_id": "e_wall",
+                "target_node_id": "n",
+                "branch": "yes"
+              }
+            ]
+          }
+        },
+        "resolved_components": {
+          "5a1f0d3c-2b44-4e6a-9c88-11f2a3b4c5d6|default": {
+            "version_number": 3,
+            "html_body": "<section class=\"rre-paywall\"><h2>Subscribers only</h2><button class=\"cta\">{{cta}}</button><script>steal()</script></section>",
+            "variables": []
+          }
+        }
+      }
+    ]
+  },
+  "body": "<html><head><title>Article</title></head><body><div id=\"dn-content-ssr\"><p>Paragraph one.</p><p>Paragraph two.</p></div></body></html>",
+  "expected": {
+    "body": "<html><head><title>Article</title></head><body><div id=\"dn-content-ssr\"><div data-rre-injected=\"rc-5a1f0d3c-2b44-4e6a-9c88-11f2a3b4c5d6-3\"><section class=\"rre-paywall\"><h2>Subscribers only</h2><button class=\"cta\">Subscribe now</button></section></div></div></body></html>",
+    "changed": true,
+    "features": [
+      {
+        "feature_id": "hard-paywall",
+        "version_number": 2,
+        "matched": true,
+        "changed": true
+      }
+    ]
+  }
+}

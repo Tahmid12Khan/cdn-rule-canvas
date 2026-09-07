@@ -1,0 +1,66 @@
+{
+  "description": "The version-level applicability selector does not match this page, so the feature is skipped BEFORE evaluation and the body is untouched.",
+  "body_kind": "html",
+  "facts": {
+    "path": "/about",
+    "site": "intrafish-com"
+  },
+  "bundle": {
+    "schema_version": 1,
+    "site": { "slug": "intrafish-com", "source_host": "test.intrafish.com" },
+    "environment": "live",
+    "generated_at": "2026-09-07T00:00:00Z",
+    "features": [
+      {
+        "id": "hard-paywall",
+        "type": "html",
+        "execution_order": 1,
+        "version_number": 2,
+        "applicability": { "html_selector": "#dn-content-ssr" },
+        "rule_graph": {
+          "canvas": {
+            "root_node_id": "s",
+            "nodes": [
+              { "kind": "start", "id": "s", "position": { "x": 0, "y": 0 } },
+              {
+                "kind": "expression",
+                "id": "e_wall",
+                "action": {
+                  "type": "apply_saved_outcome",
+                  "saved_outcome_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                  "target_selector": "body",
+                  "placement_mode": "append"
+                },
+                "position": { "x": 160, "y": 0 }
+              },
+              { "kind": "end", "id": "n", "position": { "x": 320, "y": 0 } }
+            ],
+            "edges": [
+              { "id": "x1", "source_node_id": "s", "target_node_id": "e_wall", "branch": "yes" },
+              { "id": "x2", "source_node_id": "e_wall", "target_node_id": "n", "branch": "yes" }
+            ]
+          }
+        },
+        "saved_outcomes": {
+          "7c9e6679-7425-40de-944b-e07fc1f90ae7": {
+            "html_body": "<section class=\"rre-regwall\"><h2>Register to read on</h2></section>"
+          }
+        }
+      }
+    ]
+  },
+  "body": "<html><body><div id=\"marketing\"><p>About us.</p></div></body></html>",
+  "expected": {
+    "body": "<html><body><div id=\"marketing\"><p>About us.</p></div></body></html>",
+    "changed": false,
+    "features": [
+      {
+        "feature_id": "hard-paywall",
+        "version_number": 2,
+        "matched": false,
+        "changed": false,
+        "skipped_reason": "applicability"
+      }
+    ]
+  }
+}

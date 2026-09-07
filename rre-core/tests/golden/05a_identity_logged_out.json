@@ -1,0 +1,163 @@
+{
+  "description": "Identity routing, LOGGED-OUT branch. Same bundle as 05b: a visitor without the `ifcofa` product takes the NO branch, loses the article body and is flagged paywalled.",
+  "body_kind": "json",
+  "facts": {
+    "path": "/proxy/global/v2/content/2-1-1742531",
+    "site": "intrafish-com",
+    "identity": {
+      "logged_in": false,
+      "products": []
+    }
+  },
+  "bundle": {
+    "schema_version": 1,
+    "site": {
+      "slug": "intrafish-com",
+      "source_host": "test.intrafish.com"
+    },
+    "environment": "live",
+    "generated_at": "2026-09-07T00:00:00Z",
+    "features": [
+      {
+        "id": "entitlement-gate",
+        "type": "json",
+        "execution_order": 1,
+        "version_number": 7,
+        "rule_graph": {
+          "canvas": {
+            "root_node_id": "s",
+            "nodes": [
+              {
+                "kind": "start",
+                "id": "s",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "decision",
+                "id": "d_prod",
+                "processor": {
+                  "type": "has_product",
+                  "product": "ifcofa"
+                },
+                "position": {
+                  "x": 160,
+                  "y": 0
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_grant",
+                "custom_label": "Entitled",
+                "action": {
+                  "type": "add_attribute",
+                  "json_path": "$.access",
+                  "value": "granted"
+                },
+                "position": {
+                  "x": 320,
+                  "y": -80
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_strip",
+                "action": {
+                  "type": "trim_json",
+                  "json_path": "$.body",
+                  "length": 0
+                },
+                "position": {
+                  "x": 320,
+                  "y": 80
+                }
+              },
+              {
+                "kind": "expression",
+                "id": "e_deny",
+                "action": {
+                  "type": "add_attribute",
+                  "json_path": "$.access",
+                  "value": "paywalled"
+                },
+                "position": {
+                  "x": 480,
+                  "y": 80
+                }
+              },
+              {
+                "kind": "end",
+                "id": "n_yes",
+                "position": {
+                  "x": 640,
+                  "y": -80
+                }
+              },
+              {
+                "kind": "end",
+                "id": "n_no",
+                "position": {
+                  "x": 640,
+                  "y": 80
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "x1",
+                "source_node_id": "s",
+                "target_node_id": "d_prod",
+                "branch": "yes"
+              },
+              {
+                "id": "x2",
+                "source_node_id": "d_prod",
+                "target_node_id": "e_grant",
+                "branch": "yes"
+              },
+              {
+                "id": "x3",
+                "source_node_id": "d_prod",
+                "target_node_id": "e_strip",
+                "branch": "no"
+              },
+              {
+                "id": "x4",
+                "source_node_id": "e_grant",
+                "target_node_id": "n_yes",
+                "branch": "yes"
+              },
+              {
+                "id": "x5",
+                "source_node_id": "e_strip",
+                "target_node_id": "e_deny",
+                "branch": "yes"
+              },
+              {
+                "id": "x6",
+                "source_node_id": "e_deny",
+                "target_node_id": "n_no",
+                "branch": "yes"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "body": "{\"id\":\"2-1-1742531\",\"body\":[{\"t\":\"Paragraph one.\"},{\"t\":\"Paragraph two.\"}]}",
+  "expected": {
+    "body": "{\"access\":\"paywalled\",\"body\":[],\"id\":\"2-1-1742531\"}",
+    "changed": true,
+    "features": [
+      {
+        "feature_id": "entitlement-gate",
+        "version_number": 7,
+        "matched": true,
+        "changed": true
+      }
+    ]
+  }
+}
