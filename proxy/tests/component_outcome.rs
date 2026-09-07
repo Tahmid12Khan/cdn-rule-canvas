@@ -12,7 +12,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::json_apply::{apply_outcome_json, ResolvedComponentMap};
 use rre_proxy::domain::applier::orchestrator::apply_outcome;
 use rre_proxy::infra::backend_client::{
@@ -22,7 +21,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 fn sanitizer() -> ammonia::Builder<'static> {
-    load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 const CID: &str = "55555555-5555-5555-5555-555555555555";

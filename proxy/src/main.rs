@@ -64,11 +64,18 @@ async fn main() -> anyhow::Result<()> {
 
     let registry = default_registry();
 
-    let sanitizer =
-        rre_proxy::domain::applier::html_sanitizer::load_sanitizer(&settings.sanitizer_config_path)
-            .with_context(|| {
-                format!("loading sanitizer from {}", settings.sanitizer_config_path)
-            })?;
+    // Prefer the configured allow-list; fall back to the one embedded in
+    // `rre-core` — the same bytes, and the only one the Fastly edge service can
+    // use. An unreadable path is a misconfiguration, not a reason to refuse to
+    // start with an UNSANITIZED pipeline.
+    let sanitizer = rre_core::load_sanitizer(&settings.sanitizer_config_path).unwrap_or_else(|e| {
+        tracing::warn!(
+            error = %e,
+            path = %settings.sanitizer_config_path,
+            "sanitizer config unreadable; using the embedded allow-list"
+        );
+        rre_core::default_sanitizer()
+    });
 
     let bind_addr = settings.proxy_bind_addr.clone();
 

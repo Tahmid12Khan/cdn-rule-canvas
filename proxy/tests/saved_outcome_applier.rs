@@ -11,7 +11,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::json_apply::{
     apply_action_html, apply_action_json, ResolvedComponentMap, ResolvedSavedOutcomeMap,
 };
@@ -20,7 +19,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 fn sanitizer() -> ammonia::Builder<'static> {
-    load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 /// Empty pre-resolved component map: these tests exercise Saved Outcome

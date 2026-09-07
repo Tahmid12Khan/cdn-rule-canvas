@@ -1,11 +1,10 @@
-use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::placement_popup;
 use rre_proxy::infra::backend_client::{ActiveComponent, Placement};
 use serde_json::json;
 use uuid::Uuid;
 
 fn sanitizer() -> ammonia::Builder<'static> {
-    load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 fn component() -> ActiveComponent {

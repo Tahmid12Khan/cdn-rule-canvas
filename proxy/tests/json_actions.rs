@@ -23,7 +23,7 @@ fn no_saved_outcomes() -> ResolvedSavedOutcomeMap {
 
 /// Sanitizer for the dispatcher tests (apply_action_* now take one).
 fn sanitizer() -> ammonia::Builder<'static> {
-    rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 // ---------------------------------------------------------------------------
@@ -259,9 +259,7 @@ fn apply_action_json_apply_outcome_missing_outcome_is_noop() {
 
 #[test]
 fn apply_action_html_trim_and_add_are_noops() {
-    let sanitizer =
-        rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
-            .unwrap();
+    let sanitizer = rre_core::default_sanitizer();
     let html = "<html><body>x</body></html>".to_string();
 
     let trim = json!({ "type": "trim_json", "json_path": "$.body", "length": 0 });
@@ -291,9 +289,7 @@ fn apply_action_html_trim_and_add_are_noops() {
 
 #[test]
 fn apply_action_html_apply_outcome_injects() {
-    let sanitizer =
-        rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
-            .unwrap();
+    let sanitizer = rre_core::default_sanitizer();
     let outcomes: Vec<ActiveOutcome> = serde_json::from_value(json!([
         {
             "id": "22222222-2222-2222-2222-222222222222",

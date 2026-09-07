@@ -39,9 +39,7 @@ async fn metrics_endpoint_responds() {
     let component_cache = ComponentCache::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
     let saved_outcome_cache =
         SavedOutcomeCache::new(http.clone(), "http://127.0.0.1:1".to_string(), 30);
-    let sanitizer =
-        rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
-            .unwrap();
+    let sanitizer = rre_core::default_sanitizer();
 
     let state = AppState {
         settings: Arc::new(settings()),

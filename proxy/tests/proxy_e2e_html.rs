@@ -158,9 +158,7 @@ async fn spawn_with_cap(upstream: &str, backend: &str, max_upstream_body_bytes: 
     let backend_client = BackendClient::new(http.clone(), backend.to_string(), 30);
     let component_cache = ComponentCache::new(http.clone(), backend.to_string(), 30);
     let saved_outcome_cache = SavedOutcomeCache::new(http.clone(), backend.to_string(), 30);
-    let sanitizer =
-        rre_proxy::domain::applier::html_sanitizer::load_sanitizer("config/sanitizer.yaml")
-            .unwrap();
+    let sanitizer = rre_core::default_sanitizer();
 
     let state = AppState {
         settings: Arc::new(settings),

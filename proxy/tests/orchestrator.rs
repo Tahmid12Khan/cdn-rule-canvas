@@ -1,4 +1,3 @@
-use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::json_apply::ResolvedComponentMap;
 use rre_proxy::domain::applier::orchestrator::apply_outcome;
 use rre_proxy::infra::backend_client::{ActiveComponent, ActiveOutcome, Placement};
@@ -6,7 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 fn sanitizer() -> ammonia::Builder<'static> {
-    load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 /// Empty pre-resolved map for tests that exercise the built-in component types

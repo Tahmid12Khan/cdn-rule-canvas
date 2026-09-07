@@ -12,12 +12,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use moka::future::Cache;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use serde::Deserialize;
 
 // The wire DTOs live in `rre-core` so the proxy, the backend and the Fastly
 // edge service all deserialize the same structs. Re-exported here so the
 // proxy's own import paths are unchanged.
+use rre_core::graph::RuleGraph;
+
 pub use rre_core::bundle::{
     ActiveComponent, ActiveOutcome, ActiveVersionRead, Applicability, Placement, ResolvedComponent,
     VersionSelector,

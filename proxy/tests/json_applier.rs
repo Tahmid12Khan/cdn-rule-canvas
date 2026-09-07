@@ -3,14 +3,13 @@
 //! covering remove / set (upsert + intermediate creation) / replace (exists-only),
 //! per-component fail-open, and idempotency.
 
-use rre_proxy::domain::applier::html_sanitizer::load_sanitizer;
 use rre_proxy::domain::applier::json_apply::{apply_outcome_json, ResolvedComponentMap};
 use rre_proxy::domain::applier::json_path::{self, ParsePathError, Seg};
 use rre_proxy::infra::backend_client::ActiveOutcome;
 use serde_json::{json, Value};
 
 fn sanitizer() -> ammonia::Builder<'static> {
-    load_sanitizer("config/sanitizer.yaml").unwrap()
+    rre_core::default_sanitizer()
 }
 
 /// Empty pre-resolved map for tests that exercise the built-in JSON component
