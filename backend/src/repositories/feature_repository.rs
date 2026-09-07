@@ -69,6 +69,22 @@ pub async fn list_paged(
         .await
 }
 
+/// Every feature in execution-priority order — `type ASC, execution_order ASC`
+/// — UNPAGINATED. The edge-bundle exporter needs the complete, ordered set in
+/// one read: the bundle's `features` array order IS the order a host runs them
+/// in, so a page boundary would silently drop rules at the edge.
+///
+/// `rre.feature_type` is declared `('html', 'json')`, so `"type" ASC` is html
+/// before json — the ordering the bundle contract states.
+pub async fn list_all(pool: &PgPool) -> Result<Vec<Feature>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT {COLS} FROM rre.features ORDER BY "type" ASC, execution_order ASC, id ASC"#
+    );
+    sqlx::query_as::<_, Feature>(sqlx::AssertSqlSafe(sql))
+        .fetch_all(pool)
+        .await
+}
+
 /// Count all features (for the pagination envelope).
 pub async fn count(pool: &PgPool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM rre.features")

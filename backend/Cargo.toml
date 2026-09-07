@@ -54,6 +54,11 @@ serde_with = "3"
 mustache = "0.9"
 # Engine path dep (proxy is the primary consumer; included here per scaffold task spec).
 zen-engine = { path = "../core/engine" }
+# Shared rule crate. The edge-bundle exporter RETURNS `rre_core::edge::EdgeBundle`
+# rather than a backend mirror, and reuses the applier's own reference detectors,
+# so the exporter and the hosts that consume the bundle cannot disagree on either
+# the wire shape or what counts as a component / saved-outcome reference.
+rre-core = { path = "../rre-core" }
 
 [dev-dependencies]
 testcontainers = "0.27"

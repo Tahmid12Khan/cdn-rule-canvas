@@ -3,6 +3,7 @@
 
 // Domain-owned leaf modules (filled by domain agents):
 pub mod component_template_service;
+pub mod edge_bundle_service;
 pub mod feature_service;
 pub mod outcome_service;
 pub mod product_service;

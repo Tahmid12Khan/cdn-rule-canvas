@@ -53,6 +53,14 @@ pub async fn list(pool: &PgPool, params: &PageParams) -> AppResult<Page<FeatureR
     Ok(Page::new(items, page, page_size, total))
 }
 
+/// Every feature in execution-priority order (`type ASC, execution_order ASC`),
+/// UNPAGINATED. Used by the edge-bundle exporter, which must see the whole set:
+/// the bundle's array order is the order the edge runs rules in.
+pub async fn list_ordered(pool: &PgPool) -> AppResult<Vec<FeatureRead>> {
+    let rows = repo::list_all(pool).await?;
+    Ok(rows.into_iter().map(FeatureRead::from).collect())
+}
+
 /// Fetch a single feature by slug. Absent → [`AppError::FeatureNotFound`].
 pub async fn get(pool: &PgPool, id: &str) -> AppResult<FeatureRead> {
     let feature = repo::find(pool, id).await?.ok_or_else(|| not_found(id))?;
