@@ -83,6 +83,7 @@ use crate::{
         sites::get,
         sites::update,
         sites::delete,
+        sites::edge_bundle,
         test_presets::create,
         test_presets::list,
         test_presets::get,

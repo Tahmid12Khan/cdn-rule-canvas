@@ -540,6 +540,10 @@ GET    /api/v1/sites                          -> sites::list             -> site
 GET    /api/v1/sites/{slug}                   -> sites::get              -> site_service::get
 PATCH  /api/v1/sites/{slug}                   -> sites::update           -> site_service::update
 DELETE /api/v1/sites/{slug}                   -> sites::delete           -> site_service::delete
+GET    /api/v1/sites/{slug}/edge-bundle?env=  -> sites::edge_bundle      -> edge_bundle_service::build
+# ?env=live|staging (default live). An unrecognised env is rejected by the extractor -> 400 (NOT the
+# uniform envelope); unknown slug -> 404 SITE_NOT_FOUND. Body = EdgeBundle (see below). Also available
+# offline as `cargo run --bin export_bundle -- --site <slug> --env live`, which calls the SAME service.
 
 # Products (Product Catalogue; global, snake_case `label` PK. ?q name filter + pagination)
 POST   /api/v1/products                       -> products::create        -> product_service::create (201)
@@ -697,8 +701,8 @@ DOMAIN-owned (leaf files, filled by domain agents): `src/api/v1/{features,versio
 products,saved_outcomes}.rs`, `src/models/{feature,version,outcome,component,product,saved_outcome}.rs`,
 `src/schemas/{feature,version,outcome,component,rule_graph,active_version,product,saved_outcome}.rs`,
 `src/repositories/{feature,version,outcome,component,product,saved_outcome}_repository.rs`,
-`src/services/{feature,version,outcome,rule_graph,product,saved_outcome}_service.rs`,
-`src/bin/{seed_demo,export_schema}.rs`,
+`src/services/{feature,version,outcome,rule_graph,product,saved_outcome,edge_bundle}_service.rs`,
+`src/bin/{seed_demo,export_schema,export_bundle}.rs`,
 `migrations/000{2,3,4,5}_*.{up,down}.sql`, the remaining `tests/*.rs`. Each `api/v1/*` handler module
 exposes `pub fn router() -> Router<AppState>` merged in `api/v1/mod.rs`.
 
@@ -711,6 +715,38 @@ pub struct ActiveComponent { pub id: Uuid, pub slug: String, pub r#type: String,
 ```
 
 `outcomes` and `outcomes[*].components` are ordered by `order_index ASC`.
+
+### EdgeBundle (edge export — EXACT, defined in `rre-core/src/edge.rs`)
+
+One self-contained document holding everything a host needs to evaluate a site's published rules with
+NO further I/O. The backend does NOT mirror these types: `edge_bundle_service::build` returns
+`rre_core::edge::EdgeBundle` itself, so the exporter and every consumer (the proxy, the Fastly Compute
+guest) share one definition and cannot skew.
+
+```rust
+pub const SCHEMA_VERSION: u32 = 1;
+pub struct EdgeBundle { pub schema_version: u32, pub site: EdgeSite, pub environment: String, pub generated_at: String, pub features: Vec<EdgeFeature> }
+pub struct EdgeSite { pub slug: String, pub source_host: String }
+pub struct EdgeFeature { pub id: String, pub r#type: String, pub execution_order: i32, pub version_number: i32,
+                         pub applicability: Applicability, pub rule_graph: RuleGraph, pub outcomes: Vec<ActiveOutcome>,
+                         pub resolved_components: HashMap<String, ResolvedComponent>,
+                         pub saved_outcomes: HashMap<Uuid, ResolvedSavedOutcome> }
+```
+
+- **`features` is sorted by `(type, execution_order)` ASC — html before json — and that sort is PART OF
+  THE CONTRACT.** A host runs `features` in ARRAY ORDER and never re-sorts, so the ordering decision
+  lives in exactly one place: the exporter.
+- `environment` is `"live"` or `"staging"`; `generated_at` is RFC 3339.
+- A feature with no published version for the environment is OMITTED, not exported with an empty canvas.
+- `resolved_components` is keyed `"<uuid>|default"` / `"<uuid>|<N>"` — build it with
+  `rre_core::edge::component_key(id, &selector)`, never by hand.
+- Both reference tables are resolved STATICALLY at export time: every expression node in the canvas AND
+  every component of every outcome, regardless of routing. Detection uses the applier's own helpers
+  (`json_apply::component_ref`, `json_apply::saved_outcome_ref`, `component_ref::config_ref`) so a
+  reference the runtime will look up is exactly one the exporter resolved.
+- A dangling reference (component/version/saved outcome deleted since publish) is logged and OMITTED
+  from the table rather than failing the export; the appliers already treat an unresolved reference as
+  "skip this action" (fail-open).
 
 ---
 
