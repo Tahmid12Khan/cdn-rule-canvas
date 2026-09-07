@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" class="light" data-tpl="quiet">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RRE · Progressive templates</title>
+  <style>
+    :root {
+      --live: #16a34a;
+      --staging: #d97706;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    html.light {
+      --bg: #fafafa; --elev: #fff; --border: #e4e6ea; --strong: #d0d3d9;
+      --fg: #1a1d21; --muted: #5b626c; --subtle: #9098a2;
+      --accent: #0ea5a4; --accent-muted: #eef9f8; --accent-on: #0f766e;
+      --nav: #fff; --rail: #14171c; --rail-fg: #e6e8eb; --dot: #d1d5db;
+      --live-bg: #dcfce7; --live-fg: #166534;
+      --staging-bg: #fef3c7; --staging-fg: #92400e;
+      --paper: #fff;
+    }
+    html.dark {
+      --bg: #0e1014; --elev: #14171c; --border: #232831; --strong: #2f3540;
+      --fg: #e6e8eb; --muted: #b3bac4; --subtle: #868d97;
+      --accent: #0ea5a4; --accent-muted: #123230; --accent-on: #2dd4bf;
+      --nav: #14171c; --rail: #0b0d11; --rail-fg: #e6e8eb; --dot: #2a313c;
+      --live-bg: #0f2a1c; --live-fg: #4ec98a;
+      --staging-bg: #2e220f; --staging-fg: #e0a44a;
+      --paper: #fff;
+    }
+    html[data-tpl="newsroom"].light {
+      --bg: #f3eee4; --elev: #fffdf8; --border: #e4d9c8; --strong: #d3c4ae;
+      --fg: #1c1916; --muted: #6b6156; --subtle: #94897c;
+      --accent: #0f766e; --accent-muted: #e7f3f1; --accent-on: #0f766e;
+      --nav: #fffdf8; --dot: #d8cbb8;
+    }
+    html[data-tpl="newsroom"].dark {
+      --bg: #14110e; --elev: #1c1814; --border: #2e2820; --strong: #3d3429;
+      --fg: #f3eee4; --muted: #c4b8a8; --subtle: #8f8476;
+      --accent: #2dd4bf; --accent-muted: #1a2e2a; --accent-on: #2dd4bf;
+      --nav: #1c1814; --dot: #3d3429;
+    }
+    html[data-tpl="ledger"].light { --bg: #f6f7f9; --elev: #fff; --border: #e6e8ec; }
+    html[data-tpl="audience"].light { --bg: #f7f8fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #4b5563; color: var(--fg); }
+    html.dark body { background: #111827; }
+    .studio { min-height: 100vh; display: flex; flex-direction: column; }
+    .bar {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      padding: 10px 16px; background: #111827; color: #e5e7eb; font-size: 12px;
+    }
+    .bar strong { color: #fff; font-size: 13px; }
+    .bar .desc { color: #9ca3af; width: 100%; margin: 0; }
+    .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+    .seg button {
+      border: 1px solid #4b5563; background: transparent; color: #d1d5db;
+      border-radius: 999px; padding: 5px 10px; font: inherit; cursor: pointer;
+    }
+    .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .stage { flex: 1; padding: 18px; display: flex; justify-content: center; }
+    .device {
+      width: min(1180px, 100%); height: 800px; background: var(--bg);
+      border: 1px solid #374151; border-radius: 10px; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    html[data-tpl="sidebar"] .device { flex-direction: row; }
+    .topnav {
+      height: 52px; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px; background: var(--nav); border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 16px; }
+    .logo { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; }
+    .swatch { width: 10px; height: 10px; background: var(--accent); border-radius: 2px; }
+    .links a { color: var(--muted); text-decoration: none; font-size: 13px; margin-right: 14px; }
+    .links a.on { color: var(--fg); font-weight: 600; }
+    .links a.quiet { color: var(--subtle); }
+    .tenant { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+    .page { flex: 1; overflow: auto; padding: 28px 32px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
+    html[data-tpl="newsroom"] h1 { font-family: "Iowan Old Style", Georgia, serif; font-weight: 600; letter-spacing: 0; }
+    .lede { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+    .btn { border: 0; border-radius: 6px; padding: 8px 14px; font: 600 13px Inter, sans-serif; }
+    .btn-p { background: var(--accent); color: #fff; }
+    .btn-g { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+    .chips { display: flex; gap: 8px; margin-bottom: 16px; }
+    .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+    .chip.on { background: var(--accent-muted); color: var(--accent-on); border-color: transparent; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card {
+      background: var(--elev); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; min-height: 140px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .card h3 { margin: 0; font-size: 15px; }
+    .card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .acts { margin-top: auto; font-size: 12px; font-weight: 600; color: var(--accent-on); }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .p-live { background: var(--live-bg); color: var(--live-fg); } .p-live .dot { background: var(--live); }
+    .p-st { background: var(--staging-bg); color: var(--staging-fg); } .p-st .dot { background: var(--staging); }
+    .p-dr { border: 1px solid var(--strong); color: var(--muted); } .p-dr .dot { background: var(--subtle); }
+    .dev {
+      margin-top: 20px; border: 1px dashed var(--strong); border-radius: 8px;
+      padding: 10px 12px; color: var(--subtle); font-size: 12px;
+      display: flex; justify-content: space-between;
+    }
+    .rail {
+      width: 212px; background: var(--rail); color: var(--rail-fg); padding: 18px 14px;
+      display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+    }
+    .rail .logo { color: #fff; margin-bottom: 14px; }
+    .rail a { color: #9ca3af; text-decoration: none; font-size: 13px; padding: 8px 10px; border-radius: 6px; display: block; }
+    .rail a.on { background: #1f2937; color: #fff; }
+    .rail a.quiet { color: #6b7280; margin-top: auto; }
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .split { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+    .list { border-right: 1px solid var(--border); overflow: auto; background: var(--elev); }
+    .item { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .item.on { background: var(--accent-muted); }
+    .item h3 { margin: 0 0 4px; font-size: 14px; }
+    .item p { margin: 0; font-size: 12px; color: var(--muted); }
+    .preview-pane { padding: 20px; overflow: auto; }
+    .article {
+      background: var(--paper); color: #1a1d21; border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; min-height: 360px; position: relative;
+    }
+    .article-in { padding: 20px 22px 90px; }
+    .kicker { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; }
+    .article h2 { font-size: 20px; margin: 8px 0 10px; }
+    .article p { color: #4b5563; font-size: 14px; line-height: 1.55; margin: 0 0 8px; }
+    .wall {
+      position: absolute; left: 0; right: 0; bottom: 0; background: #fff;
+      border-top: 1px solid #e5e7eb; padding: 14px; text-align: center;
+    }
+    .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; height: calc(100% - 90px); }
+    .col { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .col h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--subtle); }
+    .mini { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; background: var(--bg); }
+    table { width: 100%; border-collapse: collapse; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--subtle); padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    td { padding: 14px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+    .mast {
+      border-bottom: 2px solid var(--fg); padding-bottom: 10px; margin-bottom: 18px;
+      display: flex; justify-content: space-between; align-items: end;
+    }
+    .mast small { color: var(--subtle); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+    .feat { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+    .feat-card { background: var(--elev); border: 1px solid var(--border); padding: 18px; }
+    html[data-tpl="newsroom"] .feat-card h3 { font-family: Georgia, serif; font-size: 22px; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="studio">
+    <div class="bar">
+      <strong>Progressive templates</strong>
+      <div class="seg" id="tpl"></div>
+      <div class="seg" id="theme">
+        <button data-t="light" class="on">Light</button>
+        <button data-t="dark">Dark</button>
+      </div>
+      <p class="desc" id="desc"></p>
+    </div>
+    <div class="stage"><div class="device" id="device"></div></div>
+  </div>
+  <script>
+    const TPL = [
+      ["quiet", "Quiet cards", "The current mock: top nav, three outcome cards, Developer as a dashed row."],
+      ["sidebar", "App sidebar", "Product shell with a left rail. Content is the same, chrome feels more like an app."],
+      ["inspector", "List + preview", "Pick an experience on the left, see the visitor preview on the right. Marketing’s default screen."],
+      ["newsroom", "Newsroom desk", "Editorial masthead and paper surfaces. Same IA, publishing-desk tone."],
+      ["audience", "Audience board", "Columns by who sees it — anonymous, subscribers, everyone — instead of a flat card grid."],
+      ["ledger", "Status ledger", "Stripe-like table: name, who sees it, status. Highest density, still no IDs on the face."],
+    ];
+    const DATA = [
+      { title: "Article paywall", who: "Anonymous mobile visitors see a subscribe wall.", status: "live" },
+      { title: "Newsletter registration", who: "New desktop visitors see a sign-up prompt.", status: "staging" },
+      { title: "Subscriber full article", who: "Paying readers always see the full story.", status: "draft" },
+    ];
+    let tpl = "quiet", theme = "light";
+
+    function pill(s) {
+      if (s === "live") return `<span class="pill p-live"><i class="dot"></i> Live</span>`;
+      if (s === "staging") return `<span class="pill p-st"><i class="dot"></i> Staging</span>`;
+      return `<span class="pill p-dr"><i class="dot"></i> Draft</span>`;
+    }
+    function topnav() {
+      return `<div class="topnav">
+        <div class="brand"><div class="logo"><span class="swatch"></span> RRE</div>
+          <div class="links"><a class="on" href="#">Experiences</a><a href="#">Sites</a><a href="#">Library</a><a class="quiet" href="#">Developer</a></div>
+        </div><span class="tenant">Demo</span></div>`;
+    }
+    function cards() {
+      return `<div class="cards">${DATA.map(d => `<div class="card"><h3>${d.title}</h3><p>${d.who}</p>${pill(d.status)}<div class="acts">Preview · Edit</div></div>`).join("")}</div>
+        <div class="dev">Developer details <span>IDs, order, JSON / API rules</span></div>`;
+    }
+    function head(title, lede, cta) {
+      return `<div class="head"><div><h1>${title}</h1><p class="lede">${lede}</p></div><button class="btn btn-p">${cta}</button></div>`;
+    }
+    function quiet() {
+      return topnav() + `<div class="page">${head("Experiences", "Control what visitors see on your sites.", "New experience")}
+        <div class="chips"><span class="chip on">All</span><span class="chip">Live</span><span class="chip">Draft</span></div>${cards()}</div>`;
+    }
+    function sidebar() {
+      return `<aside class="rail">
+        <div class="logo"><span class="swatch"></span> RRE</div>
+        <a class="on" href="#">Experiences</a><a href="#">Sites</a><a href="#">Library</a>
+        <a class="quiet" href="#">Developer</a>
+      </aside>
+      <div class="main">
+        <div class="topnav"><div class="lede" style="margin:0">Demo tenant</div><button class="btn btn-p">New experience</button></div>
+        <div class="page">${head("Experiences", "Control what visitors see on your sites.", "New experience")}${cards()}</div>
+      </div>`;
+    }
+    function inspector() {
+      return topnav() + `<div class="split">
+        <div class="list">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <strong>Experiences</strong><button class="btn btn-p">New</button>
+          </div>
+          ${DATA.map((d,i) => `<div class="item ${i===0?"on":""}"><h3>${d.title}</h3><p>${d.who}</p>${pill(d.status)}</div>`).join("")}
+          <div class="dev" style="margin:12px">Developer</div>
+        </div>
+        <div class="preview-pane">
+          <div class="chips"><span class="chip on">Mobile</span><span class="chip">Desktop</span><span class="chip on">Anonymous</span><span class="chip">Subscriber</span></div>
+          <p class="lede" style="margin-bottom:12px">This visitor sees the subscribe wall because they are on a phone and not subscribed.</p>
+          <div class="article"><div class="article-in">
+            <div class="kicker">Business · 6 min read</div>
+            <h2>Ports, paper, and the next shipping cycle</h2>
+            <p>Terminal operators say the autumn peak is arriving earlier than usual.</p>
+          </div>
+          <div class="wall"><strong>Keep reading with a digital subscription</strong><div style="margin-top:8px"><button class="btn btn-p">Subscribe</button></div></div>
+          </div>
+        </div>
+      </div>`;
+    }
+    function newsroom() {
+      return topnav() + `<div class="page">
+        <div class="mast"><div><small>On site now</small><h1>Experiences</h1></div><button class="btn btn-p">New experience</button></div>
+        <div class="feat">
+          <div class="feat-card">
+            ${pill("live")}
+            <h3>Article paywall</h3>
+            <p class="lede">Anonymous mobile visitors see a subscribe wall.</p>
+            <div class="acts">Preview · Edit</div>
+          </div>
+          <div>
+            <div class="card" style="min-height:auto;margin-bottom:10px"><h3>Newsletter registration</h3><p>New desktop visitors see a sign-up prompt.</p>${pill("staging")}</div>
+            <div class="card" style="min-height:auto"><h3>Subscriber full article</h3><p>Paying readers always see the full story.</p>${pill("draft")}</div>
+          </div>
+        </div>
+        <div class="dev">Desk notes · Developer details</div>
+      </div>`;
+    }
+    function audience() {
+      const cols = [
+        ["Anonymous", [DATA[0], DATA[1]]],
+        ["Subscribers", [DATA[2]]],
+        ["Everyone", []],
+      ];
+      return topnav() + `<div class="page">${head("Experiences", "Grouped by who the visitor is — not by technical type.", "New experience")}
+        <div class="cols">${cols.map(([name, items]) => `<div class="col"><h4>${name}</h4>
+          ${items.map(d => `<div class="mini"><h3 style="margin:0 0 6px;font-size:14px">${d.title}</h3><p style="margin:0 0 8px;font-size:12px;color:var(--muted)">${d.who}</p>${pill(d.status)}</div>`).join("") || `<p class="lede">Nothing in this audience yet.</p>`}
+        </div>`).join("")}</div>
+        <div class="dev">Developer details</div>
+      </div>`;
+    }
+    function ledger() {
+      return topnav() + `<div class="page">${head("Experiences", "A compact ledger of what is live, staging, or still a draft.", "New experience")}
+        <table>
+          <thead><tr><th>Experience</th><th>Who sees it</th><th>Status</th><th></th></tr></thead>
+          <tbody>${DATA.map(d => `<tr><td><strong>${d.title}</strong></td><td style="color:var(--muted)">${d.who}</td><td>${pill(d.status)}</td><td class="acts">Preview · Edit</td></tr>`).join("")}</tbody>
+        </table>
+        <div class="dev">Developer columns · IDs, order, type</div>
+      </div>`;
+    }
+    const renderers = { quiet, sidebar, inspector, newsroom, audience, ledger };
+    function render() {
+      document.documentElement.className = theme;
+      document.documentElement.dataset.tpl = tpl;
+      document.getElementById("device").innerHTML = renderers[tpl]();
+      document.getElementById("tpl").innerHTML = TPL.map(([id, label]) =>
+        `<button data-id="${id}" class="${tpl===id?"on":""}">${label}</button>`).join("");
+      document.getElementById("desc").textContent = TPL.find(t => t[0]===tpl)[2];
+      document.querySelectorAll("#tpl button").forEach(b => b.onclick = () => { tpl = b.dataset.id; location.hash = `${tpl}/${theme}`; render(); });
+    }
+    document.getElementById("theme").onclick = (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      theme = b.dataset.t;
+      [...e.currentTarget.children].forEach(x => x.classList.toggle("on", x === b));
+      location.hash = `${tpl}/${theme}`; render();
+    };
+    const h = location.hash.replace("#","").split("/");
+    if (h[0]) tpl = h[0];
+    if (h[1]) theme = h[1];
+    [...document.querySelectorAll("#theme button")].forEach(x => x.classList.toggle("on", x.dataset.t === theme));
+    render();
+  </script>
+</body>
+</html>

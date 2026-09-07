@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RRE UI mocks</title>
+  <style>
+    :root {
+      --accent: #0ea5a4;
+      --accent-700: #0d9488;
+      --live: #16a34a;
+      --live-fg: #166534;
+      --live-bg: #dcfce7;
+      --staging: #d97706;
+      --staging-fg: #92400e;
+      --staging-bg: #fef3c7;
+      --radius: 6px;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    html.light {
+      --bg: #fafafa;
+      --elev: #ffffff;
+      --overlay: #f3f4f6;
+      --border: #e4e6ea;
+      --strong: #d0d3d9;
+      --fg: #1a1d21;
+      --muted: #5b626c;
+      --subtle: #9098a2;
+      --accent-muted: #eef9f8;
+      --accent-on: #0f766e;
+      --nav: #ffffff;
+      --dot: #d1d5db;
+      --draft-fg: #5b626c;
+      --live-bg: #dcfce7;
+      --live-fg: #166534;
+      --staging-bg: #fef3c7;
+      --staging-fg: #92400e;
+      --on-accent: #ffffff;
+    }
+    html.dark {
+      --bg: #0e1014;
+      --elev: #14171c;
+      --overlay: #1a1e24;
+      --border: #232831;
+      --strong: #2f3540;
+      --fg: #e6e8eb;
+      --muted: #b3bac4;
+      --subtle: #868d97;
+      --accent-muted: #123230;
+      --accent-on: #2dd4bf;
+      --nav: #14171c;
+      --dot: #2a313c;
+      --draft-fg: #b3bac4;
+      --live-bg: #0f2a1c;
+      --live-fg: #4ec98a;
+      --staging-bg: #2e220f;
+      --staging-fg: #e0a44a;
+      --on-accent: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #6b7280;
+      color: var(--fg);
+    }
+    html.dark body { background: #111827; }
+
+    .studio {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .studio-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 10px 16px;
+      background: #111827;
+      color: #e5e7eb;
+      font-size: 12px;
+    }
+    html.light .studio-bar { background: #1f2937; }
+    .studio-bar strong { font-size: 13px; color: #fff; }
+    .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+    .seg button {
+      border: 1px solid #4b5563;
+      background: transparent;
+      color: #d1d5db;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .seg button.on {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .hint { margin-left: auto; color: #9ca3af; }
+
+    .stage {
+      flex: 1;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+    }
+    .device {
+      width: min(1180px, 100%);
+      height: 780px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid #374151;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topnav {
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--nav);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 18px; }
+    .logo {
+      display: flex; align-items: center; gap: 8px;
+      font-weight: 650; font-size: 14px;
+    }
+    .swatch { width: 10px; height: 10px; background: var(--accent); border-radius: 2px; }
+    .nav-links { display: flex; gap: 16px; font-size: 13px; }
+    .nav-links a { color: var(--muted); text-decoration: none; }
+    .nav-links a.active { color: var(--fg); font-weight: 600; }
+    .nav-links a.quiet { color: var(--subtle); }
+    .nav-right { display: flex; align-items: center; gap: 10px; }
+    .mode {
+      display: flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden;
+      font-size: 12px;
+    }
+    .mode span { padding: 4px 10px; color: var(--muted); }
+    .mode span.on { background: var(--accent); color: #fff; }
+    .tenant {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .page { flex: 1; overflow: auto; padding: 28px 32px 24px; }
+    .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+    h1 { font-size: 24px; margin: 0; letter-spacing: -0.02em; }
+    .lede { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .btn {
+      border: 0; border-radius: var(--radius); padding: 8px 14px;
+      font: 600 13px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+      cursor: default;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+    .chips { display: flex; gap: 8px; margin-bottom: 18px; }
+    .chip {
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 10px; font-size: 12px; color: var(--muted);
+    }
+    .chip.on { background: var(--accent-muted); color: var(--accent-on); border-color: transparent; }
+
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card {
+      background: var(--elev); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 16px 14px;
+      display: flex; flex-direction: column; gap: 10px; min-height: 148px;
+    }
+    .card h3 { margin: 0; font-size: 15px; }
+    .card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .grow { flex: 1; }
+    .links { display: flex; gap: 12px; font-size: 12px; font-weight: 600; color: var(--accent-on); margin-top: auto; }
+
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 600;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .pill-live { background: var(--live-bg); color: var(--live-fg); }
+    .pill-live .dot { background: var(--live); }
+    .pill-staging { background: var(--staging-bg); color: var(--staging-fg); }
+    .pill-staging .dot { background: var(--staging); }
+    .pill-draft { border: 1px solid var(--strong); color: var(--draft-fg); }
+    .pill-draft .dot { background: var(--subtle); }
+
+    .dev-row {
+      margin-top: 22px; border: 1px dashed var(--strong); border-radius: 8px;
+      padding: 10px 12px; color: var(--subtle); font-size: 12px;
+      display: flex; justify-content: space-between;
+    }
+
+    .jobs { display: grid; grid-template-columns: 1fr 1fr 240px; grid-template-rows: auto auto; gap: 14px; }
+    .live-now { grid-column: 3; grid-row: 1 / span 2; }
+    .job {
+      background: var(--elev); border: 1px solid var(--border); border-radius: 8px;
+      padding: 20px; min-height: 140px;
+    }
+    .job h3 { margin: 0 0 8px; font-size: 16px; }
+    .job p { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .job .btn { display: inline-block; }
+    .live-now { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .live-now h4 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--subtle); }
+    .live-now li { list-style: none; margin: 0 0 10px; font-size: 13px; }
+    .live-now ul { margin: 0; padding: 0; }
+
+    .wizard {
+      max-width: 560px; margin: 12px auto 0;
+      background: var(--elev); border: 1px solid var(--border); border-radius: 10px; padding: 22px;
+    }
+    .steps { display: flex; gap: 8px; font-size: 12px; color: var(--subtle); margin-bottom: 16px; }
+    .steps b { color: var(--accent-on); }
+    .opt {
+      border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .opt.on { border-color: var(--accent); background: var(--accent-muted); }
+    .label { font-size: 12px; color: var(--subtle); margin: 14px 0 8px; font-weight: 600; }
+
+    .preview-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; height: 100%; }
+    .legend { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+    .legend strong { display: block; color: var(--fg); margin-bottom: 8px; font-size: 14px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .url {
+      flex: 1; min-width: 180px; border: 1px solid var(--border); background: var(--elev);
+      border-radius: 6px; padding: 7px 10px; font-size: 12px; color: var(--muted);
+    }
+    .article {
+      background: #fff; color: #1a1d21; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; min-height: 420px; position: relative;
+    }
+    html.dark .article { border-color: var(--border); }
+    .article-inner { padding: 22px 24px 80px; }
+    .kicker { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; }
+    .article h2 { font-size: 22px; margin: 8px 0 12px; }
+    .article p { color: #4b5563; font-size: 14px; line-height: 1.6; margin: 0 0 10px; }
+    .fade p:last-of-type { color: #9ca3af; }
+    .wall {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      background: #fff; border-top: 1px solid #e5e7eb;
+      padding: 16px 20px 18px; text-align: center;
+    }
+    .wall h4 { margin: 0 0 6px; font-size: 16px; }
+    .wall p { margin: 0 0 10px; font-size: 13px; color: #6b7280; }
+    .wall .btn { background: var(--accent); color: #fff; }
+
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .pane { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .pane h3 { margin: 0 0 8px; font-size: 13px; color: var(--subtle); text-transform: uppercase; letter-spacing: .04em; }
+    .check { font-size: 13px; margin: 10px 0; color: var(--fg); }
+    .check span { color: var(--accent-on); margin-right: 6px; }
+    .check.off span { color: var(--subtle); }
+
+    .canvas-page { display: flex; flex-direction: column; height: calc(780px - 52px); padding: 0; }
+    .canvas-head { padding: 16px 24px 0; }
+    .crumb { font-size: 12px; color: var(--subtle); margin-bottom: 8px; }
+    .summary {
+      margin: 12px 24px; background: var(--accent-muted); color: var(--accent-on);
+      border-radius: 8px; padding: 10px 12px; font-size: 13px;
+    }
+    .board {
+      flex: 1; margin: 0 24px;
+      background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+      background-size: 18px 18px;
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      position: relative;
+      min-height: 340px;
+    }
+    .node {
+      position: absolute; font-size: 12px; font-weight: 650;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center;
+    }
+    .n-start, .n-out {
+      background: #0b0f17; color: #fff; border-radius: 6px; padding: 8px 14px; min-width: 88px;
+    }
+    .n-dec {
+      width: 118px; height: 118px; background: var(--accent); color: #fff;
+      transform: rotate(45deg); border-radius: 8px;
+    }
+    .n-dec span { transform: rotate(-45deg); display: block; width: 90px; }
+    .branch {
+      position: absolute; font-size: 11px; border: 1px solid var(--border);
+      background: var(--elev); border-radius: 999px; padding: 1px 8px; color: var(--muted);
+    }
+    .line { position: absolute; height: 2px; background: var(--strong); }
+    .line-v { position: absolute; width: 2px; background: var(--strong); }
+    .drawer {
+      margin: 10px 24px 16px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--elev); overflow: hidden;
+    }
+    .drawer-h {
+      display: flex; justify-content: space-between; padding: 8px 12px;
+      font-size: 12px; font-weight: 650; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .drawer.open .drawer-b { display: grid; }
+    .drawer-b { display: none; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; font-size: 12px; }
+    .plain { color: var(--fg); line-height: 1.45; }
+    .tech { font-family: ui-monospace, Menlo, monospace; color: var(--subtle); font-size: 11px; }
+    .tabs { display: flex; gap: 8px; font-size: 12px; }
+    .tabs b { color: var(--accent-on); }
+
+    .recipe { display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; }
+    .cond { border: 1px solid var(--border); background: var(--elev); border-radius: 8px; padding: 12px; margin-bottom: 8px; font-size: 14px; }
+    .add { border: 1px dashed var(--strong); color: var(--muted); border-radius: 8px; padding: 10px; font-size: 13px; text-align: center; }
+
+    .screen { display: none; height: 100%; }
+    .screen.on { display: block; }
+    .screen.flex.on { display: flex; flex-direction: column; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="studio">
+    <div class="studio-bar">
+      <strong>RRE UI mocks</strong>
+      <div class="seg" id="dir">
+        <button data-d="a" class="on">A · Progressive</button>
+        <button data-d="b">B · Job hub</button>
+        <button data-d="c">C · Dual mode</button>
+      </div>
+      <div class="seg" id="theme">
+        <button data-t="light" class="on">Light</button>
+        <button data-t="dark">Dark</button>
+      </div>
+      <div class="seg" id="screens"></div>
+      <span class="hint">Click the screens. This is a mock, not the live app.</span>
+    </div>
+    <div class="stage">
+      <div class="device" id="device"></div>
+    </div>
+  </div>
+  <script>
+    const SCREENS = {
+      a: [
+        ["home", "Home"],
+        ["create", "Create"],
+        ["preview", "Preview"],
+        ["publish", "Publish"],
+        ["canvas", "Canvas"],
+        ["debug", "Developer open"],
+      ],
+      b: [
+        ["jobs", "Home"],
+        ["create", "Create"],
+        ["preview", "Preview"],
+        ["publish", "Publish"],
+        ["canvas", "Advanced editor"],
+      ],
+      c: [
+        ["editor", "Editor"],
+        ["developer", "Developer"],
+        ["preview", "Preview"],
+        ["publish", "Publish"],
+      ],
+    };
+
+    let dir = "a", theme = "light", screen = "home";
+
+    function nav(active, extra = "") {
+      return `
+        <div class="topnav">
+          <div class="brand">
+            <div class="logo"><span class="swatch"></span> RRE</div>
+            <div class="nav-links">
+              <a class="${active === "experiences" ? "active" : ""}" href="#">Experiences</a>
+              <a class="${active === "sites" ? "active" : ""}" href="#">Sites</a>
+              <a class="${active === "library" ? "active" : ""}" href="#">Library</a>
+              <a class="quiet" href="#">Developer</a>
+            </div>
+          </div>
+          <div class="nav-right">
+            ${extra}
+            <span class="tenant">Demo</span>
+          </div>
+        </div>`;
+    }
+
+    function modeToggle(which) {
+      return `<div class="mode"><span class="${which === "editor" ? "on" : ""}">Editor</span><span class="${which === "developer" ? "on" : ""}">Developer</span></div>`;
+    }
+
+    const CARDS = `
+      <div class="cards">
+        <div class="card">
+          <h3>Article paywall</h3>
+          <p>Anonymous mobile visitors see a subscribe wall.</p>
+          <span class="pill pill-live"><i class="dot"></i> Live</span>
+          <div class="links">Preview · Edit</div>
+        </div>
+        <div class="card">
+          <h3>Newsletter registration</h3>
+          <p>New desktop visitors see a sign-up prompt.</p>
+          <span class="pill pill-staging"><i class="dot"></i> Staging</span>
+          <div class="links">Preview · Edit</div>
+        </div>
+        <div class="card">
+          <h3>Subscriber full article</h3>
+          <p>Paying readers always see the full story.</p>
+          <span class="pill pill-draft"><i class="dot"></i> Draft</span>
+          <div class="links">Preview · Edit</div>
+        </div>
+      </div>
+      <div class="dev-row">Developer details <span>IDs, order, JSON / API rules</span></div>`;
+
+    function homePage() {
+      return nav("experiences") + `
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <h1>Experiences</h1>
+              <p class="lede">Control what visitors see on your sites.</p>
+            </div>
+            <button class="btn btn-primary">New experience</button>
+          </div>
+          <div class="chips"><span class="chip on">All</span><span class="chip">Live</span><span class="chip">Draft</span></div>
+          ${CARDS}
+        </div>`;
+    }
+
+    function jobsPage() {
+      return nav("experiences") + `
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <h1>What do you want to do?</h1>
+              <p class="lede">Build and check visitor experiences without touching technical settings.</p>
+            </div>
+          </div>
+          <div class="jobs">
+            <div class="job"><h3>Create a paywall</h3><p>Ask non-subscribers to subscribe before they read more.</p><button class="btn btn-primary">Start</button></div>
+            <div class="job"><h3>Create a sign-up wall</h3><p>Ask new visitors to register for access.</p><button class="btn btn-ghost">Start</button></div>
+            <div class="job"><h3>Preview as a visitor</h3><p>See a real page as mobile, desktop, subscriber, or anonymous.</p><button class="btn btn-ghost">Open preview</button></div>
+            <div class="job"><h3>Publish a change</h3><p>Move a draft live after you have checked it.</p><button class="btn btn-ghost">Review drafts</button></div>
+            <div class="live-now">
+              <h4>Live now</h4>
+              <ul>
+                <li>Article paywall · <span class="pill pill-live"><i class="dot"></i> Live</span></li>
+                <li>Newsletter registration · <span class="pill pill-staging"><i class="dot"></i> Staging</span></li>
+              </ul>
+              <p class="lede" style="margin-top:16px">Advanced editor · Developer tools</p>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function createPage() {
+      return nav("experiences") + `
+        <div class="page">
+          <div class="wizard">
+            <div class="steps">1 Type · <b>2 Audience</b> · 3 What they see</div>
+            <h1 style="font-size:20px">Who should see this?</h1>
+            <p class="lede">You can add more conditions later.</p>
+            <div class="label">Device</div>
+            <div class="opt on">Visitors on a phone</div>
+            <div class="opt">Visitors on a computer</div>
+            <div class="opt">Everyone</div>
+            <div class="label">And they are</div>
+            <div class="opt on">Not subscribed</div>
+            <div class="opt">Subscribed</div>
+            <div class="row" style="justify-content:flex-end;margin-top:16px;gap:8px">
+              <button class="btn btn-ghost">Back</button>
+              <button class="btn btn-primary">Continue</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function previewPage() {
+      return nav("experiences") + `
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <div class="crumb">Experiences / Article paywall</div>
+              <h1>Preview as a visitor</h1>
+            </div>
+            <span class="pill pill-live"><i class="dot"></i> Live</span>
+          </div>
+          <div class="toolbar">
+            <span class="chip on">Mobile</span><span class="chip">Desktop</span>
+            <span class="chip on">Anonymous</span><span class="chip">Subscriber</span>
+            <div class="url">https://www.example.com/article/summer-preview</div>
+            <button class="btn btn-primary">Refresh</button>
+          </div>
+          <div class="preview-layout">
+            <div class="legend">
+              <strong>This visitor sees the subscribe wall</strong>
+              They are on a phone and not subscribed. Paying readers on a computer still see the full article.
+            </div>
+            <div class="article">
+              <div class="article-inner fade">
+                <div class="kicker">Business · 6 min read</div>
+                <h2>Ports, paper, and the next shipping cycle</h2>
+                <p>Terminal operators say the autumn peak is arriving earlier than usual, with empty containers stacked on the wrong side of the water.</p>
+                <p>Buyers in retail have already pulled orders forward. That leaves less room for error if a single hub slows down.</p>
+              </div>
+              <div class="wall">
+                <h4>Keep reading with a digital subscription</h4>
+                <p>Unlimited articles on every device.</p>
+                <button class="btn">Subscribe</button>
+              </div>
+            </div>
+          </div>
+          <div class="dev-row">Developer · headers and evaluation</div>
+        </div>`;
+    }
+
+    function publishPage() {
+      return nav("experiences") + `
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <h1>Ready to go live?</h1>
+              <p class="lede">Article paywall · this draft will replace what visitors see now.</p>
+            </div>
+          </div>
+          <div class="compare">
+            <div class="pane">
+              <h3>Now live</h3>
+              <p>Anonymous mobile visitors see the current subscribe wall.</p>
+            </div>
+            <div class="pane">
+              <h3>After publish</h3>
+              <p>Anonymous mobile visitors see the new wall with a newsletter offer.</p>
+            </div>
+          </div>
+          <div style="margin:18px 0">
+            <div class="check"><span>✓</span> Previewed as mobile anonymous</div>
+            <div class="check"><span>✓</span> Previewed as desktop subscriber</div>
+            <div class="check off"><span>○</span> Marketing has signed off</div>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn btn-ghost">Keep as draft</button>
+            <button class="btn btn-primary">Publish to everyone</button>
+          </div>
+        </div>`;
+    }
+
+    function canvasPage(open, extraNav = "") {
+      return nav("experiences", extraNav) + `
+        <div class="page canvas-page flex">
+          <div class="canvas-head">
+            <div class="crumb">Experiences / Article paywall / Draft</div>
+            <div class="row">
+              <h1 style="font-size:20px">Article paywall</h1>
+              <span class="pill pill-live"><i class="dot"></i> Live</span>
+              <span class="grow"></span>
+              <button class="btn btn-ghost">Preview as visitor</button>
+              <button class="btn btn-ghost">Save</button>
+              <button class="btn btn-primary">Publish</button>
+            </div>
+          </div>
+          <div class="summary">When a visitor is on a phone and is not subscribed, show the subscribe wall. Otherwise show the full article.</div>
+          <div class="board">
+            <div class="node n-start" style="left:40px;top:150px">Start</div>
+            <div class="line" style="left:136px;top:168px;width:70px"></div>
+            <div class="node n-dec" style="left:210px;top:110px"><span>On a phone?</span></div>
+            <div class="branch" style="left:360px;top:96px">Yes</div>
+            <div class="branch" style="left:360px;top:230px">No</div>
+            <div class="line" style="left:328px;top:168px;width:90px"></div>
+            <div class="line-v" style="left:418px;top:168px;height:70px"></div>
+            <div class="node n-out" style="left:470px;top:90px">Show subscribe wall</div>
+            <div class="node n-out" style="left:470px;top:220px">Show full article</div>
+          </div>
+          <div class="drawer ${open ? "open" : ""}">
+            <div class="drawer-h">
+              <span>Developer</span>
+              <span class="tabs">${open ? "<b>Journey</b> · Request · Raw" : "Node IDs, headers, evaluation"}</span>
+            </div>
+            <div class="drawer-b">
+              <div class="plain"><strong>What happened</strong><br/>Checked device type — it was mobile.<br/>Checked subscription — not subscribed.<br/>Applied the subscribe wall.</div>
+              <div class="tech">node_id  n_4c21<br/>kind     decision.device<br/>input    device_type = mobile<br/>result   branch = yes<br/>0.12 ms</div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function editorPage() {
+      return nav("experiences", modeToggle("editor")) + `
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <h1>Article paywall</h1>
+              <p class="lede">Who sees this, then what we show.</p>
+            </div>
+            <span class="pill pill-live"><i class="dot"></i> Live</span>
+          </div>
+          <div class="recipe">
+            <div>
+              <div class="label">Who sees this</div>
+              <div class="cond">If device is Phone</div>
+              <div class="cond">And visitor is not subscribed</div>
+              <div class="add">+ Add condition</div>
+              <div class="label">Then show</div>
+              <div class="cond">Subscribe wall</div>
+              <div class="cond">Else: Full article</div>
+            </div>
+            <div>
+              <div class="toolbar"><span class="chip on">Mobile</span><span class="chip on">Anonymous</span></div>
+              <div class="article" style="min-height:360px">
+                <div class="article-inner fade">
+                  <div class="kicker">Preview</div>
+                  <h2>Ports, paper, and the next shipping cycle</h2>
+                  <p>The story fades here so the wall can sit on top.</p>
+                </div>
+                <div class="wall"><h4>Keep reading</h4><button class="btn">Subscribe</button></div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function render() {
+      document.documentElement.className = theme;
+      const map = {
+        home: homePage,
+        jobs: jobsPage,
+        create: createPage,
+        preview: previewPage,
+        publish: publishPage,
+        canvas: () => canvasPage(false),
+        debug: () => canvasPage(true),
+        editor: editorPage,
+        developer: () => canvasPage(true, modeToggle("developer")),
+      };
+      document.getElementById("device").innerHTML = (map[screen] || homePage)();
+      const wrap = document.getElementById("screens");
+      wrap.innerHTML = SCREENS[dir].map(([id, label]) =>
+        `<button data-s="${id}" class="${screen === id ? "on" : ""}">${label}</button>`
+      ).join("");
+      wrap.querySelectorAll("button").forEach((b) => b.onclick = () => { screen = b.dataset.s; location.hash = `${dir}/${screen}/${theme}`; render(); });
+    }
+
+    document.getElementById("dir").onclick = (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      dir = b.dataset.d;
+      screen = SCREENS[dir][0][0];
+      [...e.currentTarget.children].forEach((x) => x.classList.toggle("on", x === b));
+      location.hash = `${dir}/${screen}/${theme}`;
+      render();
+    };
+    document.getElementById("theme").onclick = (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      theme = b.dataset.t;
+      [...e.currentTarget.children].forEach((x) => x.classList.toggle("on", x === b));
+      location.hash = `${dir}/${screen}/${theme}`;
+      render();
+    };
+
+    const h = location.hash.replace("#", "").split("/");
+    if (h[0]) dir = h[0];
+    if (h[1]) screen = h[1];
+    if (h[2]) theme = h[2];
+    [...document.querySelectorAll("#dir button")].forEach((x) => x.classList.toggle("on", x.dataset.d === dir));
+    [...document.querySelectorAll("#theme button")].forEach((x) => x.classList.toggle("on", x.dataset.t === theme));
+    render();
+  </script>
+</body>
+</html>
