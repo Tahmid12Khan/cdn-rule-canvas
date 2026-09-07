@@ -69,8 +69,12 @@ fi
 # edge keeps compiling a processor the authoring UI no longer offers.
 if [[ "$SKIP_VENDOR" == "0" ]]; then
   say "Vendoring rre-core + zen core"
-  rsync -a --delete \
-      --exclude 'target/' --exclude 'Cargo.lock' \
+  # `tests/` is excluded on purpose. The vendored copy exists to be compiled
+  # into Wasm; the golden parity suite belongs to the source repo, which is
+  # where it is actually run, and vendoring it would ship fixtures that no
+  # command here executes.
+  rsync -a --delete --delete-excluded \
+      --exclude 'target/' --exclude 'Cargo.lock' --exclude 'tests/' \
       "$ZEN_ROOT/rre-core/" "$EDGE/vendor/rre-core/"
   rsync -a --delete --exclude 'target/' \
       "$ZEN_ROOT/core/" "$EDGE/vendor/core/"
