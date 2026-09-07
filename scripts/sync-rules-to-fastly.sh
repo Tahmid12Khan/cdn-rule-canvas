@@ -16,6 +16,9 @@
 #   scripts/sync-rules-to-fastly.sh [--fastly-repo DIR] [--site SLUG] [--env ENV]
 #                                   [--skip-export] [--skip-vendor]
 #
+# --env is `live` or `staging`; --site is the site slug as the RRE database
+# records it, which is not always the hostname.
+#
 # Requires DATABASE_URL unless --skip-export is given.
 
 set -euo pipefail
@@ -23,7 +26,7 @@ set -euo pipefail
 ZEN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FASTLY_REPO="${FASTLY_REPO:-$(cd "$ZEN_ROOT/.." && pwd)/dngroup-fastly}"
 SITE="intrafish"
-ENVIRONMENT="production"
+ENVIRONMENT="live"
 SKIP_EXPORT=0
 SKIP_VENDOR=0
 
@@ -54,10 +57,13 @@ if [[ "$SKIP_EXPORT" == "0" ]]; then
   say "Exporting $SITE ($ENVIRONMENT)"
   [[ -n "${DATABASE_URL:-}" ]] || {
     echo "DATABASE_URL is not set (or pass --skip-export)" >&2; exit 1; }
+  # `--out`, not a `>` redirect: the shell truncates the target the moment it
+  # opens it, so a failed export would leave an empty rules file that still
+  # compiles and silently applies nothing. The exporter writes via a temp file
+  # and renames, so the previous good bundle survives a failure intact.
   cargo run --quiet --manifest-path "$ZEN_ROOT/backend/Cargo.toml" \
       --bin export_bundle -- \
-      --site "$SITE" --env "$ENVIRONMENT" \
-      --out "$EDGE/rules/$SITE.json"
+      --site "$SITE" --env "$ENVIRONMENT" --out "$EDGE/rules/$SITE.json"
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$EDGE/rules/$SITE.json"
   echo "wrote rules/$SITE.json"
 else

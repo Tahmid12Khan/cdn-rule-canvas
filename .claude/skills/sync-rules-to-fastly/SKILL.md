@@ -35,7 +35,7 @@ something different.
 ## Steps
 
 1. **Confirm which site and environment.** Ask if the user did not say. Default
-   is `--site intrafish --env production`. Getting this wrong publishes staging
+   is `--site intrafish --env live`. Getting this wrong publishes staging
    rules to real readers.
 
 2. **Make sure the database is reachable.** The exporter reads it directly.
@@ -44,7 +44,7 @@ something different.
 3. **Run the script** from the repo root:
 
    ```bash
-   DATABASE_URL=postgres://... scripts/sync-rules-to-fastly.sh --site intrafish --env production
+   DATABASE_URL=postgres://... scripts/sync-rules-to-fastly.sh --site intrafish --env live
    ```
 
    Useful flags: `--fastly-repo DIR` if the checkout is not `../dngroup-fastly`,

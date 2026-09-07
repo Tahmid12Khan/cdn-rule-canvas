@@ -12,6 +12,53 @@
 - `zen/docs/superpowers/specs/2026-09-06-rre-edge-bundle-design.md` (this repo)
 - `dngroup-fastly/docs/superpowers/specs/2026-09-06-intrafish-rre-edge-rules-design.md` (Fastly repo)
 
+## Status
+
+Implemented on `feat/rre-edge-rules` in both repos. Verified 2026-09-07.
+
+| Task | State | Notes |
+|---|---|---|
+| 1-3 `rre-core` extraction | done | evaluator is synchronous; `futures::executor::block_on` drives zen with no tokio runtime |
+| 4 `apply` and `EdgeBundle` | done | `schema_version = 1` |
+| 5 Proxy rewired | done | proxy keeps its own `spawn_blocking` wrapper; zen `Variable` and `scraper::Html` are `!Send` |
+| 6 Golden fixtures | done | 8 fixtures in `rre-core/tests/golden/`, one runner, fails if the directory is empty |
+| 7-8 Backend export | done | service, `GET /api/v1/sites/{slug}/edge-bundle?env=`, `export_bundle` binary |
+| 9 Flow switch | done | header beats cookie; an unrecognised value is Zephr |
+| 10-12 RRE flows | done | `rre_export` ships a placeholder empty bundle; `rre_kv` is coded, the store is not provisioned |
+| 13 Sync skill | done | `.claude/skills/sync-rules-to-fastly/` + `scripts/sync-rules-to-fastly.sh` |
+| 14 Verification | done | see below |
+
+### What was measured
+
+Ran under `fastly compute serve` against a local fixture upstream, with the
+golden JSON bundle installed as `rules/intrafish.json`.
+
+| Check | Result |
+|---|---|
+| Rule evaluation, no paywall probe | 0-1 ms after the first request |
+| Body rewritten by `rre_export` | matched the golden fixture exactly |
+| Body rewritten by `rre_kv` | identical to `rre_export` |
+| Zephr flow, same request | body untouched, as before this change |
+| `x-rre-identity` with user and two products | `logged_in=true products=2` |
+| Unrecognised switch value | fell back to `zephr` |
+| Header against cookie | header won |
+
+### Deviations from the plan as written
+
+- `--env` takes `live` or `staging`, not `production`. Those are
+  `PublishEnvironment`'s serde strings, shared with the route's query parameter.
+- `flows::zephr::apply` gained an `is_candidate` parameter so the paywall gate
+  stays gated exactly as the router gated it before the move.
+- The RRE decision was split into `rre_common::rewrite`, which has no Fastly SDK
+  types in it. The SDK's `Response` only links for `wasm32-wasip1`, so anything
+  touching one cannot be unit tested at all.
+- `rre-core` re-exports `http`, so a host cannot build `RequestFacts` against a
+  different major version.
+- The vendored engine excludes `rre-core/tests/`. The golden suite runs in this
+  repo; vendoring it would ship fixtures no command over there executes.
+
+---
+
 ## Global Constraints
 
 - **Two repos.** `ZEN = /Users/tahmid/IdeaProjects/zen`, `FASTLY = /Users/tahmid/IdeaProjects/dngroup-fastly`. Tasks say which.
