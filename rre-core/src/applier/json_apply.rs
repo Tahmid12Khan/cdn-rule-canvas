@@ -21,12 +21,12 @@ use std::sync::Arc;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::domain::applier::json_path::{self, Seg};
-use crate::domain::applier::{
+use crate::applier::json_path::{self, Seg};
+use crate::applier::{
     component_ref, component_render, html_injection, html_sanitizer, orchestrator, ApplyError,
     JsonModificationResult,
 };
-use crate::infra::backend_client::{
+use crate::bundle::{
     ActiveComponent, ActiveOutcome, Placement, ResolvedComponent, VersionSelector,
 };
 
@@ -40,8 +40,7 @@ pub type ResolvedComponentMap = HashMap<(Uuid, VersionSelector), Arc<ResolvedCom
 /// Pre-resolved saved-outcome map for one feature's apply pass, keyed by
 /// `saved_outcome_id`. Parallel to `ResolvedComponentMap` but with no version
 /// selector (the backend `resolve` route already picked the version).
-pub type ResolvedSavedOutcomeMap =
-    HashMap<Uuid, Arc<crate::infra::saved_outcome_cache::ResolvedSavedOutcome>>;
+pub type ResolvedSavedOutcomeMap = HashMap<Uuid, Arc<crate::bundle::ResolvedSavedOutcome>>;
 
 /// Apply an outcome's components to `body`. Always returns `Ok` (per-component
 /// failures fail open). `applied` = any component mutated the body.

@@ -11,7 +11,7 @@
 use serde_json::Value;
 use serde_json_path::JsonPath;
 
-use crate::domain::context::EvaluationContext;
+use crate::context::EvaluationContext;
 
 use super::{Branch, CanvasProcessor, ProcessorError, ProcessorOutcome};
 

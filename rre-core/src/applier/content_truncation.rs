@@ -5,8 +5,8 @@
 use lol_html::{element, rewrite_str, RewriteStrSettings};
 use serde_json::Value;
 
-use crate::domain::applier::{validate_selector, ApplyError, ComponentRenderer};
-use crate::infra::backend_client::ActiveComponent;
+use crate::applier::{validate_selector, ApplyError, ComponentRenderer};
+use crate::bundle::ActiveComponent;
 
 const MARKER_ATTR: &str = "data-rre-truncated";
 const FADE_STYLE_MARKER: &str = r#"data-rre="content-truncation""#;

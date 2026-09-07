@@ -1,0 +1,29 @@
+# Standalone crate: the empty [workspace] table detaches this from the zen root
+# workspace, matching backend/ and proxy/. MUST build for wasm32-wasip1 — see
+# the dependency allow-list in
+# docs/superpowers/specs/2026-09-06-rre-edge-bundle-design.md.
+[workspace]
+
+[package]
+name = "rre-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zen-engine = { path = "../core/engine" }
+zen-expression = { path = "../core/expression" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_json_path = "0.7"
+serde_yaml = "0.9"
+http = "1"
+uuid = { version = "1", features = ["serde"] }
+thiserror = "2"
+tracing = "0.1"
+futures = { version = "0.3", default-features = false, features = ["executor"] }
+scraper = "0.27"
+lol_html = "2"
+ammonia = "4"
+mustache = "0.9"
+regex = "1"

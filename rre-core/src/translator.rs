@@ -21,7 +21,7 @@ use zen_engine::model::{
     SwitchStatementHitPolicy, TransformAttributes,
 };
 
-use crate::domain::graph::{CanvasGraph, Node};
+use crate::graph::{CanvasGraph, Node};
 
 /// Entry JDM node id for a canvas node: decisions enter at `__proc`, expressions
 /// at `__expr`, ends at `__out`. Start nodes emit no JDM node — they should never
@@ -169,8 +169,8 @@ pub fn to_decision_content(canvas: &CanvasGraph) -> DecisionContent {
         match source {
             Node::Decision { .. } => {
                 let branch = match edge.branch {
-                    crate::domain::graph::Branch::Yes => "yes",
-                    crate::domain::graph::Branch::No => "no",
+                    crate::graph::Branch::Yes => "yes",
+                    crate::graph::Branch::No => "no",
                 };
                 edges.push(Arc::new(DecisionEdge {
                     id: Arc::from(edge.id.as_str()),

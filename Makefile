@@ -43,6 +43,10 @@ restart: ## Recreate and restart all services
 
 # --- local quality gates ------------------------------------------------------
 
+rre-core-check: ## fmt + clippy + test + wasm build the shared rule crate
+	cd rre-core && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo test && cargo build --target wasm32-wasip1
+
 backend-check: ## fmt + clippy + test + build the backend crate
 	cd backend && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo test && cargo build --release
@@ -55,4 +59,4 @@ frontend-check: ## lint + typecheck + test + build the frontend
 	cd frontend && npm ci && npm run lint && npm run typecheck \
 		&& npm run test && npm run build
 
-check: backend-check proxy-check frontend-check ## Run every service's quality gate
+check: rre-core-check backend-check proxy-check frontend-check ## Run every service's quality gate

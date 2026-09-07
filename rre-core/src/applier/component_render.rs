@@ -19,7 +19,7 @@
 use mustache::MapBuilder;
 use serde_json::{Map, Value};
 
-use crate::domain::applier::ApplyError;
+use crate::applier::ApplyError;
 
 /// Render `html_body` (a mustache template) against the flat `values` map.
 ///

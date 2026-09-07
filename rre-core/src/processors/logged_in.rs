@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use crate::domain::context::EvaluationContext;
+use crate::context::EvaluationContext;
 
 use super::{Branch, CanvasProcessor, ProcessorError, ProcessorOutcome};
 
@@ -36,8 +36,8 @@ mod tests {
     use http::HeaderMap;
     use serde_json::json;
 
-    use crate::domain::context::{DeviceType, EvaluationContext};
-    use crate::domain::identity::Identity;
+    use crate::context::{DeviceType, EvaluationContext};
+    use crate::identity::Identity;
 
     use super::*;
 

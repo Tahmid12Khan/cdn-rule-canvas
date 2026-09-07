@@ -10,10 +10,7 @@ use moka::future::Cache;
 use serde::Deserialize;
 use uuid::Uuid;
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct ResolvedSavedOutcome {
-    pub html_body: String,
-}
+pub use rre_core::bundle::ResolvedSavedOutcome;
 
 #[derive(Clone)]
 struct Stamped {

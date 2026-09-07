@@ -4,13 +4,13 @@
 //! caught and that component is skipped — the overall result is still `Ok`.
 //! ShowContent (builtin) is short-circuited by the caller, not here.
 
-use crate::domain::applier::component_ref;
-use crate::domain::applier::content_truncation::ContentTruncationRenderer;
-use crate::domain::applier::html_injection::HtmlInjectionRenderer;
-use crate::domain::applier::json_apply::ResolvedComponentMap;
-use crate::domain::applier::{placement_popup, placement_sticky_footer};
-use crate::domain::applier::{ApplyError, ComponentRenderer, ModificationResult};
-use crate::infra::backend_client::{ActiveComponent, ActiveOutcome, Placement};
+use crate::applier::component_ref;
+use crate::applier::content_truncation::ContentTruncationRenderer;
+use crate::applier::html_injection::HtmlInjectionRenderer;
+use crate::applier::json_apply::ResolvedComponentMap;
+use crate::applier::{placement_popup, placement_sticky_footer};
+use crate::applier::{ApplyError, ComponentRenderer, ModificationResult};
+use crate::bundle::{ActiveComponent, ActiveOutcome, Placement};
 
 /// Apply an outcome's components to `html`. Always returns `Ok` (per-component
 /// failures fail open); only an unexpected/global failure returns `Err`.

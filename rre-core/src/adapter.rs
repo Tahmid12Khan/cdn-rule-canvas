@@ -10,8 +10,8 @@ use std::sync::Arc;
 use zen_engine::nodes::custom::{CustomNodeAdapter, CustomNodeRequest};
 use zen_engine::nodes::{NodeError, NodeResponse, NodeResult};
 
-use crate::domain::context::EvaluationContext;
-use crate::domain::processors::{ProcessorError, ProcessorRegistry};
+use crate::context::EvaluationContext;
+use crate::processors::{ProcessorError, ProcessorRegistry};
 
 #[derive(Debug)]
 pub struct CanvasNodeAdapter {

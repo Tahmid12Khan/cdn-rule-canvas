@@ -19,7 +19,8 @@ impl CompiledCache {
         }
     }
 
-    /// Cache hit -> clone the `Arc`. Miss -> run `build`, `.compile()`, insert.
+    /// Cache hit -> clone the `Arc`. Miss -> run `build`, insert. `build` is
+    /// expected to return an ALREADY-COMPILED graph (`rre_core::compile` does).
     pub fn get_or_compile(
         &self,
         feature_id: &str,
@@ -30,9 +31,7 @@ impl CompiledCache {
         if let Some(hit) = self.inner.get(&key) {
             return hit;
         }
-        let mut content = build();
-        content.compile();
-        let arc = Arc::new(content);
+        let arc = Arc::new(build());
         self.inner.insert(key, arc.clone());
         arc
     }

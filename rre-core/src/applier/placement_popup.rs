@@ -2,9 +2,9 @@
 //! (with backdrop + close button) to `<body>` and injects its CSS once.
 //! Idempotent per component via a marker attribute.
 
-use crate::domain::applier::html_sanitizer::sanitize;
-use crate::domain::applier::ApplyError;
-use crate::infra::backend_client::ActiveComponent;
+use crate::applier::html_sanitizer::sanitize;
+use crate::applier::ApplyError;
+use crate::bundle::ActiveComponent;
 use serde_json::Value;
 
 const STYLE_MARKER: &str = r#"data-rre="popup""#;

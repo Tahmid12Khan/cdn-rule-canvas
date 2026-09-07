@@ -5,9 +5,9 @@
 use lol_html::{element, rewrite_str, RewriteStrSettings};
 use serde_json::Value;
 
-use crate::domain::applier::html_sanitizer::sanitize;
-use crate::domain::applier::{validate_selector, ApplyError, ComponentRenderer};
-use crate::infra::backend_client::ActiveComponent;
+use crate::applier::html_sanitizer::sanitize;
+use crate::applier::{validate_selector, ApplyError, ComponentRenderer};
+use crate::bundle::ActiveComponent;
 
 /// Marker attribute making injections idempotent.
 const MARKER_ATTR: &str = "data-rre-injected";

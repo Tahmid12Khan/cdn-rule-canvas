@@ -23,14 +23,12 @@
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::domain::applier::json_apply::ResolvedComponentMap;
-use crate::domain::applier::{
+use crate::applier::json_apply::ResolvedComponentMap;
+use crate::applier::{
     component_render, html_injection, html_sanitizer, placement_popup, placement_sticky_footer,
     ApplyError,
 };
-use crate::infra::backend_client::{
-    ActiveComponent, Placement, ResolvedComponent, VersionSelector,
-};
+use crate::bundle::{ActiveComponent, Placement, ResolvedComponent, VersionSelector};
 
 /// Render a `component_ref` component into `html`. Resolves the template from the
 /// PRE-RESOLVED `components` map, renders + sanitizes it, then injects/wraps per the

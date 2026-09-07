@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use zen_expression::variable::Variable;
 
-use crate::domain::context::EvaluationContext;
+use crate::context::EvaluationContext;
 
 /// Branch result of a decision processor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +70,12 @@ pub trait CanvasProcessor: Send + Sync {
 }
 
 /// Registry of processors keyed by `CanvasProcessor::kind()`.
-#[derive(Default)]
+///
+/// Deliberately NOT `#[derive(Default)]`: a derived Default yields an EMPTY
+/// registry, and an empty registry makes every decision node fail to resolve
+/// its processor, so a canvas silently never matches. `Default` therefore
+/// delegates to [`default_registry`] and `new()` stays explicit for the rare
+/// caller that genuinely wants an empty one.
 pub struct ProcessorRegistry {
     map: HashMap<&'static str, Arc<dyn CanvasProcessor>>,
 }
@@ -86,8 +91,12 @@ impl std::fmt::Debug for ProcessorRegistry {
 }
 
 impl ProcessorRegistry {
+    /// An EMPTY registry. Constructs the map directly rather than delegating to
+    /// `Default`, which now builds the fully-populated one.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            map: HashMap::new(),
+        }
     }
 
     /// Register a processor, keyed off `p.kind()`.
@@ -103,6 +112,12 @@ impl ProcessorRegistry {
 
 /// Built once at startup: registers the MetaTags + DeviceType processors.
 /// Adding a processor = `impl CanvasProcessor` + one `register` line here.
+impl Default for ProcessorRegistry {
+    fn default() -> Self {
+        default_registry()
+    }
+}
+
 pub fn default_registry() -> ProcessorRegistry {
     let mut registry = ProcessorRegistry::new();
     registry.register(Arc::new(meta_tags::MetaTagsProcessor));
@@ -113,4 +128,40 @@ pub fn default_registry() -> ProcessorRegistry {
     registry.register(Arc::new(logged_in::LoggedInProcessor));
     registry.register(Arc::new(has_product::HasProductProcessor));
     registry
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// Every kind the canvas editor can emit must resolve. An unregistered kind
+    /// is not an error at eval time — the decision node just fails and the
+    /// canvas takes no branch — so only a test like this catches a missed
+    /// `register` line.
+    #[test]
+    fn default_registry_has_every_shipped_processor() {
+        let registry = ProcessorRegistry::default();
+        for kind in [
+            "meta_tags",
+            "device_type",
+            "article_url",
+            "json_expression",
+            "site_match",
+            "logged_in",
+            "has_product",
+        ] {
+            assert!(
+                registry.get(kind).is_some(),
+                "processor `{kind}` is not registered"
+            );
+        }
+    }
+
+    /// The trap this type's doc comment warns about: `default()` must NOT be
+    /// the derived, empty one.
+    #[test]
+    fn default_is_not_empty() {
+        assert!(ProcessorRegistry::default().get("has_product").is_some());
+        assert!(ProcessorRegistry::new().get("has_product").is_none());
+    }
 }

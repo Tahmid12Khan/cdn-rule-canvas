@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use crate::domain::context::EvaluationContext;
+use crate::context::EvaluationContext;
 
 use super::{Branch, CanvasProcessor, ProcessorError, ProcessorOutcome};
 

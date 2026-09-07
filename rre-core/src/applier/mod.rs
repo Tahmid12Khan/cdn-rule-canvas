@@ -15,7 +15,7 @@ pub mod orchestrator;
 pub mod placement_popup;
 pub mod placement_sticky_footer;
 
-use crate::infra::backend_client::ActiveComponent;
+use crate::bundle::ActiveComponent;
 
 /// Result of applying an outcome to an HTML body.
 pub struct ModificationResult {
