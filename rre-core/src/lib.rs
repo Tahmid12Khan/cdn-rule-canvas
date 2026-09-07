@@ -21,6 +21,12 @@ pub mod translator;
 
 pub use applier::html_sanitizer::{default_sanitizer, load_sanitizer, SanitizerError};
 pub use edge::apply;
+
+/// Re-exported so a host builds its `RequestFacts` with the SAME `http`
+/// version this crate compiled against. A host that adds its own `http`
+/// dependency can silently get a different major version, and the resulting
+/// type mismatch is reported far from its cause.
+pub use http;
 pub use evaluator::{
     compile, evaluate_sync, evaluate_with_trace_sync, EvalTrace, MatchedAction, TraceStep,
 };
