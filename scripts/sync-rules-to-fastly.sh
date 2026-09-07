@@ -61,11 +61,23 @@ if [[ "$SKIP_EXPORT" == "0" ]]; then
   # opens it, so a failed export would leave an empty rules file that still
   # compiles and silently applies nothing. The exporter writes via a temp file
   # and renames, so the previous good bundle survives a failure intact.
-  cargo run --quiet --manifest-path "$ZEN_ROOT/backend/Cargo.toml" \
-      --bin export_bundle -- \
-      --site "$SITE" --env "$ENVIRONMENT" --out "$EDGE/rules/$SITE.json"
+  # Run FROM backend/: the exporter's `Settings::load` reads `config/default`
+  # relative to the working directory, so `--manifest-path` alone fails with
+  # "configuration file not found" before it ever reaches the database.
+  ( cd "$ZEN_ROOT/backend" && cargo run --quiet --bin export_bundle -- \
+        --site "$SITE" --env "$ENVIRONMENT" --out "$EDGE/rules/$SITE.json" )
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$EDGE/rules/$SITE.json"
   echo "wrote rules/$SITE.json"
+
+  # `include_str!` needs a literal path, so a bundle nobody listed is dead
+  # weight: exported, committed, deployed, and never consulted. That failure is
+  # invisible at the POP — the flow just reports `no_bundle` — so it is caught
+  # here instead.
+  if ! grep -q "rules/$SITE.json" "$EDGE/src/flows/rre_export/mod.rs"; then
+    echo "WARNING: rules/$SITE.json is NOT in the BUNDLES list in" >&2
+    echo "         src/flows/rre_export/mod.rs, so the rre_export flow will" >&2
+    echo "         never load it. Add the include_str! line before deploying." >&2
+  fi
 else
   say "Skipping export (--skip-export)"
 fi
