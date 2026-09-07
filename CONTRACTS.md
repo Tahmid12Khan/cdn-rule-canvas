@@ -542,8 +542,19 @@ PATCH  /api/v1/sites/{slug}                   -> sites::update           -> site
 DELETE /api/v1/sites/{slug}                   -> sites::delete           -> site_service::delete
 GET    /api/v1/sites/{slug}/edge-bundle?env=  -> sites::edge_bundle      -> edge_bundle_service::build
 # ?env=live|staging (default live). An unrecognised env is rejected by the extractor -> 400 (NOT the
-# uniform envelope); unknown slug -> 404 SITE_NOT_FOUND. Body = EdgeBundle (see below). Also available
-# offline as `cargo run --bin export_bundle -- --site <slug> --env live`, which calls the SAME service.
+# uniform envelope); unknown slug -> 404 SITE_NOT_FOUND. Body = EdgeBundle (see below).
+#
+# Offline equivalent (the SAME service), driven from the repo ROOT:
+#   cargo run --manifest-path backend/Cargo.toml --bin export_bundle -- \
+#       --site <slug> --env live|staging [--out path/to/bundle.json]
+# `--env` takes PublishEnvironment's serde form: `live` or `staging` ONLY — the live environment is
+# spelled `live`, never `production`. Default `live`. `--out` creates parent dirs and writes
+# temp-then-rename, so the destination is either the complete bundle or the untouched previous one.
+# Without `--out` the bundle goes to stdout and NOTHING else does (diagnostics go to stderr), so the
+# command is pipeable. Reads DATABASE_URL from the environment, NOT `Settings::load` — the exporter is
+# CWD-independent by design so it can run from the repo root. Unknown site / missing DATABASE_URL / DB
+# error / unwritable path all exit non-zero with a stderr message and write no file. A site with zero
+# published features is NOT an error: it exports `"features": []`, the documented no-op state.
 
 # Products (Product Catalogue; global, snake_case `label` PK. ?q name filter + pagination)
 POST   /api/v1/products                       -> products::create        -> product_service::create (201)
