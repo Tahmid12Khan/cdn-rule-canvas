@@ -37,6 +37,11 @@ export const ComponentConfig = z.discriminatedUnion("type", [
     fade_out: z.boolean().default(false),
   }),
   z.object({
+    type: z.literal("html_remove"),
+    target_selector: z.string().min(1),
+    include_selector: z.boolean().default(false),
+  }),
+  z.object({
     type: z.literal("json_remove"),
     target_path: JsonTargetPath,
   }),
@@ -74,6 +79,7 @@ export type ComponentConfig = z.infer<typeof ComponentConfig>;
 export const ComponentType = z.enum([
   "html_injection",
   "content_truncation",
+  "html_remove",
   "json_remove",
   "json_set",
   "json_replace",

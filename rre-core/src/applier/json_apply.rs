@@ -8,7 +8,8 @@
 //!   for missing `Key` segments, then set the leaf).
 //! - `json_replace { target_path, value }` — overwrite ONLY if the path already
 //!   resolves to a value.
-//! - `html_injection` / `content_truncation` / unknown — no-op for JSON (warn + skip).
+//! - `html_injection` / `content_truncation` / `html_remove` / unknown — no-op for
+//!   JSON (warn + skip).
 //!
 //! Per-component failure (bad path, type mismatch) is caught and that component
 //! is skipped — same fail-open contract as the HTML orchestrator. `applied` is

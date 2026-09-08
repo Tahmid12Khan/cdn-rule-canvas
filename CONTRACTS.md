@@ -176,6 +176,9 @@ pub struct ValidationDetail { pub loc: String, pub msg: String, pub rule_id: Str
   rre.component_template_versions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED`. Down drops both
   tables (FK first). Additive — no reorder of 0001–0012.
 
+- `0018_html_remove_component`: drops & recreates `components_type_known` to ALSO allow `'html_remove'`
+  (a component type that deletes matched HTML and injects nothing). Down restores the 0014 CHECK.
+
 Migration order is load-bearing (0002 features WITHOUT versions FK; 0003 ALTERs in the deferrable FK
 after creating versions). Never reorder.
 
@@ -244,6 +247,7 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
 - `ComponentConfig` (`#[serde(tag="type", rename_all="snake_case")]`): `HtmlInjection { target_selector,
   placement_mode: HtmlPlacementMode, html_body, theme? }` (`html_injection`); `ContentTruncation {
   target_selector, word_count: u32 (1..=10000), fade_out: bool }` (`content_truncation`);
+  `HtmlRemove { target_selector, include_selector: bool (#[serde(default)] = false) }` (`html_remove`);
   `JsonRemove { target_path }` (`json_remove`); `JsonSet { target_path, value: serde_json::Value }`
   (`json_set`); `JsonReplace { target_path, value: serde_json::Value }` (`json_replace`).
   `HtmlPlacementMode (snake_case) = replace|append|prepend|before|after`. The persisted
@@ -251,6 +255,12 @@ pub struct Component { pub id: Uuid, pub outcome_id: Uuid, pub slug: String, pub
   `ComponentConfig` before persist; mismatch → `VALIDATION_ERROR`. JSON-mutation `target_path` is a
   SIMPLE path (dot + `[index]`, e.g. `$.user.premium`, `$.items[0].price`) — NOT a filter expression —
   validated trimmed-non-empty and `<=500` chars; `value` (set/replace) may be any JSON incl. `null`.
+  `html_remove` injects NOTHING (no `html_body`, no `placement_mode`, no marker wrapper): with
+  `include_selector = false` the matched element is EMPTIED (`<div id="x">…</div>` →
+  `<div id="x"></div>`); with `true` the element itself is removed along with its contents. Its
+  `target_selector` is validated like the component-ref selector (trimmed-non-empty, `<=500` chars),
+  and the row-level `placement` is IGNORED — removal has nothing to place, so the applier always takes
+  the inline path.
   `json_set` upserts; `json_replace` overwrites only when the path already exists; `json_remove` deletes.
   The DB `components_type_known` CHECK (migration 0006) allows all five discriminators.
 
@@ -1018,7 +1028,8 @@ not read straight from the public internet.
 - `domain::context::{EvaluationContext, EvaluationContextParts, DeviceType}` — `EvaluationContext.identity:
   Identity` threaded through unchanged from `domain::identity::resolve`.
 - `domain::applier` — `ComponentRenderer` trait, `ModificationResult`, `ApplyError`,
-  `orchestrator::apply_outcome`, `html_injection`, `content_truncation`, `placement_sticky_footer`,
+  `orchestrator::apply_outcome`, `html_injection`, `content_truncation`, `html_remove`,
+  `placement_sticky_footer`,
   `placement_popup`, `html_sanitizer::{load_sanitizer, sanitize}`, `component_render::render(html_body,
   variables_values) -> String`.
 - `infra::component_cache` (moka SWR, TTL = `active_version_ttl_secs`, key `(component_id: Uuid, selector:

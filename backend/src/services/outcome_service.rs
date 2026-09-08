@@ -584,6 +584,39 @@ mod tests {
     }
 
     #[test]
+    fn html_remove_serializes_with_discriminator_and_flag() {
+        let cfg = ComponentConfig::HtmlRemove {
+            target_selector: "#dn-content-ssr".to_string(),
+            include_selector: true,
+        };
+        let json = validated_config_json("html_remove", &cfg).unwrap();
+        assert_eq!(json["type"], "html_remove");
+        assert_eq!(json["target_selector"], "#dn-content-ssr");
+        assert_eq!(json["include_selector"], true);
+    }
+
+    #[test]
+    fn html_remove_include_selector_defaults_to_false() {
+        let cfg: ComponentConfig = serde_json::from_value(serde_json::json!({
+            "type": "html_remove",
+            "target_selector": "#dn-content-ssr"
+        }))
+        .unwrap();
+        let json = validated_config_json("html_remove", &cfg).unwrap();
+        assert_eq!(json["include_selector"], false);
+    }
+
+    #[test]
+    fn html_remove_empty_selector_is_rejected() {
+        let cfg = ComponentConfig::HtmlRemove {
+            target_selector: "  ".to_string(),
+            include_selector: false,
+        };
+        let err = validated_config_json("html_remove", &cfg).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION_ERROR");
+    }
+
+    #[test]
     fn group_outcomes_attaches_components_in_order() {
         use chrono::Utc;
         let now = Utc::now();

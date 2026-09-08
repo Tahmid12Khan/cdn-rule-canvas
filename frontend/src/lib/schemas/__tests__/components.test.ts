@@ -99,4 +99,12 @@ describe("defaultConfigFor", () => {
       "content_truncation",
     );
   });
+
+  it("builds an html_remove default that keeps the element", () => {
+    expect(defaultConfigFor("html_remove")).toEqual({
+      type: "html_remove",
+      target_selector: "",
+      include_selector: false,
+    });
+  });
 });

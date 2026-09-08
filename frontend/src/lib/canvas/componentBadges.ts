@@ -16,6 +16,7 @@ export interface ComponentBadge {
 const TYPE_LABELS: Record<ComponentConfig["type"], string> = {
   html_injection: "HTML Injection",
   content_truncation: "Content Truncation",
+  html_remove: "HTML Remove",
   json_remove: "JSON Remove",
   json_set: "JSON Set",
   json_replace: "JSON Replace",
@@ -50,6 +51,14 @@ export function componentBadges(config: unknown): ComponentBadge[] {
     badges.push({ label: `${c.word_count} words`, tone: "info" });
     if (c.fade_out) {
       badges.push({ label: "Fade out", tone: "placement" });
+    }
+  } else if (c.type === "html_remove") {
+    badges.push({
+      label: c.include_selector ? "Element + contents" : "Contents only",
+      tone: "placement",
+    });
+    if (c.target_selector) {
+      badges.push({ label: c.target_selector, tone: "info" });
     }
   } else if (c.type === "component_ref") {
     // Library component → inject at a selector with a placement mode.

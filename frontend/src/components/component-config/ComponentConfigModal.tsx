@@ -4,7 +4,8 @@
 //
 // Radix Dialog hosting the component configuration editor. Supports two flows:
 //   - "create": user picks a component type (tab switch between HTML Injection /
-//     Content Truncation), each tab swapping in its own validated form.
+//     Content Truncation / HTML Remove / Component), each tab swapping in its
+//     own validated form.
 //   - "edit": the type is fixed to the existing component's type; the tab strip
 //     is shown but locked to that type.
 //
@@ -25,6 +26,7 @@ import {
 } from "@/components/component-config/ComponentRefForm";
 import { ContentTruncationForm } from "@/components/component-config/ContentTruncationForm";
 import { HtmlInjectionForm } from "@/components/component-config/HtmlInjectionForm";
+import { HtmlRemoveForm } from "@/components/component-config/HtmlRemoveForm";
 import {
   JsonMutationForm,
   type JsonMutationConfig,
@@ -48,6 +50,7 @@ const PLACEMENT_OPTIONS: { value: Placement; label: string }[] = [
 const HTML_TYPE_TABS: { value: ComponentType; label: string }[] = [
   { value: "html_injection", label: "HTML Injection" },
   { value: "content_truncation", label: "Content Truncation" },
+  { value: "html_remove", label: "HTML Remove" },
   { value: "component_ref", label: "Component" },
 ];
 const JSON_TYPE_TABS: { value: ComponentType; label: string }[] = [
@@ -115,6 +118,13 @@ export function ComponentConfigModal({
       initialConfig?.type === "content_truncation"
         ? initialConfig
         : defaultConfigFor("content_truncation"),
+    [initialConfig],
+  );
+  const removeInitial = useMemo(
+    () =>
+      initialConfig?.type === "html_remove"
+        ? initialConfig
+        : defaultConfigFor("html_remove"),
     [initialConfig],
   );
   // JSON mutation initial config: seed from initialConfig when its type matches
@@ -299,6 +309,13 @@ export function ComponentConfigModal({
                 key="content_truncation"
                 formId={FORM_ID}
                 initial={truncationInitial}
+                onValidSubmit={handleValidConfig}
+              />
+            ) : type === "html_remove" ? (
+              <HtmlRemoveForm
+                key="html_remove"
+                formId={FORM_ID}
+                initial={removeInitial}
                 onValidSubmit={handleValidConfig}
               />
             ) : type === "component_ref" || type === "component_ref_json" ? (

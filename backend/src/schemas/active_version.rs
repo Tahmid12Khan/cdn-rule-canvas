@@ -50,7 +50,8 @@ pub struct ActiveComponent {
     /// Component slug.
     pub slug: String,
     /// Component type discriminator (`html_injection` | `content_truncation` |
-    /// `json_remove` | `json_set` | `json_replace`). The proxy dispatches on it.
+    /// `html_remove` | `json_remove` | `json_set` | `json_replace`). The proxy
+    /// dispatches on it.
     pub r#type: String,
     /// Raw component config JSON.
     pub config: serde_json::Value,

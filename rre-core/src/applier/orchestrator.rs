@@ -7,6 +7,7 @@
 use crate::applier::component_ref;
 use crate::applier::content_truncation::ContentTruncationRenderer;
 use crate::applier::html_injection::HtmlInjectionRenderer;
+use crate::applier::html_remove::HtmlRemoveRenderer;
 use crate::applier::json_apply::ResolvedComponentMap;
 use crate::applier::{placement_popup, placement_sticky_footer};
 use crate::applier::{ApplyError, ComponentRenderer, ModificationResult};
@@ -78,6 +79,12 @@ fn render_component(
     if component.r#type == "component_ref" {
         return component_ref::render_html(html, component, components, sanitizer);
     }
+    // Removal has no placement semantics (nothing is injected to place), so an
+    // `html_remove` row always takes the inline path even if its stored
+    // `placement` says otherwise — the placement wrappers expect an `html_body`.
+    if component.r#type == "html_remove" {
+        return HtmlRemoveRenderer.render(html, component, sanitizer);
+    }
     match component.placement {
         Placement::StickyFooter => placement_sticky_footer::render(html, component, sanitizer),
         Placement::Popup => placement_popup::render(html, component, sanitizer),
@@ -94,6 +101,7 @@ fn renderer_for(component: &ActiveComponent) -> Box<dyn ComponentRenderer> {
     match component.r#type.as_str() {
         "html_injection" => Box::new(HtmlInjectionRenderer),
         "content_truncation" => Box::new(ContentTruncationRenderer),
+        "html_remove" => Box::new(HtmlRemoveRenderer),
         _ => Box::new(PassthroughRenderer),
     }
 }

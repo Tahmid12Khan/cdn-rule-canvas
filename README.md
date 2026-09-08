@@ -101,7 +101,8 @@ feature  (slug PK, type: html | json)
         ├── applicability (JSONB)   html_selector? / json_selector?
         └─< outcome  (title, is_builtin, order_index)
               └─< component  (type, config JSONB, placement, order_index)
-                    html_injection │ content_truncation │ json_set/remove/replace
+                    html_injection │ content_truncation │ html_remove
+                    │ json_set/remove/replace
 ```
 
 - A **canvas** is a directed graph. **Decision** nodes branch the flow on a test

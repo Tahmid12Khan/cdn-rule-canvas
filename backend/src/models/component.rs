@@ -15,7 +15,7 @@ pub struct Component {
     pub outcome_id: Uuid,
     /// Stable slug within the outcome.
     pub slug: String,
-    /// Discriminator string: `html_injection` | `content_truncation`.
+    /// Discriminator string: `html_injection` | `content_truncation` | `html_remove`.
     pub r#type: String,
     /// Typed config persisted as JSONB; the embedded `type` matches `r#type`.
     pub config: serde_json::Value,

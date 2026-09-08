@@ -56,6 +56,16 @@ pub enum ComponentConfig {
         #[serde(default)]
         fade_out: bool,
     },
+    /// `type = "html_remove"` — delete matched content and inject NOTHING.
+    /// `include_selector = false` empties the matched element (the element
+    /// itself survives); `true` removes the element and its contents.
+    HtmlRemove {
+        /// CSS selector whose content (or whole element) is removed.
+        target_selector: String,
+        /// Remove the matched element itself too, not just its contents.
+        #[serde(default)]
+        include_selector: bool,
+    },
     /// `type = "json_remove"` — delete the value(s) at `target_path`.
     JsonRemove {
         /// Simple JSON path (dot + `[index]`, e.g. `$.user.premium`) to delete.
@@ -114,6 +124,7 @@ impl ComponentConfig {
         match self {
             ComponentConfig::HtmlInjection { .. } => "html_injection",
             ComponentConfig::ContentTruncation { .. } => "content_truncation",
+            ComponentConfig::HtmlRemove { .. } => "html_remove",
             ComponentConfig::JsonRemove { .. } => "json_remove",
             ComponentConfig::JsonSet { .. } => "json_set",
             ComponentConfig::JsonReplace { .. } => "json_replace",
@@ -147,6 +158,10 @@ impl ComponentConfig {
                 }
                 Ok(())
             }
+            // Removal: only the CSS selector needs checking (nothing is injected).
+            ComponentConfig::HtmlRemove {
+                target_selector, ..
+            } => validate_selector(target_selector),
             // JSON mutators: `target_path` is a simple path (dot + `[index]`),
             // non-empty and length-capped. `value` (set/replace) may be any JSON.
             ComponentConfig::JsonRemove { target_path }

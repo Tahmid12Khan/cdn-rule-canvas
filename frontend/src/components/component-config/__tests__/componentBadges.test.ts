@@ -30,6 +30,24 @@ describe("componentBadges", () => {
     expect(labels).toContain("Fade out");
   });
 
+  it("derives badges from an html_remove config", () => {
+    const contentsOnly = componentBadges({
+      type: "html_remove",
+      target_selector: "#dn-content-ssr",
+      include_selector: false,
+    }).map((b) => b.label);
+    expect(contentsOnly).toContain("HTML Remove");
+    expect(contentsOnly).toContain("Contents only");
+    expect(contentsOnly).toContain("#dn-content-ssr");
+
+    const withElement = componentBadges({
+      type: "html_remove",
+      target_selector: "#dn-content-ssr",
+      include_selector: true,
+    }).map((b) => b.label);
+    expect(withElement).toContain("Element + contents");
+  });
+
   it("derives badges from a component_ref config", () => {
     const badges = componentBadges({
       type: "component_ref",

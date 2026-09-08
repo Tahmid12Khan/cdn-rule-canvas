@@ -3,8 +3,8 @@
 // AddComponentDrawer (FRONTEND CONTRACT §2.5, Task 15).
 //
 // "+ Add A Component Or Form" dashed trigger that opens a Radix Dialog side
-// drawer listing the MVP creatable component types (html_injection,
-// content_truncation). Picking a type closes the drawer and reports the choice
+// drawer listing the creatable component types (html_injection,
+// content_truncation, html_remove, component_ref). Picking a type closes the drawer and reports the choice
 // to the parent, which appends a new draft row and opens the config modal
 // (Task 16). Radix gives us focus trap + Escape close for free (§7).
 import { useState } from "react";
@@ -30,6 +30,12 @@ const HTML_OPTIONS: ComponentTypeOption[] = [
     title: "Content Truncation",
     description:
       "Trim content to a word budget, optionally with a fade-out gradient.",
+  },
+  {
+    type: "html_remove",
+    title: "HTML Remove",
+    description:
+      "Delete a target element's contents — or the element itself — injecting nothing.",
   },
   {
     type: "component_ref",

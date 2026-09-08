@@ -51,6 +51,22 @@ export const ContentTruncationConfig = z.object({
 });
 export type ContentTruncationConfig = z.infer<typeof ContentTruncationConfig>;
 
+// ---- HTML Remove ----------------------------------------------------------
+//
+// Deletes matched content and injects NOTHING (no html_body, no placement
+// mode). `include_selector` picks what "remove" means: false empties the
+// matched element (`<div id="x">…</div>` → `<div id="x"></div>`), true removes
+// the element itself along with its contents.
+
+export const HtmlRemoveConfig = z.object({
+  type: z.literal("html_remove"),
+  target_selector: z
+    .string()
+    .min(1, "Enter a CSS selector (e.g. #dn-content-ssr) for what to remove"),
+  include_selector: z.boolean().default(false),
+});
+export type HtmlRemoveConfig = z.infer<typeof HtmlRemoveConfig>;
+
 // ---- JSON mutation (full-body) — mirrors BACKEND §2.3 ----------------------
 //
 // `target_path` is a SIMPLE path (dot + [index], e.g. `$.user.premium`,
@@ -135,6 +151,7 @@ export type ComponentRefJsonConfig = z.infer<typeof ComponentRefJsonConfig>;
 export const ComponentConfig = z.discriminatedUnion("type", [
   HtmlInjectionConfig,
   ContentTruncationConfig,
+  HtmlRemoveConfig,
   JsonRemoveConfig,
   JsonSetConfig,
   JsonReplaceConfig,
@@ -144,11 +161,12 @@ export const ComponentConfig = z.discriminatedUnion("type", [
 export type ComponentConfig = z.infer<typeof ComponentConfig>;
 
 // The creatable component types. HTML features use html_injection /
-// content_truncation / component_ref; JSON features use the json_* trio +
-// component_ref_json (the UI picks the tab set by feature type).
+// content_truncation / html_remove / component_ref; JSON features use the
+// json_* trio + component_ref_json (the UI picks the tab set by feature type).
 export const ComponentType = z.enum([
   "html_injection",
   "content_truncation",
+  "html_remove",
   "json_remove",
   "json_set",
   "json_replace",
@@ -186,6 +204,7 @@ export function defaultConfigFor(type: "html_injection"): HtmlInjectionConfig;
 export function defaultConfigFor(
   type: "content_truncation",
 ): ContentTruncationConfig;
+export function defaultConfigFor(type: "html_remove"): HtmlRemoveConfig;
 export function defaultConfigFor(type: "json_remove"): JsonRemoveConfig;
 export function defaultConfigFor(type: "json_set"): JsonSetConfig;
 export function defaultConfigFor(type: "json_replace"): JsonReplaceConfig;
@@ -210,6 +229,12 @@ export function defaultConfigFor(type: ComponentType): ComponentConfig {
         target_selector: "",
         word_count: 100,
         fade_out: false,
+      };
+    case "html_remove":
+      return {
+        type: "html_remove",
+        target_selector: "",
+        include_selector: false,
       };
     case "json_remove":
       return {

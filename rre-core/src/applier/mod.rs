@@ -8,6 +8,7 @@ pub mod component_ref;
 pub mod component_render;
 pub mod content_truncation;
 pub mod html_injection;
+pub mod html_remove;
 pub mod html_sanitizer;
 pub mod json_apply;
 pub mod json_path;
